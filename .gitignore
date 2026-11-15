@@ -1,0 +1,12 @@
+# Python caches and local environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# Local editor settings and secrets
+.vscode/
+.env
+.env.*
+!.env.example
