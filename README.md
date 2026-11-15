@@ -23,6 +23,8 @@ Start Ollama, then run the app from this folder:
 python AIassist.py
 ```
 
+On Windows, you can double-click **Start AI Assist.cmd** instead. It finds Python, starts the app from the correct folder, and keeps startup errors visible. If `.py` files are associated with Python, you can also double-click `AIassist.py` directly.
+
 Choose a model in the sidebar before chatting. Click **Refresh models** after adding models or restarting Ollama. Switching models starts a new conversation.
 
 - **Enter:** send a message.
