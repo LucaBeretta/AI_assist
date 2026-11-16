@@ -1,5 +1,6 @@
 """Capabilities UI checks with mocked metadata; no Ollama server is needed."""
 
+import gc
 import threading
 import time
 import tkinter as tk
@@ -27,6 +28,8 @@ def metadata(model="alpha:8b", context=131072, flags=None):
 
 class CapabilitiesViewTests(unittest.TestCase):
     def setUp(self):
+        # Collect closed widget cycles on the Tk thread before starting workers.
+        gc.collect()
         try:
             self.root = tk.Tk()
         except tk.TclError as error:
@@ -55,6 +58,8 @@ class CapabilitiesViewTests(unittest.TestCase):
         self.root.update()
         self.root.destroy()
         self.assertEqual(self.callback_errors, [])
+        self.view = self.app = self.root = None
+        gc.collect()
 
     def build(self):
         self.view = CapabilitiesView(self.root, self.app)

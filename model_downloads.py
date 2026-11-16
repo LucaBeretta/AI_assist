@@ -152,6 +152,10 @@ class ModelDownloadDialog:
         self.notebook.pack(fill="both", expand=True, padx=10)
         self.update_controls()
 
+    def show_colibri(self):
+        self.notebook.select(self.colibri.frame)
+        self.change_tab()
+
     def change_tab(self, event=None):
         if self.notebook.select() == str(self.popular_tab):
             self.recommended_target = None

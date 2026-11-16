@@ -18,7 +18,6 @@ _MAX_CHAT_BYTES = 64 * 1024 * 1024
 _CHAT_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 _MODES = {"chat", "dev"}
 _ROLES = {"user", "assistant", "system"}
-_BACKENDS = {"ollama", "colibri"}
 
 
 class ChatStoreError(ValueError):
@@ -164,8 +163,6 @@ class ChatStore:
         context_length = chat.get("context_length")
         if context_length is not None and (type(context_length) is not int or context_length < 1):
             raise ChatStoreError("Chat context_length must be a positive integer or null.")
-        if chat.get("backend", "ollama") not in _BACKENDS:
-            raise ChatStoreError("Chat backend must be 'ollama' or 'colibri'.")
         for field in ("created_at", "updated_at"):
             _timestamp(chat.get(field), field)
         if "_manual_title" in chat and type(chat["_manual_title"]) is not bool:
@@ -178,8 +175,6 @@ class ChatStore:
             if message["role"] == "assistant":
                 message.setdefault("content", "")
         record.setdefault("context_length", None)
-        # Chats saved before colibri support were all Ollama chats.
-        record.setdefault("backend", "ollama")
         return record
 
     def list_chats(self, query="", mode=None):
@@ -194,7 +189,8 @@ class ChatStore:
             raise ChatStoreError("Chat mode must be 'chat' or 'dev'.")
         self.errors.clear()
         try:
-            paths = sorted(path for path in self.directory.iterdir() if path.suffix == ".json")
+            paths = sorted(path for path in self.directory.iterdir()
+                           if path.suffix == ".json" and path.name != "appearance.json")
         except OSError as error:
             message = f"Could not list saved chats: {error}"
             self._note_error(message)
@@ -220,14 +216,17 @@ class ChatStore:
         return sorted(chats, key=lambda chat: (_timestamp(chat["updated_at"], "updated_at"), chat["id"]),
                       reverse=True)
 
-    def create(self, model="", mode="chat", title=NEW_CHAT_TITLE, project_path="", backend="ollama"):
+    def create(self, model="", mode="chat", title=NEW_CHAT_TITLE, project_path=""):
         """Create and persist an empty conversation."""
+        return self.save(self.new_record(model, mode, title, project_path))
+
+    def new_record(self, model="", mode="chat", title=NEW_CHAT_TITLE, project_path=""):
+        """Build an empty record without disk I/O for queued persistence."""
         now = _utc_now()
         chat = {
             "id": str(uuid.uuid4()),
             "title": title,
             "model": model,
-            "backend": backend,
             "mode": mode,
             "messages": [],
             "draft": "",
@@ -240,16 +239,23 @@ class ChatStore:
             "updated_at": now,
             "_manual_title": title != NEW_CHAT_TITLE,
         }
-        return self.save(chat)
+        return chat
 
-    def export_all(self, destination):
-        """Write every readable chat to one .zip: the original JSON files (copy them
-        back into the chats folder to restore) and a Markdown copy of each.
+    def export_all(self, destination, unsaved=None, deleted=()):
+        """Write every readable chat to one .zip: the JSON files (copy them back into
+        the chats folder to restore) and a Markdown copy of each.
 
-        Returns the number of chats written. Damaged files are left out and
-        listed in ``errors``."""
+        ``unsaved`` maps chat ids to records not yet on disk; ``deleted`` lists
+        ids being deleted. Damaged files are left out and listed in ``errors``.
+        Returns the number of chats written."""
         destination = Path(destination).expanduser()
-        chats = self.list_chats()
+        unsaved = dict(unsaved or {})
+        deleted = set(deleted)
+        chats = {chat["id"]: chat for chat in self.list_chats()}
+        for identity, record in unsaved.items():
+            chats[identity] = self._validate(record, expected_id=identity)
+        chats = [chat for identity, chat in chats.items() if identity not in deleted]
+        chats.sort(key=lambda chat: (chat["updated_at"], chat["id"]), reverse=True)
         used_names = set()
         temporary = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.tmp")
         try:
@@ -260,15 +266,17 @@ class ChatStore:
                     "chats folder (on Windows %LOCALAPPDATA%\\AI Assist\\chats, elsewhere ~/.aiassist/chats)\n"
                     "while AI Assist is closed.\n\nreadable/ holds the same conversations as Markdown.\n"))
                 for chat in chats:
-                    archive.write(self._path(chat["id"]), f"chats/{chat['id']}.json")
+                    if chat["id"] in unsaved:
+                        archive.writestr(f"chats/{chat['id']}.json", json.dumps(chat, ensure_ascii=False, indent=2))
+                    else:
+                        archive.write(self._path(chat["id"]), f"chats/{chat['id']}.json")
                     base = re.sub(r"[^\w\- ]+", "", chat["title"]).strip()[:60] or "chat"
                     name, counter = base, 2
                     while name.casefold() in used_names:
                         name, counter = f"{base} ({counter})", counter + 1
                     used_names.add(name.casefold())
-                    engine = chat.get("backend", "ollama")
                     lines = [f"# {chat['title']}", "",
-                             f"Model: {chat['model'] or 'none'} ({engine})  |  Updated: {chat['updated_at']}", ""]
+                             f"Model: {chat['model'] or 'none'} ({chat.get('backend', 'Ollama')})  |  Updated: {chat['updated_at']}", ""]
                     for message in chat["messages"]:
                         speaker = {"user": "You", "assistant": "AI Assist"}.get(message["role"], message["role"].title())
                         lines += [f"## {speaker}", "", message["content"], ""]

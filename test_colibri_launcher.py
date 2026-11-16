@@ -1,4 +1,5 @@
-"""colibri support: format translation, the coli launcher, and the HTTP gateway.
+"""colibri's launcher driven from AI Assist (status, recommendations, install,
+context, start and stop), plus chat backups.
 
 A fake ``coli`` script stands in for colibri's launcher and a local HTTP server
 for its OpenAI-compatible gateway, so no model, download, or network is used."""
@@ -14,8 +15,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-import colibri_client
-from coding_agent import AgentCancelled, run_agent
+import colibri_launcher as colibri_client
 
 
 FAKE_COLI = textwrap.dedent('''\
@@ -190,57 +190,6 @@ def completion(content="", tool_calls=None, reasoning=None):
                  "choices": [{"index": 0, "message": message, "finish_reason": "tool_calls" if tool_calls else "stop"}]}
 
 
-class TranslationTests(unittest.TestCase):
-    def test_tool_history_gets_ids_and_string_arguments(self):
-        history = [
-            {"role": "system", "content": "rules"},
-            {"role": "user", "content": "inspect"},
-            {"role": "assistant", "content": "", "thinking": "plan", "tool_calls": [
-                {"function": {"name": "list_files", "arguments": {"limit": 5}}},
-                {"function": {"name": "read_file", "arguments": {"path": "a.py"}}}]},
-            {"role": "tool", "tool_name": "read_file", "content": "print(1)"},
-            {"role": "tool", "tool_name": "list_files", "content": "[]"},
-            {"role": "assistant", "content": "done"},
-        ]
-        converted = colibri_client.to_openai_messages(history)
-        calls = converted[2]["tool_calls"]
-        self.assertEqual([call["function"]["name"] for call in calls], ["list_files", "read_file"])
-        self.assertEqual(json.loads(calls[0]["function"]["arguments"]), {"limit": 5})
-        self.assertEqual(converted[2]["reasoning_content"], "plan")
-        # Results are matched by tool name, not only by position.
-        self.assertEqual(converted[3], {"role": "tool", "tool_call_id": calls[1]["id"], "content": "print(1)"})
-        self.assertEqual(converted[4]["tool_call_id"], calls[0]["id"])
-        self.assertNotEqual(calls[0]["id"], calls[1]["id"])
-        self.assertEqual(converted[5], {"role": "assistant", "content": "done"})
-
-    def test_orphaned_tool_result_becomes_a_note(self):
-        converted = colibri_client.to_openai_messages([
-            {"role": "user", "content": "go"},
-            {"role": "tool", "tool_name": "run_command", "content": "exit 0"}])
-        self.assertEqual(converted[1]["role"], "user")
-        self.assertIn("run_command", converted[1]["content"])
-
-    def test_response_becomes_native_message(self):
-        _, reply = completion("", [{"id": "c1", "type": "function",
-                                     "function": {"name": "read_file", "arguments": "{\"path\": \"a\"}"}}], "why")
-        native = colibri_client.from_openai_response(reply)["message"]
-        self.assertEqual(native["tool_calls"], [{"function": {"name": "read_file", "arguments": "{\"path\": \"a\"}"}}])
-        self.assertEqual(native["thinking"], "why")
-        with self.assertRaises(colibri_client.ColibriError):
-            colibri_client.from_openai_response({"choices": []})
-        with self.assertRaises(colibri_client.ColibriError):
-            colibri_client.from_openai_response({"error": {"message": "context_length_exceeded"}})
-
-    def test_json_output_skips_banner_and_host_normalizes(self):
-        self.assertEqual(colibri_client.parse_json_output("colibri v2\n  {not json\n[1, 2]\n"), [1, 2])
-        with self.assertRaises(colibri_client.ColibriError):
-            colibri_client.parse_json_output("no json here")
-        self.assertEqual(colibri_client.normalize_host("0.0.0.0:8000/v1/"), "http://127.0.0.1:8000")
-        self.assertEqual(colibri_client.normalize_host("https://box.local:9000"), "https://box.local:9000")
-        with self.assertRaises(colibri_client.ColibriError):
-            colibri_client.normalize_host("ftp://x")
-
-
 class LauncherTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -261,13 +210,11 @@ class LauncherTests(unittest.TestCase):
             self.assertEqual(colibri_client.find_directory(), str(self.colibri.resolve()))
         with self.assertRaises(colibri_client.ColibriError):
             colibri_client.save_directory(self.folder)
-        saved = colibri_client.save_directory(self.colibri)
-        self.assertEqual(colibri_client.load_saved_directory(), saved)
-        colibri_client.save_setting("engine", "colibri")
-        self.assertEqual(colibri_client.load_setting("engine"), "colibri")
-        self.assertEqual(colibri_client.load_saved_directory(), saved)
-        # Settings live in a dot-folder that ChatStore's *.json listing ignores.
-        self.assertTrue(colibri_client.settings_path().is_relative_to(self.folder / "chats" / ".settings"))
+        settings = self.folder / "chats" / "colibri.settings"
+        saved = colibri_client.save_directory(self.colibri, settings)
+        self.assertEqual(colibri_client.load_settings(settings)["directory"], saved)
+        self.assertEqual(colibri_client.find_directory(saved), saved)
+        self.assertEqual(colibri_client.load_settings(self.folder / "missing"), {})
 
     def test_status_recommendations_start_and_stop(self):
         report = colibri_client.status(self.colibri)
@@ -285,9 +232,9 @@ class LauncherTests(unittest.TestCase):
         report = colibri_client.start_server(self.colibri)
         self.assertEqual(colibri_client.server_state(report), "ready")
         self.assertEqual(report["family"], "qwen36")
-        self.assertEqual(colibri_client.server_host(report), "http://127.0.0.1:8123")
-        with patch.dict(os.environ, {"COLIBRI_HOST": "127.0.0.1:9999"}):
-            self.assertEqual(colibri_client.server_host(report), "http://127.0.0.1:9999")
+        self.assertEqual(colibri_client.server_url(report), "http://127.0.0.1:8123/v1")
+        self.assertTrue(colibri_client.is_local_url("http://127.0.0.1:8123/v1"))
+        self.assertFalse(colibri_client.is_local_url("http://192.168.1.20:8000/v1"))
         self.assertIn("start --json --no-browser", self.calls())
         colibri_client.stop_server(self.colibri)
         self.assertEqual(colibri_client.server_state(colibri_client.status(self.colibri)), "stopped")
@@ -338,73 +285,16 @@ class LauncherTests(unittest.TestCase):
             colibri_client.status(self.colibri)
 
 
-class GatewayTests(unittest.TestCase):
-    def gateway(self, replies, **options):
-        gateway = FakeGateway(replies, **options)
-        self.addCleanup(gateway.close)
-        return gateway
-
-    def test_models_capabilities_and_chat(self):
-        gateway = self.gateway([completion("Ciao!")])
-        self.assertEqual(colibri_client.list_models(gateway.url), ["qwen3-coder-30b"])
-        metadata = colibri_client.capabilities(gateway.url, "qwen3-coder-30b", "qwen36")
-        self.assertEqual(metadata["capabilities"], ["completion", "tools"])
-        self.assertEqual(metadata["context_length"], 16384)
-        self.assertNotIn("tools", colibri_client.capabilities(gateway.url, "qwen3-coder-30b", "inkling")["capabilities"])
-        answer = colibri_client.request_chat(gateway.url, [{"role": "user", "content": "hi"}], "qwen3-coder-30b")
-        self.assertEqual(answer, "Ciao!")
-        self.assertEqual(gateway.requests[0]["model"], "qwen3-coder-30b")
-        self.assertFalse(gateway.requests[0]["stream"])
-
-    def test_http_errors_are_readable(self):
-        gateway = self.gateway([(400, {"error": {"message": "context_length_exceeded"}})])
-        with self.assertRaisesRegex(colibri_client.ColibriError, "HTTP 400: context_length_exceeded"):
-            colibri_client.request_chat(gateway.url, [{"role": "user", "content": "hi"}], "m")
-        with self.assertRaisesRegex(colibri_client.ColibriError, "Could not reach colibri"):
-            colibri_client.list_models("http://127.0.0.1:9")
-
-    def test_agent_round_trip_through_colibri(self):
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        project = Path(temporary.name)
-        (project / "main.py").write_text("print('hello')\n", encoding="utf-8")
-        gateway = self.gateway([
-            completion("", [{"id": "srv_1", "type": "function",
-                             "function": {"name": "read_file", "arguments": "{\"path\": \"main.py\"}"}}], "look first"),
-            completion("main.py prints hello."),
-        ])
-        events = []
-        result = run_agent(gateway.url, "qwen3-coder-30b", project, [{"role": "user", "content": "What does main.py do?"}],
-                           events.append, lambda action: False, context_length=8192, backend="colibri")
-        self.assertEqual(result["assistant_text"], "main.py prints hello.")
-        first, second = gateway.requests
-        self.assertEqual([tool["function"]["name"] for tool in first["tools"]],
-                         ["list_files", "read_file", "edit_file", "write_file", "run_command"])
-        self.assertIn("max_tokens", first)
-        assistant = next(message for message in second["messages"] if message.get("tool_calls"))
-        tool = next(message for message in second["messages"] if message["role"] == "tool")
-        self.assertEqual(tool["tool_call_id"], assistant["tool_calls"][0]["id"])
-        self.assertIn("print('hello')", tool["content"])
-        # The saved native history keeps Ollama's shape: object arguments, tool_name.
-        native_call = result["messages"][1]["tool_calls"][0]["function"]
-        self.assertEqual(native_call["arguments"], {"path": "main.py"})
-        self.assertEqual(result["messages"][2]["tool_name"], "read_file")
-
-    def test_agent_cancel_and_backend_validation(self):
-        gateway = self.gateway([completion("late")], delay=3)
-        cancel = threading.Event()
-        threading.Timer(0.3, cancel.set).start()
-        with tempfile.TemporaryDirectory() as folder:
-            with self.assertRaises(AgentCancelled):
-                run_agent(gateway.url, "m", folder, [{"role": "user", "content": "x"}], lambda event: None,
-                          lambda action: False, cancel_event=cancel, backend="colibri")
-            with self.assertRaises(ValueError):
-                run_agent(gateway.url, "m", folder, [{"role": "user", "content": "x"}], lambda event: None,
-                          lambda action: False, backend="lmstudio")
-
-
-if __name__ == "__main__":
-    unittest.main()
+class OutputTests(unittest.TestCase):
+    def test_json_output_skips_banner(self):
+        self.assertEqual(colibri_client.parse_json_output("colibri v2\n  {not json\n[1, 2]\n"), [1, 2])
+        with self.assertRaises(colibri_client.ColibriError):
+            colibri_client.parse_json_output("no json here")
+        self.assertEqual(colibri_client.server_url({"server": {"urls": {"openai_base_url": "http://0.0.0.0:8001/v1"}}}),
+                         "http://127.0.0.1:8001/v1")
+        self.assertIsNone(colibri_client.server_url({}))
+        self.assertEqual(colibri_client.speed_text({"server": {"tokens_per_second": 3.44}}), "~3.4 tok/s on the last answer")
+        self.assertEqual(colibri_client.speed_text({"server": {"tokens_per_second": 21.2}}), "~21 tok/s on the last answer")
 
 
 class ChatBackupTests(unittest.TestCase):
@@ -417,23 +307,26 @@ class ChatBackupTests(unittest.TestCase):
             first.update(title="Piano / sito", messages=[{"role": "user", "content": "ciao"},
                                                          {"role": "assistant", "content": "Ciao!"}])
             store.save(first)
-            second = store.create(model="qwen3-coder-30b", backend="colibri")
-            second.update(title="Piano / sito")
+            second = store.create(model="qwen3-coder-30b")
+            second.update(title="Piano / sito", backend="Colibri")
             store.save(second)
             (Path(folder) / "chats" / "00000000-0000-0000-0000-000000000000.json").write_text("{broken", encoding="utf-8")
             target = Path(folder) / "backup.zip"
-            self.assertEqual(store.export_all(target), 2)
+            unsent = store.new_record(model="alpha:8b")
+            unsent.update(title="Not on disk yet", messages=[{"role": "user", "content": "in coda"}])
+            self.assertEqual(store.export_all(target, unsaved={unsent["id"]: unsent}, deleted={second["id"]}), 2)
             self.assertEqual(len(store.errors), 1)
             with zipfile.ZipFile(target) as archive:
                 names = sorted(archive.namelist())
                 self.assertIn(f"chats/{first['id']}.json", names)
                 self.assertIn("readable/Piano  sito.md", names)
-                self.assertIn("readable/Piano  sito (2).md", names)
+                self.assertIn("readable/Not on disk yet.md", names)
+                self.assertNotIn(f"chats/{second['id']}.json", names)  # being deleted
                 self.assertIn("README.txt", names)
                 markdowns = [archive.read(name).decode("utf-8") for name in names if name.startswith("readable/")]
                 restored = json.loads(archive.read(f"chats/{first['id']}.json"))
-            self.assertTrue(any("## AI Assist\n\nCiao!" in text and "(ollama)" in text for text in markdowns))
-            self.assertTrue(any("(colibri)" in text for text in markdowns))
+            self.assertTrue(any("## AI Assist\n\nCiao!" in text and "(Ollama)" in text for text in markdowns))
+            self.assertTrue(any("in coda" in text for text in markdowns))
             self.assertEqual(restored["messages"][1]["content"], "Ciao!")
             # Restoring is copying the JSON back into a chats folder.
             fresh = ChatStore(Path(folder) / "restored")
@@ -442,19 +335,5 @@ class ChatBackupTests(unittest.TestCase):
             self.assertEqual(list(Path(folder).glob(".backup.zip.*.tmp")), [])
 
 
-class ChatStoreBackendTests(unittest.TestCase):
-    def test_backend_is_saved_and_old_chats_default_to_ollama(self):
-        from chat_store import ChatStore, ChatStoreError
-        with tempfile.TemporaryDirectory() as folder:
-            store = ChatStore(folder)
-            chat = store.create(model="qwen3-coder-30b", backend="colibri")
-            self.assertEqual(store.load(chat["id"])["backend"], "colibri")
-            path = Path(folder) / f"{chat['id']}.json"
-            data = json.loads(path.read_text(encoding="utf-8"))
-            del data["backend"]
-            path.write_text(json.dumps(data), encoding="utf-8")
-            self.assertEqual(store.load(chat["id"])["backend"], "ollama")
-            data["backend"] = "lmstudio"
-            path.write_text(json.dumps(data), encoding="utf-8")
-            with self.assertRaises(ChatStoreError):
-                store.load(chat["id"])
+if __name__ == "__main__":
+    unittest.main()

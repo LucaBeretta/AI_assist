@@ -7,7 +7,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 import webbrowser
 
-import colibri_client
+import colibri_launcher as colibri_client
 
 
 def gb(value):
@@ -411,7 +411,7 @@ class ColibriRecommendationsPanel:
                     self.notice = (error, True)
                 else:
                     self.notice = (f"colibri restarted with context {context_label(data)}.", False)
-                    if self.app.backend_name == "colibri":
+                    if self.app.backend == "Colibri":
                         self.app.health_poll_at = 0
                 self.refresh()
             elif kind == "installed" and request == self.installing:

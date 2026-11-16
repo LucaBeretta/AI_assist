@@ -1,6 +1,7 @@
 """Exercise the download UI without fetching model weights."""
 
 import io
+import gc
 import json
 import os
 import tempfile
@@ -11,7 +12,6 @@ import unittest
 from unittest.mock import patch
 
 import AIassist
-from test_colibri_client import join_workers
 from model_library import DownloadCancelled
 
 
@@ -41,7 +41,8 @@ def variants(name):
 
 class DownloadUITests(unittest.TestCase):
     def setUp(self):
-        self.threads_before = set(threading.enumerate())
+        gc.collect()
+        self.addCleanup(gc.collect)
         try:
             self.root = tk.Tk()
         except tk.TclError as error:
@@ -70,8 +71,6 @@ class DownloadUITests(unittest.TestCase):
             patch("model_downloads.fetch_model_variants", side_effect=variants),
             patch("hardware_panel.detect_hardware", return_value=HARDWARE),
             patch("hardware_panel.recommend_models", return_value=[RECOMMENDATION]),
-            # Keep the colibri tab hermetic on machines that have colibri installed.
-            patch("colibri_client.find_directory", return_value=None),
         ]
         for item in self.patches:
             item.start()
@@ -87,9 +86,14 @@ class DownloadUITests(unittest.TestCase):
     def tearDown(self):
         if hasattr(self, "app"):
             self.app.close()
+            deadline = time.monotonic() + 5
+            while not self.app.closed and time.monotonic() < deadline:
+                self.root.update()
+                time.sleep(.01)
+            self.assertTrue(self.app.closed)
+            self.app.saver.thread.join(timeout=2)
         elif hasattr(self, "root"):
             self.root.destroy()
-        join_workers(self.threads_before)
         for item in reversed(getattr(self, "patches", [])):
             item.stop()
         if hasattr(self, "chat_directory"):
@@ -260,6 +264,7 @@ class DownloadUITests(unittest.TestCase):
             self.app.send_prompt()
             self.wait(lambda: not self.app.is_waiting)
             self.assertEqual(request.call_args.kwargs["context_length"], 4096)
+            self.assertTrue(callable(request.call_args.kwargs["on_chunk"]))
         self.assertEqual(self.app.conversation[-1]["content"], "Hello back")
 
     def test_failed_hardware_scan_can_be_retried(self):
@@ -297,7 +302,7 @@ class ContextContractTests(unittest.TestCase):
     def test_recommended_context_is_sent_to_chat_and_default_context_is_preserved(self):
         for context in (None, 4096):
             with self.subTest(context=context), patch("AIassist.urllib.request.urlopen", return_value=io.BytesIO(
-                    b'{"message":{"content":"Hello"}}')) as opened:
+                    b'{"message":{"content":"Hello"},"done":true}\n')) as opened:
                 self.assertEqual(AIassist.request_ollama([], "test:1b", context), "Hello")
                 payload = json.loads(opened.call_args.args[0].data)
                 if context is None:

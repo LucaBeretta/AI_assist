@@ -9,7 +9,6 @@ import threading
 import tkinter as tk
 from tkinter import ttk
 
-import colibri_client
 from developer_tools import fetch_model_capabilities
 
 
@@ -64,10 +63,10 @@ class CapabilitiesView:
 
         self._build_model_card(page)
         self._section_heading(page, "01", "Available in this app",
-                              "Tools you can use today with your Ollama conversations.")
+                              "Tools you can use today with your local conversations.")
         self._build_workspace_card(page)
         self._section_heading(page, "02", "Native model support",
-                              "Reported by Ollama for the selected model, independently of app features.")
+                              "Reported by the selected backend, independently of app features.")
         self._build_support_card(page)
 
         note = tk.Frame(page, bg=c["background"])
@@ -159,7 +158,7 @@ class CapabilitiesView:
         c = self.app.COLORS
         card = self._card(parent)
         features = (
-            ("Local Ollama chat", "Talk with installed models through your configured Ollama server."),
+            ("Local AI chat", "Talk with local models through Ollama or Colibri."),
             ("Saved conversations", "Save and search chats locally, then rename, export, or delete them."),
             ("Project text context", "Choose a project and select readable text files to include in a conversation."),
             ("Coding agent", "Let the agent read project text files and propose changes. Review each file diff "
@@ -268,6 +267,8 @@ class CapabilitiesView:
         ready = False
         if not model:
             text = "Choose a model and project to use the coding agent."
+        elif getattr(self.app, "backend", "Ollama") == "Colibri":
+            text = "Colibri native tools are enabled in Developer. Support depends on the served engine; API metadata does not advertise tool support."
         elif not metadata_matches:
             text = "Checking model tool support..." if self._loading else "Refresh model metadata to check agent availability."
         elif not tools:
@@ -281,9 +282,8 @@ class CapabilitiesView:
 
     def _show_configured_context(self, model):
         context = self.app.model_contexts.get(model) if model else None
-        colibri = getattr(self.app, "backend_name", "ollama") == "colibri"
-        default = "Set by colibri setup (--ctx)" if colibri else "Ollama default"
-        self.app_context_label.configure(text=_token_count(None if colibri else context, default if model else "No model selected"))
+        fallback = "Managed by Colibri server" if getattr(self.app, "backend", "Ollama") == "Colibri" else "Ollama default"
+        self.app_context_label.configure(text=_token_count(context, fallback if model else "No model selected"))
 
     def _reset_metadata(self, status):
         c = self.app.COLORS
@@ -312,20 +312,22 @@ class CapabilitiesView:
             self.status_label.configure(text="Choose an installed model from the sidebar, or download one to get started.",
                                         fg=self.app.COLORS["muted"])
             return
-        colibri = getattr(self.app, "backend_name", "ollama") == "colibri"
-        self.status_label.configure(text=f"Reading model metadata from {'colibri' if colibri else 'Ollama'}...", fg=self.app.COLORS["muted"])
+        if getattr(self.app, "backend", "Ollama") == "Colibri":
+            client = self.app.colibri_client()
+            self.status_label.configure(text="Reading model list from Colibri...", fg=self.app.COLORS["muted"])
+            threading.Thread(target=self._fetch_worker, args=(request_id, client, model), daemon=True).start()
+            return
+        self.status_label.configure(text="Reading model metadata from Ollama...", fg=self.app.COLORS["muted"])
         try:
-            host = self.app.active_host() if colibri else self.app.ollama_host()
+            host = self.app.ollama_host()
         except Exception as error:
             self._show_error(str(error))
             return
-        family = self.app.colibri_family() if colibri else None
-        threading.Thread(target=self._fetch_worker, args=(request_id, host, model, colibri, family), daemon=True).start()
+        threading.Thread(target=self._fetch_worker, args=(request_id, host, model), daemon=True).start()
 
-    def _fetch_worker(self, request_id, host, model, colibri=False, family=None):
+    def _fetch_worker(self, request_id, host, model):
         try:
-            metadata = (colibri_client.capabilities(host, model, family) if colibri
-                        else fetch_model_capabilities(host, model))
+            metadata = (host.metadata(model) if not isinstance(host, str) else fetch_model_capabilities(host, model))
             self.events.put((request_id, model, metadata, None))
         except Exception as error:
             self.events.put((request_id, model, None, str(error)))
@@ -352,14 +354,15 @@ class CapabilitiesView:
             label.configure(text=_capability_status(capabilities, name),
                             fg=c["success"] if name in capabilities else c["muted"])
         flags = ", ".join(capabilities) if capabilities else "none returned"
-        if metadata.get("engine") == "colibri":
-            self.flags_label.configure(text=f"colibri capabilities: {flags}. Tool calling follows the model family "
-                                       "(GLM, DeepSeek V4, Kimi, Qwen3.6/3.8, MiMo); the context is the one colibri loaded.")
-            self.status_label.configure(text="Model metadata received from colibri.", fg=c["muted"])
-        else:
-            self.flags_label.configure(text=f"Ollama /api/show flags: {flags}. "
-                                       "A missing flag is not proof that a model lacks the feature; older servers may omit flags.")
-            self.status_label.configure(text="Model metadata received from Ollama.", fg=c["muted"])
+        if metadata.get("source") == "Colibri /v1/models":
+            self.flags_label.configure(text="Colibri's model API does not advertise capability flags or native context limits. Tool support depends on the engine.")
+            self.status_label.configure(text="Model list received from Colibri.", fg=c["muted"])
+            self.refresh_button.configure(text="Refresh")
+            self._show_agent_status()
+            return
+        self.flags_label.configure(text=f"Ollama /api/show flags: {flags}. "
+                                   "A missing flag is not proof that a model lacks the feature; older servers may omit flags.")
+        self.status_label.configure(text="Model metadata received from Ollama.", fg=c["muted"])
         self.refresh_button.configure(text="Refresh")
         self._show_agent_status()
 

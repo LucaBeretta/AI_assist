@@ -46,6 +46,7 @@ _MAX_PROBE_BYTES = 4 * 1024 * 1024
 _MAX_FILE_BYTES = 64000
 _MAX_SHOW_BYTES = 2 * 1024 * 1024
 _PRIVATE_KEY_RE = re.compile(r"-----BEGIN (?:[A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?)-----")
+_BINARY_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0e-\x1f]")
 _FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})([^\r\n]*)[\r\n]*$")
 _FILENAME_RE = re.compile(
     r"(?:^|\s)(?:filename|file|title)\s*=\s*(?:\"([^\"]+)\"|'([^']+)'|([^\s]+))",
@@ -121,7 +122,7 @@ def _decode_text(data, partial=False):
         text = decoder.decode(data, final=not partial)
     except UnicodeDecodeError as error:
         raise ValueError("This file is not readable UTF-8 text.") from error
-    if any(ord(character) < 32 and character not in "\t\n\r\f" for character in text):
+    if _BINARY_CONTROL_RE.search(text):
         raise ValueError("Binary files cannot be included in project context.")
     if _PRIVATE_KEY_RE.search(text):
         raise ValueError("Private-key contents are excluded from project context.")

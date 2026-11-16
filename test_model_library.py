@@ -8,7 +8,7 @@ import urllib.error
 from unittest.mock import patch
 
 from model_library import (
-    DownloadCancelled, fetch_model_variants, fetch_popular_models, pull_model,
+    DownloadCancelled, fetch_model_variants, fetch_popular_models, pull_model, _PageParser,
 )
 
 
@@ -40,6 +40,15 @@ def response(contents):
 
 
 class LibraryTests(unittest.TestCase):
+    def test_deep_page_preserves_text_and_document_order(self):
+        page = _PageParser()
+        page.feed("<div>" * 1500 + " first\n<b>second</b>\tthird " + "</div>" * 1500)
+        self.assertEqual(page.root.text(), "first second third")
+        nodes = list(page.root.nodes())
+        self.assertEqual(len(nodes), 1501)
+        self.assertEqual(nodes[-1].tag, "b")
+        self.assertEqual(list(page.root.nodes("b")), [nodes[-1]])
+
     def test_popularity_order_description_counts_and_non_chat_filtering(self):
         html = '<div id="repo"><ul>' + "".join([
             model_row("llama3.1", "Chat &amp; coding", ["tools", "8b", "70b"], "121.1M"),

@@ -1,4 +1,4 @@
-"""A native tool-call loop (Ollama or colibri) with reviewed writes and reviewed shell commands.
+"""An Ollama tool-call loop with reviewed writes and reviewed shell commands.
 
 File tools stay within the project and exclude private files. Shell commands
 run with the current user's permissions: their working directory is not a
@@ -23,11 +23,25 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-import colibri_client
 import developer_tools as projects
+from response_metrics import metrics_summary
 
 
 _MAX_FILE_BYTES = 64000
+# Sizes the user can allow the agent to read and edit (Developer > Files).
+FILE_LIMIT_CHOICES = (64000, 128000, 256000, 512000, 1000000)
+# Per-run settings for the worker thread running the agent: the chosen file
+# limit and the model's context, which decides when a file is read in parts.
+_run = threading.local()
+
+
+def _file_limit():
+    return getattr(_run, "file_limit", _MAX_FILE_BYTES)
+
+
+def estimate_tokens(size):
+    """About four characters per token: a rough guide, not a tokenizer."""
+    return max(1, int(size) // 4)
 _MAX_OUTPUT_CHARS = 20000
 _MAX_RESPONSE_BYTES = 1024 * 1024
 _MAX_TOOL_CALLS = 8
@@ -37,7 +51,8 @@ _SYSTEM = (
     "command unless a successful tool result confirms it. Read files before editing. "
     "To change an existing file use edit_file: copy old_text exactly from read_file output "
     "(a few unique lines) and give its replacement. Use write_file only for new files or "
-    "complete rewrites. Every edit and shell command is reviewed "
+    "complete rewrites. Large files are returned in parts: read the rest with start_line and "
+    "end_line. Every edit and shell command is reviewed "
     "by the user; respect denials and explain what remains. Request narrow read_file line "
     "ranges when output is shortened. Do not repeat a denied action. File tools exclude "
     "secrets and stay inside the project; shell commands run as the current user and are "
@@ -122,23 +137,29 @@ def _snapshot(target):
         return None
     if not stat.S_ISREG(metadata.st_mode):
         raise ValueError("Only regular text files can be edited.")
-    if metadata.st_size > _MAX_FILE_BYTES:
-        raise ValueError("This file exceeds the 64,000-byte editing limit.")
+    limit = _file_limit()
+    if metadata.st_size > limit:
+        raise ValueError(f"This file exceeds the {limit:,}-byte editing limit. A larger limit can be chosen in "
+                         "Developer > Files; splitting the file also helps.")
     with target.open("rb") as source:
-        data = source.read(_MAX_FILE_BYTES + 1)
-    if len(data) > _MAX_FILE_BYTES:
-        raise ValueError("This file exceeds the 64,000-byte editing limit.")
+        data = source.read(limit + 1)
+    if len(data) > limit:
+        raise ValueError(f"This file exceeds the {limit:,}-byte editing limit.")
     projects._decode_text(data)
     return data
 
 
-def _approved(approve_action, action):
+def _approved(approve_action, action, allow_destination=False):
     try:
         approved = approve_action(dict(action))
     except Exception as error:
         raise ValueError(f"Approval could not be completed; no action was taken: {str(error)[:250]}") from error
+    if (allow_destination and isinstance(approved, dict) and approved.get("approved") is True
+            and isinstance(approved.get("destination"), str) and approved["destination"]):
+        return approved["destination"]
     if approved is not True:
         raise ValueError("The user declined this action. No action was taken; do not repeat it.")
+    return True
 
 
 def _edit_file(project, arguments, approve_action, cancel_event, on_event):
@@ -173,7 +194,37 @@ def _edit_file(project, arguments, approve_action, cancel_event, on_event):
     return result if count == 1 else f"{result} Replaced {count} occurrences."
 
 
-def _write_file(project, arguments, approve_action, cancel_event, on_event, expected_old=None):
+def _read_file(project, arguments, on_event):
+    """Read a file, or a line range. A file too large for the model's context is
+    returned in parts, with the line numbers to ask for next."""
+    _safe_target(project, arguments.get("path"))
+    content = projects.read_project_file(project, arguments.get("path"), max_bytes=_file_limit())
+    start = arguments.get("start_line", 1)
+    end = arguments.get("end_line")
+    if isinstance(start, bool) or not isinstance(start, int) or start < 1:
+        raise ValueError("start_line must be a positive line number.")
+    if end is not None and (isinstance(end, bool) or not isinstance(end, int) or end < start):
+        raise ValueError("end_line must be a line number at or after start_line.")
+    lines = content.splitlines(keepends=True)
+    context = getattr(_run, "context_length", None) or 4096
+    budget = max(2000, context)  # characters for one read: about a quarter of the context
+    part_note = ""
+    if end is None and len("".join(lines[start - 1:])) > budget:
+        size, end = 0, start - 1
+        while end < len(lines) and (size + len(lines[end]) <= budget or end == start - 1):
+            size += len(lines[end])
+            end += 1
+        tokens = estimate_tokens(len(content))
+        part_note = (f"\n[Part of a large file: about {tokens:,} tokens, the model's context is {context:,}. "
+                     f"Continue with start_line={end + 1}; ask for about {max(1, end - start + 1)} lines at a time.]")
+        _emit(on_event, "status", f"{arguments['path']} is about {tokens:,} tokens, more than the model's "
+                                  f"{context:,}-token context: the agent reads it in parts.")
+    shown_end = min(end or len(lines), len(lines))
+    return (f"File: {arguments['path']} (lines {start}-{shown_end} of {len(lines)})\n"
+            + "".join(lines[start - 1:end]) + part_note)
+
+
+def _write_file(project, arguments, approve_action, cancel_event, on_event, destination_selected=False, expected_old=None):
     target, path = _safe_target(project, arguments.get("path"))
     content = arguments.get("content")
     if not isinstance(content, str):
@@ -182,8 +233,8 @@ def _write_file(project, arguments, approve_action, cancel_event, on_event, expe
         new_bytes = content.encode("utf-8")
     except UnicodeEncodeError as error:
         raise ValueError("File content must be valid UTF-8 text.") from error
-    if len(new_bytes) > _MAX_FILE_BYTES:
-        raise ValueError("New content exceeds the 64,000-byte editing limit.")
+    if len(new_bytes) > _file_limit():
+        raise ValueError(f"New content exceeds the {_file_limit():,}-byte editing limit.")
     projects._decode_text(new_bytes)
     old_bytes = _snapshot(target)
     if expected_old is not None and old_bytes != expected_old:
@@ -198,9 +249,23 @@ def _write_file(project, arguments, approve_action, cancel_event, on_event, expe
     diff = "".join(line if line.endswith("\n") else line + "\n\\ No newline at end of file\n"
                    for line in diff_lines)
     _check_cancelled(cancel_event)
-    _approved(approve_action, {"kind": "write_file", "path": path, "content": content,
-                             "diff": diff, "exists": old_bytes is not None})
+    approved = _approved(approve_action, {"kind": "write_file", "path": path, "content": content,
+                             "diff": diff, "exists": old_bytes is not None, "destination": str(target),
+                             "destination_selected": destination_selected},
+                         allow_destination=old_bytes is None and not destination_selected)
     _check_cancelled(cancel_event)
+    if isinstance(approved, str):
+        chosen = Path(approved).expanduser()
+        if not chosen.is_absolute():
+            raise ValueError("The chosen save destination must be an absolute file path.")
+        chosen = chosen.resolve()
+        if chosen != target:
+            # Only the approval UI can supply this override. Recompute the
+            # diff at that destination and require review before any write.
+            projects._check_components(chosen.parts)
+            result = _write_file(chosen.parent, {"path": chosen.name, "content": content},
+                                 approve_action, cancel_event, on_event, destination_selected=True)
+            return f"User-selected destination: {chosen}\n{result}\nThe originally proposed path was not written."
 
     def recheck():
         current, _ = _safe_target(project, path)
@@ -343,16 +408,7 @@ def _execute_tool(project, name, arguments, approve_action, cancel_event, on_eve
             raise ValueError("File listing limit must be between 1 and 250.")
         return json.dumps(projects.list_project_files(project, limit), ensure_ascii=False)
     if name == "read_file":
-        _safe_target(project, arguments.get("path"))
-        content = projects.read_project_file(project, arguments.get("path"))
-        start = arguments.get("start_line", 1)
-        end = arguments.get("end_line")
-        if isinstance(start, bool) or not isinstance(start, int) or start < 1:
-            raise ValueError("start_line must be a positive line number.")
-        if end is not None and (isinstance(end, bool) or not isinstance(end, int) or end < start):
-            raise ValueError("end_line must be a line number at or after start_line.")
-        lines = content.splitlines(keepends=True)
-        return f"File: {arguments['path']} (lines {start}-{min(end or len(lines), len(lines))} of {len(lines)})\n" + "".join(lines[start - 1:end])
+        return _read_file(project, arguments, on_event)
     if name == "edit_file":
         return _edit_file(project, arguments, approve_action, cancel_event, on_event)
     if name == "write_file":
@@ -360,6 +416,22 @@ def _execute_tool(project, name, arguments, approve_action, cancel_event, on_eve
     if name == "run_command":
         return _run_command(project, arguments, approve_action, cancel_event)
     raise ValueError(f"Unknown tool '{name}'. Use one of the provided tools.")
+
+
+def _conversation_memory(history, limit):
+    """Keep the original request and recent dialogue as bounded excerpts."""
+    dialogue = [(index, message) for index, message in enumerate(history)
+                if message.get("role") in {"user", "assistant"} and message.get("content", "").strip()]
+    if not dialogue:
+        return []
+    first_user = next((item for item in dialogue if item[1]["role"] == "user"), dialogue[0])
+    selected = dict([first_user] + dialogue[-4:])
+    allowance = max(1, (limit - 180) // len(selected) - 30)
+    excerpts = [f"{message['role']}: {_shorten(message['content'], allowance, 'Excerpt shortened.')}"
+                for _, message in sorted(selected.items())]
+    text = ("Earlier conversation excerpts (incomplete historical context; tool results are omitted):\n"
+            + "\n".join(excerpts))
+    return [{"role": "assistant", "content": _shorten(text, limit, "Earlier dialogue shortened.")}]
 
 
 def _request_messages(history, context_length):
@@ -373,7 +445,8 @@ def _request_messages(history, context_length):
                 "Earlier context shortened.")} for message in history[:latest] if message.get("role") == "system"][:2]
     user = {"role": "user", "content": _shorten(history[latest].get("content", ""), budget // 2,
             "Selected context shortened; use file tools to inspect the project.")}
-    remaining = max(1000, budget - len(json.dumps(systems + [user])))
+    memory = _conversation_memory(history[:latest], budget // 4)
+    remaining = max(1000, budget - len(json.dumps(systems + memory + [user], ensure_ascii=False)))
     groups = []
     for message in history[latest + 1:]:
         if message.get("role") == "tool" and groups and groups[-1][0].get("tool_calls"):
@@ -393,7 +466,7 @@ def _request_messages(history, context_length):
             break
         else:
             break
-    return [{"role": "system", "content": _SYSTEM}] + systems + [user] + kept, prediction
+    return [{"role": "system", "content": _SYSTEM}] + systems + memory + [user] + kept, prediction
 
 
 def _chat(host, model, messages, context_length, cancel_event):
@@ -438,22 +511,24 @@ def _chat(host, model, messages, context_length, cancel_event):
             continue
 
 
-def _colibri_chat(host, model, messages, context_length, cancel_event):
-    """One agent step through colibri's OpenAI-compatible gateway.
-
-    colibri fixes its context when the server starts, so only the reply budget
-    is sent; the history is bounded with the same rules as for Ollama."""
-    request_messages, prediction = _request_messages(messages, context_length)
-    try:
-        return colibri_client.agent_chat(host, model, request_messages, TOOLS, prediction, cancel_event)
-    except colibri_client.ColibriCancelled as error:
-        raise AgentCancelled("The coding agent was stopped.") from error
-    except colibri_client.ColibriError as error:
-        raise RuntimeError(f"Could not complete the colibri agent request: {error}") from error
-
-
 def run_agent(host, model, project_root, messages, on_event, approve_action,
-              cancel_event=None, context_length=4096, max_steps=12, backend="ollama"):
+              cancel_event=None, context_length=4096, max_steps=12, chat_fn=None, file_limit=None):
+    """Run the agent with ``file_limit`` bytes as the largest file it may read or
+    edit (default 64,000; FILE_LIMIT_CHOICES lists what the app offers)."""
+    if file_limit is None:
+        file_limit = _MAX_FILE_BYTES
+    if isinstance(file_limit, bool) or not isinstance(file_limit, int) or not 1000 <= file_limit <= 4000000:
+        raise ValueError("The agent file size limit must be between 1,000 and 4,000,000 bytes.")
+    _run.file_limit, _run.context_length = file_limit, context_length
+    try:
+        return _run_agent(host, model, project_root, messages, on_event, approve_action,
+                          cancel_event, context_length, max_steps, chat_fn)
+    finally:
+        _run.file_limit, _run.context_length = _MAX_FILE_BYTES, None
+
+
+def _run_agent(host, model, project_root, messages, on_event, approve_action,
+               cancel_event=None, context_length=4096, max_steps=12, chat_fn=None):
     """Run tools on a worker thread, returning the updated native chat history.
 
     ``approve_action`` must return exactly True to allow a reviewed operation.
@@ -471,9 +546,6 @@ def run_agent(host, model, project_root, messages, on_event, approve_action,
         raise ValueError("Choose an HTTP or HTTPS Ollama host.")
     if not isinstance(model, str) or not model.strip():
         raise ValueError("Choose an installed model with native tool calling.")
-    if backend not in ("ollama", "colibri"):
-        raise ValueError("The agent backend must be 'ollama' or 'colibri'.")
-    chat = _colibri_chat if backend == "colibri" else _chat
     if isinstance(context_length, bool) or not isinstance(context_length, int) or not 2048 <= context_length <= 1048576:
         raise ValueError("Agent context length must be between 2,048 and 1,048,576 tokens.")
     if isinstance(max_steps, bool) or not isinstance(max_steps, int) or not 1 <= max_steps <= 30:
@@ -485,7 +557,10 @@ def run_agent(host, model, project_root, messages, on_event, approve_action,
     _emit(on_event, "status", "Developer agent is inspecting the project.")
     for step in range(max_steps):
         _check_cancelled(cancel_event)
-        response = chat(host, model, history, context_length, cancel_event)
+        response = (chat_fn or _chat)(host, model, history, context_length, cancel_event)
+        summary = metrics_summary(response)
+        if summary:
+            _emit(on_event, "metrics", f"Step {step + 1}: {summary}")
         message = response.get("message")
         if not isinstance(message, dict) or not isinstance(message.get("content", ""), str):
             raise RuntimeError("Ollama returned an unreadable agent message.")
