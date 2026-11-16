@@ -10,3 +10,7 @@ env/
 .env
 .env.*
 !.env.example
+
+# Optional local chat-data overrides
+.aiassist/
+/chats/
