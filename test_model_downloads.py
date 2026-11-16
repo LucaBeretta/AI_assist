@@ -11,6 +11,7 @@ import unittest
 from unittest.mock import patch
 
 import AIassist
+from test_colibri_client import join_workers
 from model_library import DownloadCancelled
 
 
@@ -40,6 +41,7 @@ def variants(name):
 
 class DownloadUITests(unittest.TestCase):
     def setUp(self):
+        self.threads_before = set(threading.enumerate())
         try:
             self.root = tk.Tk()
         except tk.TclError as error:
@@ -87,6 +89,7 @@ class DownloadUITests(unittest.TestCase):
             self.app.close()
         elif hasattr(self, "root"):
             self.root.destroy()
+        join_workers(self.threads_before)
         for item in reversed(getattr(self, "patches", [])):
             item.stop()
         if hasattr(self, "chat_directory"):
@@ -256,7 +259,7 @@ class DownloadUITests(unittest.TestCase):
         with patch("AIassist.request_ollama", return_value="Hello back") as request:
             self.app.send_prompt()
             self.wait(lambda: not self.app.is_waiting)
-            self.assertEqual(request.call_args.kwargs, {"context_length": 4096})
+            self.assertEqual(request.call_args.kwargs["context_length"], 4096)
         self.assertEqual(self.app.conversation[-1]["content"], "Hello back")
 
     def test_failed_hardware_scan_can_be_retried(self):

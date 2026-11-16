@@ -12,6 +12,7 @@ import unittest
 from unittest.mock import patch
 
 from AIassist import AIAssistantGUI
+from test_colibri_client import join_workers
 
 
 def model_metadata(host, model):
@@ -38,6 +39,7 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         (self.project / "main.py").write_text(self.original_code, encoding="utf-8")
         (self.project / "README.md").write_text("Workspace fixture\n", encoding="utf-8")
         (self.project / ".env").write_text("TEST_SECRET=excluded\n", encoding="utf-8")
+        self.threads_before = set(threading.enumerate())
         self.mocks = ExitStack()
         self.addCleanup(self.mocks.close)
         self.mocks.enter_context(patch.dict(os.environ, {
@@ -84,6 +86,7 @@ class WorkspaceIntegrationTests(unittest.TestCase):
             self.app.close()
         elif self.app is None:
             self.root.destroy()
+        join_workers(self.threads_before)
         for finished in self.worker_finished:
             self.assertTrue(finished.wait(1), "A mocked agent worker was left waiting for approval")
         self.assertEqual([str(error[1]) for error in self.callback_errors], [], "Tk callback failed")
@@ -190,7 +193,9 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         self.assertEqual(self.app.conversation, messages)
         self.assertEqual(self.app.input_box.get("1.0", "end-1c"), draft)
         self.assertEqual(self.app.model_contexts["alpha:8b"], 8192)
-        self.request.assert_called_once_with([messages[0]], "alpha:8b", context_length=8192)
+        self.request.assert_called_once()
+        self.assertEqual(self.request.call_args.args, ([messages[0]], "alpha:8b"))
+        self.assertEqual(self.request.call_args.kwargs["context_length"], 8192)
 
     def test_new_chat_is_visible_after_clearing_a_nonmatching_history_search(self):
         self.app.history_search.set("a query that never matches New chat")

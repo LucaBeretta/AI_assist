@@ -64,6 +64,10 @@ class WorkspaceMixin:
         self.request_serial = 0
         self.approvals = []
         self.pending_chat_model = None
+        self.stream_queue = queue.Queue()
+        self.chat_cancel = threading.Event()
+        self.live = None
+        self.colibri_agent_confirmed = False
         try:
             self.chat_store = ChatStore()
         except (OSError, ValueError) as error:
@@ -180,6 +184,7 @@ class WorkspaceMixin:
         self.chat_menu = tk.Menu(self.root, tearoff=False)
         self.chat_menu.add_command(label="Rename chat", command=self.rename_chat)
         self.chat_menu.add_command(label="Export chat...", command=self.export_chat)
+        self.chat_menu.add_command(label="Back up all chats...", command=self.backup_chats)
         self.chat_menu.add_separator()
         self.chat_menu.add_command(label="Delete chat", command=self.delete_chat)
         self.chat_actions = self.button(header, "Chat options", lambda: self.chat_menu.tk_popup(self.chat_actions.winfo_rootx(), self.chat_actions.winfo_rooty() + self.chat_actions.winfo_height()),
@@ -210,7 +215,7 @@ class WorkspaceMixin:
         footer.pack(fill="x", padx=14, pady=(0, 12))
         self.composer_hint = tk.Label(footer, text="Choose a model to begin", bg=c["surface"], fg=c["muted"], font=("Segoe UI", 8), anchor="w", wraplength=330, justify="left")
         self.composer_hint.pack(side="left", fill="x", expand=True)
-        self.send_button = self.button(footer, "Send  \u2191", self.send_prompt, c["accent"], "white", c["accent_hover"])
+        self.send_button = self.button(footer, "Send  \u2191", self.send_or_stop, c["accent"], "white", c["accent_hover"])
         self.send_button.pack(side="right")
         status = tk.Frame(self.chat_frame, bg=c["background"])
         status.pack(side="bottom", fill="x", padx=28)
@@ -308,11 +313,17 @@ class WorkspaceMixin:
         for button in (self.choose_project_button, self.attach_button):
             button.config(state="disabled" if busy else "normal")
         self.stop_agent_button.config(state="normal" if self.agent_active else "disabled")
-        self.chat_actions.config(state="normal" if self.current_chat and not busy else "disabled")
+        self.chat_actions.config(state="normal" if (self.current_chat or self.history_records) and not busy else "disabled")
+        for label in ("Rename chat", "Export chat...", "Delete chat"):
+            self.chat_menu.entryconfigure(label, state="normal" if self.current_chat else "disabled")
         ready = bool(self.model_name.get()) and not busy and (self.current_mode != "dev" or self.project_ready)
         self.input_box.config(state="normal" if ready else "disabled")
-        self.send_button.config(state="normal" if ready else "disabled", text="Working..." if self.is_waiting else ("Run agent" if self.current_mode == "dev" else "Send  \u2191"),
-                                bg=self.COLORS["accent"] if ready else self.COLORS["border"])
+        if self.is_waiting:
+            # While an answer or the agent runs, the same button stops it.
+            self.send_button.config(state="normal", text="Stop  \u25a0", bg=self.COLORS["ink"])
+        else:
+            self.send_button.config(state="normal" if ready else "disabled", text="Run agent" if self.current_mode == "dev" else "Send  \u2191",
+                                    bg=self.COLORS["accent"] if ready else self.COLORS["border"])
         if self.project_loading:
             self.composer_hint.config(text="Preparing project context...")
         elif self.current_mode == "dev":
@@ -599,6 +610,24 @@ class WorkspaceMixin:
             except OSError as error:
                 self.set_status(str(error), error=True)
 
+    def backup_chats(self):
+        if self.busy() or self.chat_store is None:
+            return
+        self.persist_current()
+        stamp = time.strftime("%Y-%m-%d")
+        destination = filedialog.asksaveasfilename(parent=self.root, title="Back up all chats", defaultextension=".zip",
+                                                   initialfile=f"AI Assist chats {stamp}.zip", filetypes=[("Zip archive", "*.zip")])
+        if not destination:
+            return
+        try:
+            count = self.chat_store.export_all(destination)
+        except (OSError, ValueError) as error:
+            self.set_status(str(error), error=True)
+            return
+        skipped = len(self.chat_store.errors)
+        self.set_status(f"Backed up {count} chat{'s' if count != 1 else ''} to {Path(destination).name}."
+                        + (f" {skipped} damaged file{'s were' if skipped != 1 else ' was'} left out." if skipped else ""))
+
     def delete_chat(self):
         if self.busy() or not self.current_chat:
             return
@@ -763,6 +792,8 @@ class WorkspaceMixin:
         if self.current_mode == "dev" and not self.project_ready:
             self.set_status("Choose a project folder before starting the coding agent.")
             return "break"
+        if self.current_mode == "dev" and self.backend_name == "colibri" and not self.confirm_colibri_agent():
+            return "break"
         prompt = self.input_box.get("1.0", "end-1c").strip()
         if not prompt:
             return "break"
@@ -799,9 +830,100 @@ class WorkspaceMixin:
                                                              messages, context or 4096, self.agent_cancel), daemon=True).start()
         else:
             self.set_status(f"{model} is thinking...")
-            threading.Thread(target=self.fetch_response, args=(messages, prompt, model, context), daemon=True).start()
+            self.chat_cancel = threading.Event()
+            serial = self.request_serial
+            self.start_live_message()
+            on_delta = lambda kind, text: self.stream_queue.put((serial, kind, text))
+            threading.Thread(target=self.fetch_response, args=(messages, prompt, model, context, self.chat_cancel, on_delta),
+                             daemon=True).start()
         self.update_controls()
         return "break"
+
+    def confirm_colibri_agent(self):
+        """Once per session: the agent makes several requests, and colibri is slow."""
+        if self.colibri_agent_confirmed:
+            return True
+        speed = colibri_client.tokens_per_second(self.colibri_report or {})
+        measured = (f"colibri answered at about {speed:.1f} tokens per second last time. " if speed
+                    else "colibri streams large models from the disk, so it can be slow. ")
+        if speed is not None and speed >= 15:
+            self.colibri_agent_confirmed = True
+            return True
+        if not messagebox.askokcancel(
+                "Coding agent on colibri",
+                measured + "The coding agent reads files and asks the model several times, so one request "
+                "can take many minutes. You can stop it at any time with Stop.\n\nStart the agent?",
+                parent=self.root):
+            self.set_status("Agent not started. Switch Engine to Ollama for faster agent work.")
+            return False
+        self.colibri_agent_confirmed = True
+        return True
+
+    def send_or_stop(self):
+        if self.is_waiting:
+            self.stop_current()
+            return "break"
+        return self.send_prompt()
+
+    def stop_current(self):
+        if not self.is_waiting:
+            return
+        if self.agent_active:
+            self.stop_agent()
+        else:
+            self.chat_cancel.set()
+            self.set_status("Stopping the answer...")
+
+    def start_live_message(self):
+        """A plain card that fills while the answer streams; replaced by the
+        formatted message when the answer ends."""
+        self.end_live_message()
+        if self.empty_state is not None:
+            self.empty_state.destroy()
+            self.empty_state = None
+            self.suggestion_buttons = []
+        c = self.COLORS
+        card = tk.Frame(self.message_frame, bg=c["background"])
+        card.pack(fill="x", padx=24, pady=(16, 6))
+        heading = tk.Frame(card, bg=c["background"])
+        heading.pack(fill="x", padx=14, pady=(10, 3))
+        tk.Label(heading, text="AI ASSIST", bg=c["background"], fg=c["muted"], font=("Segoe UI", 8, "bold")).pack(side="left")
+        state = tk.Label(heading, text="waiting for the model\u2026", bg=c["background"], fg=c["accent"], font=("Segoe UI", 8))
+        state.pack(side="left", padx=8)
+        body = tk.Label(card, text="", bg=c["background"], fg=c["ink"], font=("Segoe UI", 11),
+                        anchor="w", justify="left", wraplength=640)
+        body.pack(fill="x", padx=14, pady=(2, 12))
+        card.bind("<Configure>", lambda event: body.config(wraplength=max(200, event.width - 30)))
+        self.live = {"card": card, "body": body, "state": state, "text": "", "thinking": False}
+        self.root.after_idle(lambda: self.chat_canvas.yview_moveto(1))
+
+    def end_live_message(self):
+        if self.live is not None:
+            if self.live["card"].winfo_exists():
+                self.live["card"].destroy()
+            self.live = None
+
+    def apply_stream(self):
+        changed = False
+        for _ in range(400):
+            try:
+                serial, kind, text = self.stream_queue.get_nowait()
+            except queue.Empty:
+                break
+            if serial != self.request_serial or self.live is None:
+                continue
+            if kind == "content":
+                self.live["text"] += text
+            else:
+                self.live["thinking"] = True
+            changed = True
+        if changed and self.live is not None:
+            follow = self.chat_canvas.yview()[1] > 0.97
+            text = self.live["text"]
+            self.live["body"].config(text=text)
+            self.live["state"].config(text="writing\u2026" if text else "thinking\u2026")
+            if follow:
+                self.root.after_idle(lambda: self.chat_canvas.yview_moveto(1))
 
     def agent_worker(self, request, host, model, root, messages, context, cancel):
         def event(item):
@@ -957,12 +1079,23 @@ class WorkspaceMixin:
                     self.agent_history = data.get("messages", [])
                 self.finish_response(response, error)
 
-    def finish_response(self, response, error):
+    def finish_response(self, response, error, stopped=False):
+        self.apply_stream()
+        self.end_live_message()
         self.is_waiting = False
         self.agent_active = False
         self.activity.stop()
         self.activity.pack_forget()
-        if error:
+        if self.backend_name == "colibri":
+            self.health_poll_at = 0  # refresh colibri's status (and its measured speed) now
+        if stopped:
+            if response and response.strip():
+                self.conversation.append({"role": "assistant", "content": response})
+                self.display_message("AI Assist", response, "ai")
+                self.set_status("Stopped. The partial answer was kept.")
+            else:
+                self.set_status("Stopped before the model answered.")
+        elif error:
             self.set_status(error, error=True)
             self.display_message("Request failed", error, "error")
         else:
@@ -984,12 +1117,14 @@ class WorkspaceMixin:
             self.manage_models("refresh")
         self.process_models()
         self.process_workspace_events()
+        self.apply_stream()
         try:
-            prompt, response, error = self.response_queue.get_nowait()
+            item = self.response_queue.get_nowait()
         except queue.Empty:
             pass
         else:
-            self.finish_response(response, error)
+            prompt, response, error = item[:3]
+            self.finish_response(response, error, stopped=len(item) > 3 and item[3])
         if not self.closed:
             self.refresh_after_download()
             interval = _response_poll_interval(
@@ -1051,6 +1186,7 @@ class WorkspaceMixin:
     def close(self):
         self.persist_current()
         self.agent_cancel.set()
+        self.chat_cancel.set()
         for decision, window in list(self.approvals):
             self.resolve_approval(decision, window, False)
         for job in (self.draft_job, self.search_job):

@@ -294,7 +294,7 @@ class AgentTests(unittest.TestCase):
         payload = json.loads(request.data)
         self.assertFalse(payload["stream"])
         self.assertEqual({item["function"]["name"] for item in payload["tools"]},
-                         {"list_files", "read_file", "write_file", "run_command"})
+                         {"list_files", "read_file", "edit_file", "write_file", "run_command"})
         self.assertEqual(payload["options"]["num_ctx"], 4096)
         self.assertEqual(result["assistant_text"], "Done")
 

@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import threading
 import time
 import tkinter as tk
 import unittest
@@ -15,7 +16,7 @@ from unittest.mock import patch
 from AIassist import AIAssistantGUI
 import colibri_client
 from colibri_panel import card_text, comparison_text
-from test_colibri_client import CATALOG, FakeGateway, completion, make_fake_colibri
+from test_colibri_client import CATALOG, FakeGateway, completion, join_workers, make_fake_colibri
 
 
 def ollama_metadata(host, model):
@@ -44,6 +45,7 @@ class PanelTextTests(unittest.TestCase):
 
 class ColibriWorkspaceTests(unittest.TestCase):
     def setUp(self):
+        self.threads_before = set(threading.enumerate())
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.folder = Path(self.temporary.name)
@@ -82,6 +84,7 @@ class ColibriWorkspaceTests(unittest.TestCase):
             self.root.tk.call("after", "cancel", scheduled)
         if not self.app.closed:
             self.app.close()
+        join_workers(self.threads_before)
         self.assertEqual([str(error[1]) for error in self.callback_errors], [])
 
     def wait_for(self, predicate, description, timeout=10):
@@ -151,6 +154,7 @@ class ColibriWorkspaceTests(unittest.TestCase):
         ]
         self.switch_to_colibri()
         self.app.nav_buttons["dev"].invoke()
+        self.mocks.enter_context(patch("workspace_ui.messagebox.askokcancel", return_value=True))
         with patch("workspace_ui.filedialog.askdirectory", return_value=str(project)):
             self.app.choose_project_button.invoke()
         self.wait_for(lambda: not self.app.project_loading and bool(self.app.project_files), "project scan")
@@ -164,6 +168,40 @@ class ColibriWorkspaceTests(unittest.TestCase):
         saved = self.app.chat_store.load(self.app.current_chat["id"])
         self.assertEqual((saved["backend"], saved["mode"]), ("colibri", "dev"))
         self.assertEqual(saved["agent_history"][-2]["tool_name"], "read_file")
+
+    def test_speed_is_shown_and_slow_agent_asks_once(self):
+        state = self.state()
+        state["tps"] = 3.4
+        (self.colibri / "c" / "state.json").write_text(json.dumps(state))
+        self.switch_to_colibri()
+        self.assertIn("~3.4 tok/s on the last answer", self.app.model_help.cget("text"))
+        project = self.folder / "project"
+        project.mkdir()
+        (project / "a.py").write_text("x = 1\n", encoding="utf-8")
+        self.app.nav_buttons["dev"].invoke()
+        with patch("workspace_ui.filedialog.askdirectory", return_value=str(project)):
+            self.app.choose_project_button.invoke()
+        self.wait_for(lambda: not self.app.project_loading and bool(self.app.project_files), "project scan")
+        with patch("workspace_ui.messagebox.askokcancel", return_value=False) as ask:
+            self.send("Spiega a.py")
+        self.assertIn("about 3.4 tokens per second", ask.call_args.args[1])
+        self.assertFalse(self.app.is_waiting)
+        self.assertEqual(self.gateway.requests, [])
+        self.assertIn("Agent not started", self.app.status_label.cget("text"))
+        self.gateway.replies[:] = [completion("a.py imposta x a 1."), completion("Ancora.")]
+        with patch("workspace_ui.messagebox.askokcancel", return_value=True) as ask:
+            self.send("Spiega a.py")
+            self.wait_for(lambda: not self.app.is_waiting, "agent reply", timeout=15)
+            self.send("E poi?")
+            self.wait_for(lambda: not self.app.is_waiting, "second agent reply", timeout=15)
+        self.assertEqual(ask.call_count, 1)  # asked once per session
+        # A fast colibri never asks.
+        self.assertTrue(self.app.colibri_agent_confirmed)
+        self.app.colibri_agent_confirmed = False
+        self.app.colibri_report["server"]["tokens_per_second"] = 22.0
+        with patch("workspace_ui.messagebox.askokcancel") as ask:
+            self.assertTrue(self.app.confirm_colibri_agent())
+        ask.assert_not_called()
 
     def test_stop_all_and_capabilities_on_colibri(self):
         self.switch_to_colibri()
@@ -214,6 +252,7 @@ class ColibriWorkspaceTests(unittest.TestCase):
                 panel.choose(next(row for row, _ in panel.card_buttons if row["id"] == "qwen36-35b"))
             self.wait_for(lambda: panel.installing is None and not panel.loading, "fake install", timeout=20)
             self.assertEqual(self.state()["model"], "qwen36-35b")
+            self.assertIn("Qwen3.6-35B is set up and starting", panel.message.cget("text"))
             labels = {row["id"]: button.cget("text") for row, button in panel.card_buttons}
             self.assertEqual(labels["qwen36-35b"], "Use in chat")
             self.gateway.close()
@@ -226,6 +265,39 @@ class ColibriWorkspaceTests(unittest.TestCase):
             self.assertTrue(dialog.closed)
             self.wait_for(lambda: not self.app.busy() and self.app.model_name.get() == "qwen36-35b", "use installed model")
             self.assertEqual(self.app.backend_name, "colibri")
+
+    def test_context_picker_applies_and_installs_with_context(self):
+        with patch("model_downloads.fetch_popular_models", return_value=[]), \
+                patch("hardware_panel.detect_hardware", side_effect=RuntimeError("skip")):
+            self.app.open_downloads()
+            dialog = self.app.download_dialog
+            dialog.window.withdraw()
+            panel = dialog.colibri
+            self.wait_for(lambda: not panel.loading and panel.card_buttons, "colibri cards")
+            self.assertEqual(panel.context_choice.get(), "Automatic")
+            self.assertEqual(str(panel.context_button.cget("state")), "disabled")  # nothing to change yet
+            panel.context_choice.set("32,768 tokens")
+            self.wait_for(lambda: str(panel.context_button.cget("state")) == "normal", "apply enabled")
+            panel.context_button.invoke()
+            self.wait_for(lambda: panel.installing is None and not panel.loading, "context change", timeout=15)
+            self.assertEqual(panel.context_choice.get(), "32,768 tokens")
+            self.assertIn("context 32,768 tokens", panel.summary.cget("text"))
+            self.assertIn("restarted with context 32,768 tokens", panel.message.cget("text"))
+            log = (self.colibri / "c" / "calls.log").read_text().splitlines()
+            self.assertIn("setup --ctx 32768 --yes --json --no-browser", log)
+
+    def test_backup_from_chat_options(self):
+        self.send("hello")
+        self.wait_for(lambda: not self.app.is_waiting, "reply")
+        target = self.folder / "backup.zip"
+        with patch("workspace_ui.filedialog.asksaveasfilename", return_value=str(target)):
+            self.app.chat_menu.invoke("Back up all chats...")
+        self.assertTrue(target.is_file())
+        self.assertIn("Backed up 1 chat to backup.zip", self.app.status_label.cget("text"))
+        self.app.new_chat()
+        self.root.update()
+        self.assertEqual(str(self.app.chat_actions.cget("state")), "normal")  # backup stays reachable
+        self.assertEqual(self.app.chat_menu.entrycget("Delete chat", "state"), "disabled")
 
     def test_missing_colibri_explains_how_to_install(self):
         with patch.dict(os.environ, {"COLIBRI_DIR": ""}), patch("colibri_client.find_directory", return_value=None):

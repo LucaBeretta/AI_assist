@@ -25,12 +25,15 @@ python AIassist.py
 
 On Windows, you can double-click **Start AI Assist.cmd** instead. It finds Python, starts the app from the correct folder, and keeps startup errors visible. If `.py` files are associated with Python, you can also double-click `AIassist.py` directly.
 
+On macOS, double-click **Start AI Assist.command**. It looks for a Python 3 that includes Tkinter (the python.org installer does; with Homebrew also run `brew install python-tk`). If macOS refuses to open it the first time, right-click it and choose **Open**, or run `chmod +x "Start AI Assist.command"`. On Apple silicon (M1 and later) the recommendations count the memory the GPU shares with the system, so Macs get GPU-sized suggestions rather than CPU-only ones.
+
 Choose a model in the sidebar before chatting. Click **Refresh models** after adding models or restarting Ollama. Switching models starts a new conversation.
 
 ## Chats and developer workspace
 
-- **New chat** immediately creates and selects a saved entry, clearing any search that would hide it. Messages and drafts save locally. Search, resume, rename, export, or delete chats from the sidebar and **Chat options**.
-- **Developer** uses a chosen project folder and a model that advertises tool calling, such as `qwen3-coder:30b`. The agent can inspect text files, propose edits, and run commands. Each edit shows its diff before **Apply change**; each command shows its text and working folder before **Run command**. **Reject** declines an action, and **Stop agent** cancels work and pending reviews.
+- **New chat** immediately creates and selects a saved entry, clearing any search that would hide it. Messages and drafts save locally. Search, resume, rename, export, or delete chats from the sidebar and **Chat options**. **Chat options > Back up all chats...** writes one .zip with every chat as JSON (copy those files back into the chats folder to restore) and as readable Markdown.
+- Answers **stream**: the text appears while the model writes it. While an answer or the agent runs, **Send** becomes **Stop**; stopping keeps the part already written.
+- **Developer** uses a chosen project folder and a model that advertises tool calling, such as `qwen3-coder:30b`. The agent can inspect text files, propose edits, and run commands. It changes existing files by replacing exact blocks (`edit_file`), so small changes stay small and quick; it writes whole files only for new files or full rewrites. Each edit shows its diff before **Apply change**; each command shows its text and working folder before **Run command**. **Reject** declines an action, and **Stop agent** cancels work and pending reviews.
 - **Files** lets you pin selected project files to context. Generated code appears in **Code**, with explicit copy/save actions. **Activity** records tool results and command output. Native tool history is retained when a developer chat is resumed.
 - **Capabilities** distinguishes actual app features from the selected model's reported support. It shows the native context maximum separately from the app's configured context.
 
@@ -62,7 +65,7 @@ AI Assist can also use [colibri](https://github.com/JustVugg/colibri), an engine
 3. The tab shows colibri's own assessment of this PC (`coli setup --list --json`): which models fit, how much RAM and disk each needs, whether it runs from RAM or streams from the SSD, and whether it supports the coding agent's tools. A summary line compares it with the Ollama (GPU) recommendation.
 4. **Install & use** runs `coli setup --model <id>`: it downloads the model (resumable: cancel and retry later), prepares the engine for this PC, and starts the server. Then choose **Use in chat**.
 
-Switch engines with **Engine** in the sidebar. colibri serves one model at a time; **Run all** starts it and **Stop all** stops it, and sending a message starts it if it is stopped. Saved chats remember their engine and reopen on it. The **Developer** agent works on colibri with models whose family supports tool calls (Qwen3.6/Qwen3-Coder, Qwen3.8, GLM, DeepSeek V4, Kimi, MiMo). The context size is the one colibri was set up with (`coli setup --ctx`).
+Switch engines with **Engine** in the sidebar. colibri serves one model at a time; **Run all** starts it and **Stop all** stops it, and sending a message starts it if it is stopped. Saved chats remember their engine and reopen on it. The **Developer** agent works on colibri with models whose family supports tool calls (Qwen3.6/Qwen3-Coder, Qwen3.8, GLM, DeepSeek V4, Kimi, MiMo). The **Context** picker in the colibri tab sets the context for Install & use, and **Apply to the current model** restarts colibri with a new one (Automatic lets colibri choose). The sidebar shows colibri's measured speed after each answer; because colibri can be slow, the first agent request in a session asks for confirmation unless the last answer ran at 15 tokens per second or more.
 
 Everything stays local: AI Assist runs your own `coli` launcher and talks to colibri's server on `127.0.0.1`. Only colibri's model download uses the internet.
 

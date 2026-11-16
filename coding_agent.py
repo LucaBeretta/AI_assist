@@ -35,7 +35,9 @@ _SYSTEM = (
     "You are the local AI Assist coding agent. Use the provided native tools to inspect, "
     "edit, and verify the selected project. Never claim to have edited files or run a "
     "command unless a successful tool result confirms it. Read files before editing. "
-    "Write complete file contents, not patches. Every write and shell command is reviewed "
+    "To change an existing file use edit_file: copy old_text exactly from read_file output "
+    "(a few unique lines) and give its replacement. Use write_file only for new files or "
+    "complete rewrites. Every edit and shell command is reviewed "
     "by the user; respect denials and explain what remains. Request narrow read_file line "
     "ranges when output is shortened. Do not repeat a denied action. File tools exclude "
     "secrets and stay inside the project; shell commands run as the current user and are "
@@ -56,7 +58,11 @@ TOOLS = [
     _schema("read_file", "Read a UTF-8 project file. Prefer narrow 1-based inclusive line ranges.",
             {"path": {"type": "string"}, "start_line": {"type": "integer", "minimum": 1},
              "end_line": {"type": "integer", "minimum": 1}}, ("path",)),
-    _schema("write_file", "Request approval to create or replace a project text file using its complete contents.",
+    _schema("edit_file", "Request approval to replace one exact block of text in an existing project file. "
+            "old_text must match the file exactly and appear once (or set replace_all).",
+            {"path": {"type": "string"}, "old_text": {"type": "string"}, "new_text": {"type": "string"},
+             "replace_all": {"type": "boolean"}}, ("path", "old_text", "new_text")),
+    _schema("write_file", "Request approval to create a new project text file, or replace one completely, using its complete contents.",
             {"path": {"type": "string"}, "content": {"type": "string"}}, ("path", "content")),
     _schema("run_command", "Request approval for a shell command in the project. Runs with user permissions, not a sandbox.",
             {"command": {"type": "string"}, "description": {"type": "string"},
@@ -135,7 +141,39 @@ def _approved(approve_action, action):
         raise ValueError("The user declined this action. No action was taken; do not repeat it.")
 
 
-def _write_file(project, arguments, approve_action, cancel_event, on_event):
+def _edit_file(project, arguments, approve_action, cancel_event, on_event):
+    """Replace an exact block; the result goes through write_file's diff, review and atomic write."""
+    target, path = _safe_target(project, arguments.get("path"))
+    old_text, new_text = arguments.get("old_text"), arguments.get("new_text")
+    replace_all = arguments.get("replace_all", False)
+    if not isinstance(old_text, str) or not old_text:
+        raise ValueError("edit_file requires old_text copied exactly from the file.")
+    if not isinstance(new_text, str):
+        raise ValueError("edit_file requires new_text (it may be empty to delete old_text).")
+    if not isinstance(replace_all, bool):
+        raise ValueError("replace_all must be true or false.")
+    old_bytes = _snapshot(target)
+    if old_bytes is None:
+        raise ValueError(f"{path} does not exist. Use write_file to create a new file.")
+    current = projects._decode_text(old_bytes)
+    count = current.count(old_text)
+    if count == 0 and "\r\n" in current and "\r\n" not in old_text:
+        # The model saw the file with plain newlines; keep the file's CRLF endings.
+        old_text, new_text = old_text.replace("\n", "\r\n"), new_text.replace("\n", "\r\n")
+        count = current.count(old_text)
+    if count == 0:
+        raise ValueError(f"old_text was not found in {path}. Read the file again and copy the exact lines, "
+                         "including indentation.")
+    if count > 1 and not replace_all:
+        raise ValueError(f"old_text appears {count} times in {path}. Include more surrounding lines so it is unique, "
+                         "or set replace_all to change every occurrence.")
+    updated = current.replace(old_text, new_text) if replace_all else current.replace(old_text, new_text, 1)
+    result = _write_file(project, {"path": path, "content": updated}, approve_action, cancel_event, on_event,
+                         expected_old=old_bytes)
+    return result if count == 1 else f"{result} Replaced {count} occurrences."
+
+
+def _write_file(project, arguments, approve_action, cancel_event, on_event, expected_old=None):
     target, path = _safe_target(project, arguments.get("path"))
     content = arguments.get("content")
     if not isinstance(content, str):
@@ -148,6 +186,8 @@ def _write_file(project, arguments, approve_action, cancel_event, on_event):
         raise ValueError("New content exceeds the 64,000-byte editing limit.")
     projects._decode_text(new_bytes)
     old_bytes = _snapshot(target)
+    if expected_old is not None and old_bytes != expected_old:
+        raise ValueError("The file changed while the edit was prepared. Read it again and retry.")
     old_text = projects._decode_text(old_bytes) if old_bytes is not None else ""
     if old_bytes == new_bytes:
         return f"No change needed: {path} already contains this exact text."
@@ -313,6 +353,8 @@ def _execute_tool(project, name, arguments, approve_action, cancel_event, on_eve
             raise ValueError("end_line must be a line number at or after start_line.")
         lines = content.splitlines(keepends=True)
         return f"File: {arguments['path']} (lines {start}-{min(end or len(lines), len(lines))} of {len(lines)})\n" + "".join(lines[start - 1:end])
+    if name == "edit_file":
+        return _edit_file(project, arguments, approve_action, cancel_event, on_event)
     if name == "write_file":
         return _write_file(project, arguments, approve_action, cancel_event, on_event)
     if name == "run_command":

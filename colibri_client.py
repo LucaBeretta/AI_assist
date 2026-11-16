@@ -199,21 +199,38 @@ def status(directory):
     report = run_coli_json(directory, ["status", "--json"], timeout=30)
     if not isinstance(report, dict):
         raise ColibriError("colibri returned an invalid status report.")
-    family = None
+    config = {}
     config_path = report.get("config_path")
     if isinstance(config_path, str) and config_path:
         try:
-            config = json.loads(Path(config_path).read_text(encoding="utf-8"))
-            family = config.get("family") if isinstance(config, dict) else None
+            loaded = json.loads(Path(config_path).read_text(encoding="utf-8"))
+            config = loaded if isinstance(loaded, dict) else {}
         except (OSError, ValueError):
-            family = None
+            config = {}
+    family, ctx = config.get("family"), config.get("ctx")
     report["family"] = family if isinstance(family, str) else None
+    # The context the model was set up with; None or 0 means colibri chooses it.
+    report["ctx"] = ctx if isinstance(ctx, int) and not isinstance(ctx, bool) and ctx > 0 else None
     return report
 
 
 def server_state(report):
     server = report.get("server") if isinstance(report, dict) else None
     return server.get("state", "stopped") if isinstance(server, dict) else "not configured"
+
+
+def tokens_per_second(report):
+    """colibri's measured speed on its last answer (prompt time included), or None."""
+    server = report.get("server") if isinstance(report, dict) else None
+    value = server.get("tokens_per_second") if isinstance(server, dict) else None
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0 else None
+
+
+def speed_text(report):
+    speed = tokens_per_second(report)
+    if speed is None:
+        return ""
+    return f"~{speed:.1f} tok/s on the last answer" if speed < 10 else f"~{speed:.0f} tok/s on the last answer"
 
 
 def server_host(report):
@@ -308,14 +325,39 @@ def install_progress(report):
     return install.get("phase"), number("done"), number("total"), install.get("running") is True
 
 
-def install_model(directory, model_id, on_progress, cancel_event, poll_seconds=2.0):
+CONTEXT_CHOICES = (0, 4096, 8192, 16384, 32768, 65536, 131072)
+
+
+def _check_ctx(ctx):
+    if ctx is not None and (isinstance(ctx, bool) or not isinstance(ctx, int) or ctx < 0 or ctx > 1048576):
+        raise ColibriError("Choose a context between 0 (automatic) and 1,048,576 tokens.")
+
+
+def set_context(directory, ctx):
+    """Change the configured model's context (0 = automatic) and restart it with it.
+
+    colibri keeps a running server as it is, so it is stopped first; setup then
+    saves the context and starts the server again in the background."""
+    _check_ctx(ctx)
+    if ctx is None:
+        raise ColibriError("Choose a context.")
+    stop_server(directory)
+    code, stdout, stderr = run_coli(directory, ["setup", "--ctx", str(ctx), "--yes", "--json", "--no-browser"], timeout=600)
+    if code != 0:
+        raise ColibriError("colibri could not change the context: " + (stderr.strip() or stdout.strip())[-600:])
+    return status(directory)
+
+
+def install_model(directory, model_id, on_progress, cancel_event, poll_seconds=2.0, ctx=None):
     """``coli setup --model ID --yes --json --no-browser``: download (resumable),
     build or fetch the engine, configure, and start the server in the background.
 
     Cancelling stops the whole process tree; the next run resumes the download."""
     if not isinstance(model_id, str) or not model_id or model_id.startswith("-"):
         raise ColibriError("Choose a colibri model to install.")
-    command = coli_command(directory, "setup", "--model", model_id, "--yes", "--json", "--no-browser")
+    _check_ctx(ctx)
+    extra = ["--ctx", str(ctx)] if ctx is not None else []
+    command = coli_command(directory, "setup", "--model", model_id, "--yes", "--json", "--no-browser", *extra)
     try:
         process = subprocess.Popen(command, cwd=str(Path(command[1]).parent), stdin=subprocess.DEVNULL,
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=_environment(),
@@ -482,6 +524,65 @@ def request_chat(host, messages, model, max_tokens=None, timeout=1800):
     result = _request(host, "/v1/chat/completions", payload, timeout=timeout)
     message = from_openai_response(result)["message"]
     content = message.get("content", "").strip()
+    if not content:
+        raise ColibriError("colibri's response did not contain a message.")
+    return content
+
+
+def stream_chat(host, messages, model, on_delta, cancel_event=None, max_tokens=None, timeout=1800):
+    """A streamed chat turn (server-sent events). ``on_delta(kind, text)`` gets
+    "content" and "thinking" pieces; returns the full answer text."""
+    import streaming
+    payload = {"model": model, "messages": to_openai_messages(messages), "stream": True}
+    if max_tokens is not None:
+        payload["max_tokens"] = max_tokens
+    request = urllib.request.Request(normalize_host(host) + "/v1/chat/completions", data=json.dumps(payload).encode("utf-8"),
+                                     method="POST", headers={"Content-Type": "application/json", "Accept": "text/event-stream"})
+    api_key = os.environ.get("COLI_API_KEY")
+    if api_key:
+        request.add_header("Authorization", f"Bearer {api_key}")
+    pieces = []
+
+    def handle(line):
+        if line.startswith(":") or not line.startswith("data:"):
+            return None
+        data = line[5:].strip()
+        if data == "[DONE]":
+            return streaming.STOP
+        try:
+            chunk = json.loads(data)
+        except ValueError as error:
+            raise ColibriError("colibri returned an invalid streamed response.") from error
+        if isinstance(chunk, dict) and chunk.get("error"):
+            error = chunk["error"]
+            raise ColibriError(str(error.get("message") if isinstance(error, dict) else error)[:600])
+        choices = chunk.get("choices") if isinstance(chunk, dict) else None
+        delta = choices[0].get("delta") if isinstance(choices, list) and choices and isinstance(choices[0], dict) else None
+        if not isinstance(delta, dict):
+            return None
+        for kind, key in (("thinking", "reasoning_content"), ("thinking", "reasoning"), ("content", "content")):
+            text = delta.get(key)
+            if isinstance(text, str) and text:
+                if kind == "content":
+                    pieces.append(text)
+                on_delta(kind, text)
+        return None
+
+    def describe(code, detail):
+        try:
+            parsed = json.loads(detail)
+            error = parsed.get("error")
+            detail = (error.get("message") if isinstance(error, dict) else error) or detail
+        except (ValueError, AttributeError):
+            pass
+        return f"colibri returned HTTP {code}: {str(detail)[:600]}"
+
+    try:
+        streaming.run_stream(request, handle, cancel_event, timeout=timeout, describe_http_error=describe,
+                             unreachable=f"Could not reach colibri at {normalize_host(host)}. Start it, then click Refresh.")
+    except streaming.StreamCancelled as stopped:
+        raise streaming.StreamCancelled(partial="".join(pieces)) from stopped
+    content = "".join(pieces).strip()
     if not content:
         raise ColibriError("colibri's response did not contain a message.")
     return content

@@ -12,6 +12,7 @@ import urllib.request
 import urllib.parse
 
 import colibri_client
+import streaming
 from model_downloads import ModelDownloadDialog
 from workspace_ui import WorkspaceMixin
 
@@ -113,10 +114,16 @@ def set_model_running(model, start=True, context_length=None):
     ollama_api("/api/generate", payload, timeout=300)
 
 
-def request_ollama(messages, model=None, context_length=None):
-    """Send the conversation to the local Ollama chat API."""
+def request_ollama(messages, model=None, context_length=None, on_delta=None, cancel_event=None):
+    """Send the conversation to the local Ollama chat API.
+
+    With ``on_delta`` the answer streams: ``on_delta(kind, text)`` receives
+    "content" and "thinking" pieces as they arrive, and ``cancel_event`` stops
+    it (raising streaming.StreamCancelled with the partial text)."""
     host = ollama_url()
     model = model or os.environ.get("OLLAMA_MODEL", "qwen3:30b")
+    if on_delta is not None or cancel_event is not None:
+        return _stream_ollama(host, messages, model, context_length, on_delta or (lambda kind, text: None), cancel_event)
     payload = {"model": model, "messages": messages, "stream": False, "keep_alive": -1}
     if context_length is not None:
         payload["options"] = {"num_ctx": context_length}
@@ -162,6 +169,44 @@ def initial_engine():
     return remembered if remembered in ENGINE_LABELS else "ollama"
 
 
+def _stream_ollama(host, messages, model, context_length, on_delta, cancel_event):
+    payload = {"model": model, "messages": messages, "stream": True, "keep_alive": -1}
+    if context_length is not None:
+        payload["options"] = {"num_ctx": context_length}
+    request = urllib.request.Request(f"{host}/api/chat", data=json.dumps(payload).encode("utf-8"),
+                                     headers={"Content-Type": "application/json"}, method="POST")
+    pieces = []
+
+    def handle(line):
+        try:
+            chunk = json.loads(line)
+        except ValueError as error:
+            raise RuntimeError("Ollama returned an invalid streamed response.") from error
+        if not isinstance(chunk, dict):
+            raise RuntimeError("Ollama returned an invalid streamed response.")
+        if chunk.get("error"):
+            raise RuntimeError(f"Ollama: {str(chunk['error'])[:500]}")
+        message = chunk.get("message") if isinstance(chunk.get("message"), dict) else {}
+        for kind in ("thinking", "content"):
+            text = message.get(kind)
+            if isinstance(text, str) and text:
+                if kind == "content":
+                    pieces.append(text)
+                on_delta(kind, text)
+        return streaming.STOP if chunk.get("done") else None
+
+    try:
+        streaming.run_stream(request, handle, cancel_event, timeout=1800,
+                             describe_http_error=lambda code, detail: f"Ollama returned HTTP {code}: {detail.strip()}",
+                             unreachable=f"Could not connect to Ollama at {host}. Start Ollama or run 'ollama serve', then try again.")
+    except streaming.StreamCancelled as stopped:
+        raise streaming.StreamCancelled(partial="".join(pieces)) from stopped
+    content = "".join(pieces).strip()
+    if not content:
+        raise RuntimeError("Ollama's response did not contain a message.")
+    return content
+
+
 class OllamaAssistantBase:
     COLORS = {
         "background": "#f5f6fa",
@@ -197,6 +242,10 @@ class OllamaAssistantBase:
         self.empty_state = None
         self.closed = False
         self.download_dialog = None
+        # Closed dialogs stay referenced until the app exits: a background
+        # worker that outlives a dialog must never drop the last reference to
+        # its Tk objects, because Tk can only free them on the main thread.
+        self.retired_dialogs = []
         self.download_refresh_pending = False
         self.recent_downloads = set()
         # "ollama" or "colibri". colibri serves one model at a time from its own
@@ -412,6 +461,8 @@ class OllamaAssistantBase:
         if self.download_dialog is not None and not self.download_dialog.closed:
             self.download_dialog.window.lift()
             return
+        if self.download_dialog is not None:
+            self.retired_dialogs.append(self.download_dialog)
         self.download_dialog = ModelDownloadDialog(self)
 
     def model_downloaded(self, name):
@@ -592,8 +643,10 @@ class OllamaAssistantBase:
             self.model_status.config(text="\n".join(
                 f"{'Running' if m in loaded else 'Stopped'}: {m}" for m in models) or "No installed models found.")
             if self.backend_name == "colibri":
+                speed = colibri_client.speed_text(self.colibri_report or {})
                 self.model_help.config(text=("colibri serves one model at a time. " if models else "")
-                                       + ("Running." if loaded else "Stopped: sending starts it."))
+                                       + (f"Running, {speed}." if loaded and speed else "Running." if loaded
+                                          else "Stopped: sending starts it."))
                 connected = bool(loaded)
             else:
                 self.model_help.config(text=f"{len(models)} installed, {len(loaded)} running. Models share available memory.")
@@ -670,23 +723,32 @@ class OllamaAssistantBase:
         return self.send_prompt(event)
 
 
-    def fetch_response(self, messages, user_input, model, context_length=None):
-        if self.backend_name == "colibri":
-            try:
+    def fetch_response(self, messages, user_input, model, context_length=None, cancel_event=None, on_delta=None):
+        """Worker thread: stream one answer. Puts (prompt, text, error, stopped)."""
+        try:
+            if self.backend_name == "colibri":
                 directory = self.colibri_directory()
                 if directory:
-                    self.colibri_report = colibri_client.start_server(directory)
-                response = colibri_client.request_chat(self.active_host(), messages, model)
-                self.response_queue.put((user_input, response, None))
-            except (RuntimeError, ValueError, OSError) as error:
-                self.response_queue.put((user_input, None, str(error)))
-            return
-        try:
-            response = (request_ollama(messages, model, context_length=context_length) if context_length is not None
-                        else request_ollama(messages, model))
-            self.response_queue.put((user_input, response, None))
-        except (RuntimeError, ValueError) as error:
-            self.response_queue.put((user_input, None, str(error)))
+                    self.colibri_report = colibri_client.start_server(directory, cancel_event=cancel_event)
+                if on_delta is None and cancel_event is None:
+                    response = colibri_client.request_chat(self.active_host(), messages, model)
+                else:
+                    response = colibri_client.stream_chat(self.active_host(), messages, model,
+                                                          on_delta or (lambda kind, text: None), cancel_event)
+            else:
+                options = {}
+                if context_length is not None:
+                    options["context_length"] = context_length
+                if on_delta is not None or cancel_event is not None:
+                    options.update(on_delta=on_delta, cancel_event=cancel_event)
+                response = request_ollama(messages, model, **options)
+            self.response_queue.put((user_input, response, None, False))
+        except streaming.StreamCancelled as stopped:
+            self.response_queue.put((user_input, stopped.partial, None, True))
+        except colibri_client.ColibriCancelled:
+            self.response_queue.put((user_input, "", None, True))
+        except (RuntimeError, ValueError, OSError) as error:
+            self.response_queue.put((user_input, None, str(error), False))
 
 
     def close(self):

@@ -18,6 +18,16 @@ def readable(value):
     return f"{value / 1e9:.1f} GB" if isinstance(value, (int, float)) else "?"
 
 
+def context_label(value):
+    return "Automatic" if not value else f"{value:,} tokens"
+
+
+def context_value(label):
+    if not label or label == "Automatic":
+        return 0
+    return int(label.split()[0].replace(",", "").replace(".", ""))
+
+
 def card_text(row):
     """Short lines for one colibri model card."""
     streams = "stream" in (row.get("runs") or "")
@@ -54,6 +64,41 @@ def comparison_text(ollama_recommendations, colibri_rows):
     return " ".join(parts)
 
 
+# Workers get plain values and the event queue, never the panel: a thread that
+# outlives a closed dialog must not hold its Tk objects.
+
+def load_worker(events, request, directory):
+    try:
+        if not directory:
+            events.put(("loaded", request, None, None))
+            return
+        report = colibri_client.status(directory)
+        rows = colibri_client.recommendations(directory)
+        events.put(("loaded", request, (directory, report, rows), None))
+    except Exception as error:
+        events.put(("loaded", request, None, str(error)))
+
+
+def install_worker(events, directory, row, cancel_event, ctx=None):
+    def progress(phase, done, total):
+        events.put(("progress", row["id"], (phase, done, total), None))
+    try:
+        colibri_client.install_model(directory, row["id"], progress, cancel_event, ctx=ctx or None)
+        events.put(("installed", row["id"], row, None))
+    except colibri_client.ColibriCancelled as error:
+        events.put(("installed", row["id"], row, "cancelled: " + str(error)))
+    except Exception as error:
+        events.put(("installed", row["id"], row, str(error)))
+
+
+def context_worker(events, directory, ctx):
+    try:
+        colibri_client.set_context(directory, ctx)
+        events.put(("context", "__context__", ctx, None))
+    except Exception as error:
+        events.put(("context", "__context__", ctx, str(error)))
+
+
 class ColibriRecommendationsPanel:
     def __init__(self, dialog, parent):
         self.dialog = dialog
@@ -66,6 +111,7 @@ class ColibriRecommendationsPanel:
         self.cancel_event = threading.Event()
         self.card_buttons = []
         self.request = 0
+        self.notice = ("", False)
         self.closed = False
         c = self.app.COLORS
         self.frame = tk.Frame(parent, bg=c["surface"])
@@ -94,6 +140,21 @@ class ColibriRecommendationsPanel:
         self.comparison.pack(fill="x", padx=14, pady=(0, 10))
         header.bind("<Configure>", lambda event: [label.config(wraplength=max(300, event.width - 28))
                                                    for label in (self.summary, self.comparison)])
+        context_row = tk.Frame(self.frame, bg=c["surface"])
+        context_row.pack(fill="x", padx=18, pady=(0, 6))
+        tk.Label(context_row, text="Context", bg=c["surface"], fg=c["muted"], font=("Segoe UI", 9)).pack(side="left")
+        self.context_choice = tk.StringVar(self.frame, value="Automatic")
+        self.context_picker = ttk.Combobox(context_row, textvariable=self.context_choice, state="readonly", width=16,
+                                           values=[context_label(value) for value in colibri_client.CONTEXT_CHOICES],
+                                           font=("Segoe UI", 9))
+        self.context_picker.pack(side="left", padx=8)
+        self.context_button = self.app.button(context_row, "Apply to the current model", self.apply_context,
+                                              c["background"], c["accent"], "#e8ecf6")
+        self.context_button.config(pady=4)
+        self.context_button.pack(side="left")
+        self.context_note = tk.Label(context_row, text="Used by Install & use. Longer contexts need more RAM.",
+                                     bg=c["surface"], fg=c["muted"], font=("Segoe UI", 8))
+        self.context_note.pack(side="left", padx=10)
         self.message = tk.Label(self.frame, text="", bg=c["surface"], fg=c["muted"], font=("Segoe UI", 9),
                                 anchor="w", justify="left", wraplength=850)
         self.message.pack(fill="x", padx=18, pady=(0, 6))
@@ -132,19 +193,8 @@ class ColibriRecommendationsPanel:
         self.summary.config(text="Looking for colibri...")
         self.message.config(text="colibri checks this PC's RAM, disk, CPU and GPU against its own model catalog.")
         self.update_controls()
-        threading.Thread(target=self.load_worker, args=(self.request,), daemon=True).start()
-
-    def load_worker(self, request):
-        try:
-            directory = self.app.colibri_directory()
-            if not directory:
-                self.events.put(("loaded", request, None, None))
-                return
-            report = colibri_client.status(directory)
-            rows = colibri_client.recommendations(directory)
-            self.events.put(("loaded", request, (directory, report, rows), None))
-        except Exception as error:
-            self.events.put(("loaded", request, None, str(error)))
+        directory = self.app.colibri_directory()
+        threading.Thread(target=load_worker, args=(self.events, self.request, directory), daemon=True).start()
 
     def choose_folder(self):
         if self.installing:
@@ -238,6 +288,10 @@ class ColibriRecommendationsPanel:
                           bg=self.app.COLORS["accent"] if enabled else "#e5e9f2")
         self.refresh_button.config(state="disabled" if busy else "normal")
         self.folder_button.config(state="disabled" if busy else "normal")
+        self.context_picker.config(state="disabled" if busy else "readonly")
+        can_apply = (not busy and configured is not None and not self.dialog.app_busy()
+                     and context_value(self.context_choice.get()) != ((self.report or {}).get("ctx") or 0))
+        self.context_button.config(state="normal" if can_apply else "disabled")
         self.cancel_button.config(state="normal" if self.installing and not self.cancel_event.is_set() else "disabled")
 
     def update_comparison(self):
@@ -269,19 +323,22 @@ class ColibriRecommendationsPanel:
         self.progress.config(value=0)
         self.message.config(text=f"Setting up {row['name']} with colibri...", fg=self.app.COLORS["muted"])
         self.update_controls()
-        threading.Thread(target=self.install_worker, args=(self.app.colibri_directory(), row, self.cancel_event),
+        ctx = context_value(self.context_choice.get())
+        threading.Thread(target=install_worker, args=(self.events, self.app.colibri_directory(), dict(row), self.cancel_event, ctx),
                          daemon=True).start()
 
-    def install_worker(self, directory, row, cancel_event):
-        def progress(phase, done, total):
-            self.events.put(("progress", row["id"], (phase, done, total), None))
-        try:
-            colibri_client.install_model(directory, row["id"], progress, cancel_event)
-            self.events.put(("installed", row["id"], row, None))
-        except colibri_client.ColibriCancelled as error:
-            self.events.put(("installed", row["id"], row, "cancelled: " + str(error)))
-        except Exception as error:
-            self.events.put(("installed", row["id"], row, str(error)))
+    def apply_context(self):
+        if self.installing or self.loading or self.configured_model() is None:
+            return
+        if self.dialog.app_busy():
+            self.message.config(text="Wait for the current chat or model operation to finish first.")
+            return
+        ctx = context_value(self.context_choice.get())
+        self.installing = "__context__"
+        self.message.config(text=f"Restarting colibri with context {context_label(ctx)}...", fg=self.app.COLORS["muted"])
+        self.update_controls()
+
+        threading.Thread(target=context_worker, args=(self.events, self.app.colibri_directory(), ctx), daemon=True).start()
 
     def cancel_install(self):
         if self.installing:
@@ -322,16 +379,22 @@ class ColibriRecommendationsPanel:
                                         fg=self.app.COLORS["muted"])
                 else:
                     directory, self.report, self.rows = data
+                    self.context_choice.set(context_label(self.report.get("ctx")))
                     setup = (self.report.get("setup") or {})
                     model = (setup.get("model") or {}).get("name")
                     state = colibri_client.server_state(self.report)
                     self.summary.config(text=f"colibri folder: {directory}\n"
-                                        + (f"Set up: {model} ({setup.get('backend') or 'cpu'})  |  server {state}"
+                                        + (f"Set up: {model} ({setup.get('backend') or 'cpu'})  |  context "
+                                           f"{context_label(self.report.get('ctx')).lower()}  |  server {state}"
                                            if model else "No model set up yet: pick one below."))
                     fitting = sum(1 for row in self.rows if row.get("fits"))
-                    self.message.config(text=f"{fitting} of {len(self.rows)} colibri models fit this PC. "
+                    # A result of the last action stays visible above the general explanation.
+                    (notice, failed), self.notice = self.notice, ("", False)
+                    self.message.config(text=(notice + "\n" if notice else "")
+                                        + f"{fitting} of {len(self.rows)} colibri models fit this PC. "
                                         "Install & use downloads the model, prepares the engine, and starts it. "
-                                        "colibri serves one model at a time.", fg=self.app.COLORS["muted"])
+                                        "colibri serves one model at a time.",
+                                        fg=self.app.COLORS["error" if failed else "muted"])
                     self.show_cards()
                 self.update_comparison()
                 self.update_controls()
@@ -342,16 +405,24 @@ class ColibriRecommendationsPanel:
                     self.message.config(text=f"Downloading {request}: {readable(done)} / {readable(total)}")
                 elif phase:
                     self.message.config(text=f"colibri setup: {phase}...")
+            elif kind == "context" and request == self.installing:
+                self.installing = None
+                if error:
+                    self.notice = (error, True)
+                else:
+                    self.notice = (f"colibri restarted with context {context_label(data)}.", False)
+                    if self.app.backend_name == "colibri":
+                        self.app.health_poll_at = 0
+                self.refresh()
             elif kind == "installed" and request == self.installing:
                 self.installing = None
                 if error and error.startswith("cancelled: "):
-                    self.message.config(text=error[len("cancelled: "):], fg=self.app.COLORS["muted"])
+                    self.notice = (error[len("cancelled: "):], False)
                 elif error:
-                    self.message.config(text=error, fg=self.app.COLORS["error"])
+                    self.notice = (error, True)
                 else:
                     self.progress.config(value=100)
-                    self.message.config(text=f"{data['name']} is set up and starting. Choose Use in chat.",
-                                        fg=self.app.COLORS["muted"])
+                    self.notice = (f"{data['name']} is set up and starting. Choose Use in chat.", False)
                 self.refresh()
         if not self.closed:
             self.update_comparison()

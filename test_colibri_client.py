@@ -42,7 +42,8 @@ FAKE_COLI = textwrap.dedent('''\
             report["setup"] = {"status": "ready", "ready": state["ready"], "backend": "cpu",
                                "model": {"id": state["model"], "name": state["model"].upper()}}
             report["server"] = {"state": state["server"], "model_id": state["model"] if state["server"] == "ready" else None,
-                                "urls": {"openai_base_url": state["url"] + "/v1"}}
+                                "urls": {"openai_base_url": state["url"] + "/v1"},
+                                "tokens_per_second": state.get("tps") if state["server"] == "ready" else None}
         print(json.dumps(report, indent=2))
     elif args[:2] == ["setup", "--list"]:
         print(json.dumps(state["catalog"], indent=2))
@@ -51,8 +52,15 @@ FAKE_COLI = textwrap.dedent('''\
         print(json.dumps({"state": "ready"}))
     elif args[:1] == ["stop"]:
         state["server"] = "stopped"; save(state)
+    elif args[:1] == ["setup"] and "--ctx" in args and "--model" not in args:
+        ctx = int(args[args.index("--ctx") + 1])
+        with open(os.path.join(here, "setup.json"), "w", encoding="utf-8") as handle:
+            json.dump({"family": "qwen36", "ctx": ctx}, handle)
+        state["server"] = "ready"; save(state)
+        print(json.dumps({"config": {"ctx": ctx}}))
     elif args[:1] == ["setup"] and "--model" in args:
         model = args[args.index("--model") + 1]
+        ctx = int(args[args.index("--ctx") + 1]) if "--ctx" in args else None
         for done in (0, 50, 100):
             state["install"] = {"phase": "download", "done": done, "total": 100, "running": True}
             save(state)
@@ -60,7 +68,7 @@ FAKE_COLI = textwrap.dedent('''\
         state.update(model=model, ready=True, server="ready", install={"phase": "started", "running": False})
         save(state)
         with open(os.path.join(here, "setup.json"), "w", encoding="utf-8") as handle:
-            json.dump({"family": "qwen36"}, handle)
+            json.dump({"family": "qwen36", "ctx": ctx}, handle)
         print(json.dumps({"config": {"model": {"id": model}}}))
     else:
         print("unknown command", file=sys.stderr)
@@ -94,8 +102,9 @@ def make_fake_colibri(folder, url, **state):
 class FakeGateway:
     """A minimal colibri gateway: /v1/models and scripted /v1/chat/completions."""
 
-    def __init__(self, replies, model="qwen3-coder-30b", delay=0.0):
+    def __init__(self, replies, model="qwen3-coder-30b", delay=0.0, stream_pause=0.0):
         self.replies = list(replies)
+        self.stream_pause = stream_pause
         self.requests = []
         gateway = self
 
@@ -128,15 +137,47 @@ class FakeGateway:
                     self.send_json(500, {"error": {"message": "no scripted reply"}})
                     return
                 status, reply = gateway.replies.pop(0)
-                self.send_json(status, reply)
+                if payload.get("stream") and status == 200:
+                    self.send_stream(reply)
+                else:
+                    self.send_json(status, reply)
+
+            def send_stream(self, reply):
+                """Server-sent events as colibri's gateway sends them."""
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.end_headers()
+                message = reply["choices"][0]["message"]
+                events = [{"reasoning_content": "."}]
+                text = message.get("content") or ""
+                middle = len(text) // 2
+                events += [{"content": text[:middle]}, {"content": text[middle:]}]
+                for delta in events:
+                    chunk = {"choices": [{"index": 0, "delta": delta, "finish_reason": None}]}
+                    self.wfile.write(b": keep-alive\n\n")
+                    self.wfile.write(("data: " + json.dumps(chunk) + "\n\n").encode("utf-8"))
+                    self.wfile.flush()
+                    time.sleep(gateway.stream_pause)
+                self.wfile.write(b"data: [DONE]\n\n")
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
-        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        threading.Thread(target=self.server.serve_forever, daemon=True, name="fake-server").start()
 
     def close(self):
         self.server.shutdown()
         self.server.server_close()
+
+
+def join_workers(before, timeout=15):
+    """Let the app's background workers finish before a Tk test drops the app.
+
+    A worker that ends after the test would release the last reference to Tk
+    objects from its own thread, which aborts Tcl ("deleted by the wrong thread")."""
+    for thread in threading.enumerate():
+        if thread is threading.main_thread() or thread in before or thread.name == "fake-server":
+            continue
+        thread.join(timeout)
 
 
 def completion(content="", tool_calls=None, reasoning=None):
@@ -263,6 +304,20 @@ class LauncherTests(unittest.TestCase):
         with self.assertRaises(colibri_client.ColibriError):
             colibri_client.install_model(self.colibri, "--yes", lambda *item: None, cancel)
 
+    def test_context_on_install_and_change(self):
+        colibri_client.install_model(self.colibri, "qwen3-coder-30b", lambda *item: None, threading.Event(),
+                                     poll_seconds=0.05, ctx=16384)
+        self.assertIn("setup --model qwen3-coder-30b --yes --json --no-browser --ctx 16384", self.calls())
+        self.assertEqual(colibri_client.status(self.colibri)["ctx"], 16384)
+        report = colibri_client.set_context(self.colibri, 0)
+        calls = self.calls()
+        self.assertLess(calls.index("stop"), calls.index("setup --ctx 0 --yes --json --no-browser"))
+        self.assertIsNone(report["ctx"])  # 0 = automatic
+        with self.assertRaises(colibri_client.ColibriError):
+            colibri_client.set_context(self.colibri, -5)
+        with self.assertRaises(colibri_client.ColibriError):
+            colibri_client.install_model(self.colibri, "x", lambda *item: None, threading.Event(), ctx=True)
+
     def test_install_cancel_stops_the_process(self):
         state = json.loads((self.colibri / "c" / "state.json").read_text())
         state["step_seconds"] = 5
@@ -324,7 +379,7 @@ class GatewayTests(unittest.TestCase):
         self.assertEqual(result["assistant_text"], "main.py prints hello.")
         first, second = gateway.requests
         self.assertEqual([tool["function"]["name"] for tool in first["tools"]],
-                         ["list_files", "read_file", "write_file", "run_command"])
+                         ["list_files", "read_file", "edit_file", "write_file", "run_command"])
         self.assertIn("max_tokens", first)
         assistant = next(message for message in second["messages"] if message.get("tool_calls"))
         tool = next(message for message in second["messages"] if message["role"] == "tool")
@@ -350,6 +405,41 @@ class GatewayTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ChatBackupTests(unittest.TestCase):
+    def test_backup_zip_holds_restorable_json_and_markdown(self):
+        import zipfile
+        from chat_store import ChatStore
+        with tempfile.TemporaryDirectory() as folder:
+            store = ChatStore(Path(folder) / "chats")
+            first = store.create(model="alpha:8b")
+            first.update(title="Piano / sito", messages=[{"role": "user", "content": "ciao"},
+                                                         {"role": "assistant", "content": "Ciao!"}])
+            store.save(first)
+            second = store.create(model="qwen3-coder-30b", backend="colibri")
+            second.update(title="Piano / sito")
+            store.save(second)
+            (Path(folder) / "chats" / "00000000-0000-0000-0000-000000000000.json").write_text("{broken", encoding="utf-8")
+            target = Path(folder) / "backup.zip"
+            self.assertEqual(store.export_all(target), 2)
+            self.assertEqual(len(store.errors), 1)
+            with zipfile.ZipFile(target) as archive:
+                names = sorted(archive.namelist())
+                self.assertIn(f"chats/{first['id']}.json", names)
+                self.assertIn("readable/Piano  sito.md", names)
+                self.assertIn("readable/Piano  sito (2).md", names)
+                self.assertIn("README.txt", names)
+                markdowns = [archive.read(name).decode("utf-8") for name in names if name.startswith("readable/")]
+                restored = json.loads(archive.read(f"chats/{first['id']}.json"))
+            self.assertTrue(any("## AI Assist\n\nCiao!" in text and "(ollama)" in text for text in markdowns))
+            self.assertTrue(any("(colibri)" in text for text in markdowns))
+            self.assertEqual(restored["messages"][1]["content"], "Ciao!")
+            # Restoring is copying the JSON back into a chats folder.
+            fresh = ChatStore(Path(folder) / "restored")
+            (Path(folder) / "restored" / f"{first['id']}.json").write_text(json.dumps(restored), encoding="utf-8")
+            self.assertEqual(fresh.load(first["id"])["title"], "Piano / sito")
+            self.assertEqual(list(Path(folder).glob(".backup.zip.*.tmp")), [])
 
 
 class ChatStoreBackendTests(unittest.TestCase):
