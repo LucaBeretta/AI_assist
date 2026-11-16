@@ -1,4 +1,4 @@
-"""An Ollama tool-call loop with reviewed writes and reviewed shell commands.
+"""A native tool-call loop (Ollama or colibri) with reviewed writes and reviewed shell commands.
 
 File tools stay within the project and exclude private files. Shell commands
 run with the current user's permissions: their working directory is not a
@@ -23,6 +23,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+import colibri_client
 import developer_tools as projects
 
 
@@ -395,8 +396,22 @@ def _chat(host, model, messages, context_length, cancel_event):
             continue
 
 
+def _colibri_chat(host, model, messages, context_length, cancel_event):
+    """One agent step through colibri's OpenAI-compatible gateway.
+
+    colibri fixes its context when the server starts, so only the reply budget
+    is sent; the history is bounded with the same rules as for Ollama."""
+    request_messages, prediction = _request_messages(messages, context_length)
+    try:
+        return colibri_client.agent_chat(host, model, request_messages, TOOLS, prediction, cancel_event)
+    except colibri_client.ColibriCancelled as error:
+        raise AgentCancelled("The coding agent was stopped.") from error
+    except colibri_client.ColibriError as error:
+        raise RuntimeError(f"Could not complete the colibri agent request: {error}") from error
+
+
 def run_agent(host, model, project_root, messages, on_event, approve_action,
-              cancel_event=None, context_length=4096, max_steps=12):
+              cancel_event=None, context_length=4096, max_steps=12, backend="ollama"):
     """Run tools on a worker thread, returning the updated native chat history.
 
     ``approve_action`` must return exactly True to allow a reviewed operation.
@@ -414,6 +429,9 @@ def run_agent(host, model, project_root, messages, on_event, approve_action,
         raise ValueError("Choose an HTTP or HTTPS Ollama host.")
     if not isinstance(model, str) or not model.strip():
         raise ValueError("Choose an installed model with native tool calling.")
+    if backend not in ("ollama", "colibri"):
+        raise ValueError("The agent backend must be 'ollama' or 'colibri'.")
+    chat = _colibri_chat if backend == "colibri" else _chat
     if isinstance(context_length, bool) or not isinstance(context_length, int) or not 2048 <= context_length <= 1048576:
         raise ValueError("Agent context length must be between 2,048 and 1,048,576 tokens.")
     if isinstance(max_steps, bool) or not isinstance(max_steps, int) or not 1 <= max_steps <= 30:
@@ -425,7 +443,7 @@ def run_agent(host, model, project_root, messages, on_event, approve_action,
     _emit(on_event, "status", "Developer agent is inspecting the project.")
     for step in range(max_steps):
         _check_cancelled(cancel_event)
-        response = _chat(host, model, history, context_length, cancel_event)
+        response = chat(host, model, history, context_length, cancel_event)
         message = response.get("message")
         if not isinstance(message, dict) or not isinstance(message.get("content", ""), str):
             raise RuntimeError("Ollama returned an unreadable agent message.")

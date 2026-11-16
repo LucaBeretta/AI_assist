@@ -11,6 +11,7 @@ import urllib.error
 import urllib.request
 import urllib.parse
 
+import colibri_client
 from model_downloads import ModelDownloadDialog
 from workspace_ui import WorkspaceMixin
 
@@ -149,6 +150,18 @@ def request_ollama(messages, model=None, context_length=None):
         raise RuntimeError("Ollama's response did not contain a message.")
     return content.strip()
 
+ENGINE_LABELS = {"ollama": "Ollama", "colibri": "colibri"}
+
+
+def initial_engine():
+    """AI_ASSIST_ENGINE wins, then the engine used last time, then Ollama."""
+    configured = os.environ.get("AI_ASSIST_ENGINE", "").strip().lower()
+    if configured in ENGINE_LABELS:
+        return configured
+    remembered = colibri_client.load_setting("engine")
+    return remembered if remembered in ENGINE_LABELS else "ollama"
+
+
 class OllamaAssistantBase:
     COLORS = {
         "background": "#f5f6fa",
@@ -186,6 +199,11 @@ class OllamaAssistantBase:
         self.download_dialog = None
         self.download_refresh_pending = False
         self.recent_downloads = set()
+        # "ollama" or "colibri". colibri serves one model at a time from its own
+        # server; AI Assist drives it with the user's coli launcher.
+        self.backend_name = initial_engine()
+        self.colibri_dir = None
+        self.colibri_report = None
         self.root.title("AI Assist | Your local workspace")
         self.root.geometry("1120x780")
         self.root.minsize(860, 640)
@@ -337,6 +355,59 @@ class OllamaAssistantBase:
     def ollama_host():
         return ollama_url()
 
+    def engine_label(self):
+        return ENGINE_LABELS.get(self.backend_name, "Ollama")
+
+    def active_host(self):
+        """The server the selected engine answers on."""
+        if self.backend_name == "colibri":
+            return colibri_client.server_host(self.colibri_report or {})
+        return ollama_url()
+
+    def colibri_family(self):
+        return (self.colibri_report or {}).get("family")
+
+    def colibri_directory(self):
+        if self.colibri_dir is None or colibri_client.coli_path(self.colibri_dir) is None:
+            self.colibri_dir = colibri_client.find_directory()
+        return self.colibri_dir
+
+    def set_colibri_directory(self, directory):
+        self.colibri_dir = colibri_client.save_directory(directory)
+        return self.colibri_dir
+
+    def switch_engine(self, engine, refresh=True):
+        """Change engines. The model list is reloaded and a fresh chat starts."""
+        if engine not in ENGINE_LABELS:
+            raise ValueError("Choose Ollama or colibri.")
+        if self.is_waiting or self.is_loading_models or self.lifecycle_busy:
+            return False
+        if hasattr(self, "engine_choice"):
+            self.engine_choice.set(ENGINE_LABELS[engine])
+        if engine == self.backend_name:
+            if refresh:
+                self.manage_models("startup")
+            return True
+        self.backend_name = engine
+        try:
+            colibri_client.save_setting("engine", engine)
+        except OSError:
+            pass
+        self.model_name.set("")
+        self.active_model = None
+        self.loaded_models = set()
+        self.recent_downloads.clear()
+        self.model_picker.config(values=())
+        self.new_chat()
+        self.set_connection(f"Connecting to {self.engine_label()}", self.COLORS["muted"])
+        if refresh:
+            self.manage_models("startup")
+        return True
+
+    def select_colibri_model(self, model_id=None):
+        """After colibri setup: use the engine and its (now configured) model."""
+        return self.switch_engine("colibri")
+
     def open_downloads(self):
         if self.download_dialog is not None and not self.download_dialog.closed:
             self.download_dialog.window.lift()
@@ -415,6 +486,9 @@ class OllamaAssistantBase:
     def model_worker(self, action, selected, contexts=None):
         contexts = contexts or {}
         progress = lambda text: self.lifecycle_queue.put(("progress", text))
+        if self.backend_name == "colibri":
+            self.lifecycle_queue.put(("done", self.colibri_model_worker(action, selected, progress)))
+            return
         errors = []
         models, loaded = [], set()
         try:
@@ -453,6 +527,48 @@ class OllamaAssistantBase:
             errors.append(str(error))
         self.lifecycle_queue.put(("done", (action, selected, models, loaded, errors)))
 
+    def colibri_model_worker(self, action, selected, progress):
+        """colibri's lifecycle: status on refresh, start on startup/start, stop on stop.
+
+        colibri serves one configured model; its id comes from /v1/models while
+        it runs, and from colibri's setup while it is stopped."""
+        errors, models, loaded = [], [], set()
+        try:
+            directory = self.colibri_directory()
+            if not directory:
+                raise RuntimeError("colibri was not found. Install it from " + colibri_client.GITHUB_URL
+                                   + ", then open Find & download models > colibri engine and choose its folder.")
+            if action == "stop_all":
+                progress("Stopping colibri...")
+                colibri_client.stop_server(directory)
+                report = colibri_client.status(directory)
+            elif action in ("startup", "start_one", "start_all"):
+                report = colibri_client.status(directory)
+                if report.get("configured") and (report.get("setup") or {}).get("ready"):
+                    report = colibri_client.start_server(directory, progress)
+            else:
+                report = colibri_client.status(directory)
+            self.colibri_report = report
+            state = colibri_client.server_state(report)
+            if state == "ready":
+                models = colibri_client.list_models(colibri_client.server_host(report))
+                loaded = set(models)
+            elif report.get("configured"):
+                setup = report.get("setup") or {}
+                name = (report.get("server") or {}).get("model_id") or (setup.get("model") or {}).get("id")
+                models = [name] if name else []
+            if action in ("startup", "start_one") and models:
+                selected = models[0]
+            if not report.get("configured"):
+                errors.append("colibri has no model yet. Open Find & download models > colibri engine to pick one for this PC.")
+            elif not (report.get("setup") or {}).get("ready"):
+                errors.append("colibri's setup did not finish. Open Find & download models > colibri engine to resume it.")
+            elif action in ("startup", "start_one", "start_all") and state != "ready":
+                errors.append("colibri did not start. Run `coli logs -n 50` in its folder to see why.")
+        except (RuntimeError, OSError, ValueError) as error:
+            errors.append(str(error))
+        return action, selected, models, loaded, errors
+
     def process_lifecycle(self):
         while True:
             try:
@@ -475,8 +591,15 @@ class OllamaAssistantBase:
                 self.new_chat()
             self.model_status.config(text="\n".join(
                 f"{'Running' if m in loaded else 'Stopped'}: {m}" for m in models) or "No installed models found.")
-            self.model_help.config(text=f"{len(models)} installed, {len(loaded)} running. Models share available memory.")
-            self.set_connection("Ollama connected" if models else "Check Ollama", self.COLORS["success"] if models else "#efa396")
+            if self.backend_name == "colibri":
+                self.model_help.config(text=("colibri serves one model at a time. " if models else "")
+                                       + ("Running." if loaded else "Stopped: sending starts it."))
+                connected = bool(loaded)
+            else:
+                self.model_help.config(text=f"{len(models)} installed, {len(loaded)} running. Models share available memory.")
+                connected = bool(models)
+            self.set_connection(f"{self.engine_label()} connected" if connected else f"Check {self.engine_label()}",
+                                self.COLORS["success"] if connected else "#efa396")
             if self.startup_pending:
                 self.startup_pending = False
                 self.loading_bar.stop()
@@ -548,6 +671,16 @@ class OllamaAssistantBase:
 
 
     def fetch_response(self, messages, user_input, model, context_length=None):
+        if self.backend_name == "colibri":
+            try:
+                directory = self.colibri_directory()
+                if directory:
+                    self.colibri_report = colibri_client.start_server(directory)
+                response = colibri_client.request_chat(self.active_host(), messages, model)
+                self.response_queue.put((user_input, response, None))
+            except (RuntimeError, ValueError, OSError) as error:
+                self.response_queue.put((user_input, None, str(error)))
+            return
         try:
             response = (request_ollama(messages, model, context_length=context_length) if context_length is not None
                         else request_ollama(messages, model))
@@ -559,7 +692,7 @@ class OllamaAssistantBase:
     def close(self):
         self.closed = True
         if self.download_dialog is not None:
-            self.download_dialog.close()
+            self.download_dialog.close(force=True)
         if hasattr(self, "poll_id"):
             self.root.after_cancel(self.poll_id)
         self.activity.stop()

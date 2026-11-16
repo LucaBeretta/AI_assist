@@ -68,6 +68,8 @@ class DownloadUITests(unittest.TestCase):
             patch("model_downloads.fetch_model_variants", side_effect=variants),
             patch("hardware_panel.detect_hardware", return_value=HARDWARE),
             patch("hardware_panel.recommend_models", return_value=[RECOMMENDATION]),
+            # Keep the colibri tab hermetic on machines that have colibri installed.
+            patch("colibri_client.find_directory", return_value=None),
         ]
         for item in self.patches:
             item.start()

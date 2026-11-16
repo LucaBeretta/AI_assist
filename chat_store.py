@@ -17,6 +17,7 @@ _MAX_CHAT_BYTES = 64 * 1024 * 1024
 _CHAT_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 _MODES = {"chat", "dev"}
 _ROLES = {"user", "assistant", "system"}
+_BACKENDS = {"ollama", "colibri"}
 
 
 class ChatStoreError(ValueError):
@@ -162,6 +163,8 @@ class ChatStore:
         context_length = chat.get("context_length")
         if context_length is not None and (type(context_length) is not int or context_length < 1):
             raise ChatStoreError("Chat context_length must be a positive integer or null.")
+        if chat.get("backend", "ollama") not in _BACKENDS:
+            raise ChatStoreError("Chat backend must be 'ollama' or 'colibri'.")
         for field in ("created_at", "updated_at"):
             _timestamp(chat.get(field), field)
         if "_manual_title" in chat and type(chat["_manual_title"]) is not bool:
@@ -174,6 +177,8 @@ class ChatStore:
             if message["role"] == "assistant":
                 message.setdefault("content", "")
         record.setdefault("context_length", None)
+        # Chats saved before colibri support were all Ollama chats.
+        record.setdefault("backend", "ollama")
         return record
 
     def list_chats(self, query="", mode=None):
@@ -214,13 +219,14 @@ class ChatStore:
         return sorted(chats, key=lambda chat: (_timestamp(chat["updated_at"], "updated_at"), chat["id"]),
                       reverse=True)
 
-    def create(self, model="", mode="chat", title=NEW_CHAT_TITLE, project_path=""):
+    def create(self, model="", mode="chat", title=NEW_CHAT_TITLE, project_path="", backend="ollama"):
         """Create and persist an empty conversation."""
         now = _utc_now()
         chat = {
             "id": str(uuid.uuid4()),
             "title": title,
             "model": model,
+            "backend": backend,
             "mode": mode,
             "messages": [],
             "draft": "",

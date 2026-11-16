@@ -1,6 +1,6 @@
 # AI Assist
 
-A local Ollama workspace with saved chats, a developer agent, code previews, model capabilities, and hardware-aware downloads. Built with Python and Tkinter; no pip packages are required.
+A local Ollama and colibri workspace with saved chats, a developer agent, code previews, model capabilities, and hardware-aware downloads. Built with Python and Tkinter; no pip packages are required.
 
 ## Requirements
 
@@ -53,9 +53,24 @@ Browsing requires internet access, and Ollama must be running to install models.
 - **Ctrl+N:** start a new chat with the current model.
 - **Copy:** copy the complete message.
 
+## colibri engine (large models from RAM + SSD)
+
+AI Assist can also use [colibri](https://github.com/JustVugg/colibri), an engine that runs very large mixture-of-experts models (Qwen3-Coder, Qwen3.6, DeepSeek V4, GLM-5.2, Kimi K3...) on an ordinary PC: it keeps the always-used part of the model in RAM and streams the experts from the SSD, with or without a GPU. Answers are slower than a model that fits your GPU in Ollama, but the models can be far larger.
+
+1. Install colibri once: download it from GitHub (**Code > Download ZIP**, or `git clone`) and run `START-HERE.bat` (Windows) or `./start-here.sh` (macOS/Linux).
+2. In AI Assist choose **Find & download models > colibri engine (RAM + SSD)**. AI Assist finds colibri in `COLIBRI_DIR`, beside this folder, or in your home, Documents, Desktop, or Downloads folder; otherwise click **Choose colibri folder...** (the folder that contains `c/coli`).
+3. The tab shows colibri's own assessment of this PC (`coli setup --list --json`): which models fit, how much RAM and disk each needs, whether it runs from RAM or streams from the SSD, and whether it supports the coding agent's tools. A summary line compares it with the Ollama (GPU) recommendation.
+4. **Install & use** runs `coli setup --model <id>`: it downloads the model (resumable: cancel and retry later), prepares the engine for this PC, and starts the server. Then choose **Use in chat**.
+
+Switch engines with **Engine** in the sidebar. colibri serves one model at a time; **Run all** starts it and **Stop all** stops it, and sending a message starts it if it is stopped. Saved chats remember their engine and reopen on it. The **Developer** agent works on colibri with models whose family supports tool calls (Qwen3.6/Qwen3-Coder, Qwen3.8, GLM, DeepSeek V4, Kimi, MiMo). The context size is the one colibri was set up with (`coli setup --ctx`).
+
+Everything stays local: AI Assist runs your own `coli` launcher and talks to colibri's server on `127.0.0.1`. Only colibri's model download uses the internet.
+
 ## Configuration
 
 `OLLAMA_HOST` optionally sets the Ollama server address; the default is `http://localhost:11434`.
+
+`COLIBRI_DIR` points to the colibri folder; `COLIBRI_HOST` overrides colibri's server address (default: the one `coli status` reports, normally `http://127.0.0.1:8000`); `COLI_API_KEY` is sent if your colibri server requires one. `AI_ASSIST_ENGINE` (`ollama` or `colibri`) chooses the engine at startup; otherwise the last engine used is kept.
 
 `OLLAMA_MODEL` can name your preferred installed model at startup. Otherwise, the app uses an already running model or the first installed model. You can change the selection in the sidebar.
 
