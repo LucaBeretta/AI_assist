@@ -28,17 +28,30 @@ class _Node:
         self.children = []
 
     def nodes(self, tag=None):
-        for child in self.children:
-            if isinstance(child, _Node):
+        pending = [iter(self.children)]
+        while pending:
+            child = next(pending[-1], None)
+            if child is None:
+                pending.pop()
+            elif isinstance(child, _Node):
                 if tag is None or child.tag == tag:
                     yield child
-                yield from child.nodes(tag)
+                pending.append(iter(child.children))
 
     def text(self):
-        return " ".join(" ".join(
-            child.text() if isinstance(child, _Node) else child
-            for child in self.children
-        ).split())
+        # Flatten once, avoiding repeated copies and whitespace normalization
+        # at every ancestor of a text node on deeply nested pages.
+        parts = []
+        pending = [iter(self.children)]
+        while pending:
+            child = next(pending[-1], None)
+            if child is None:
+                pending.pop()
+            elif isinstance(child, _Node):
+                pending.append(iter(child.children))
+            else:
+                parts.append(child)
+        return " ".join(" ".join(parts).split())
 
     def has_classes(self, *classes):
         return set(classes).issubset(self.attrs.get("class", "").split())

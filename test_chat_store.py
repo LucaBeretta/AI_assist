@@ -14,6 +14,12 @@ from chat_store import ChatStore, ChatStoreError
 
 
 class ChatStoreTests(unittest.TestCase):
+    def test_legacy_appearance_preferences_are_not_reported_as_a_damaged_chat(self):
+        chat = self.store.create(model="demo")
+        (self.directory / "appearance.json").write_text('{"theme": "Dark"}', encoding="utf-8")
+        self.assertEqual([record["id"] for record in self.store.list_chats()], [chat["id"]])
+        self.assertEqual(self.store.errors, [])
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)

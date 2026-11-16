@@ -4,6 +4,7 @@ import re
 import tkinter as tk
 
 from developer_tools import extract_code_blocks
+from html_preview import is_html
 
 
 _FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})([^\r\n]*)[\r\n]*$")
@@ -101,6 +102,12 @@ def _render_code(parent, block, app, colors):
     actions.pack(side="right", padx=(4, 5), pady=3)
     copy_button = _button(app, actions, "Copy", lambda: _copy_code(panel, block["code"]), colors)
     copy_button.pack(side="left", padx=(0, 2))
+    preview = getattr(app, "preview_html_block", None)
+    if callable(preview) and is_html(block):
+        preview_button = _button(app, actions, "Preview", lambda: preview(block), colors)
+        preview_button.pack(side="left", padx=(0, 2))
+        if not block["complete"]:
+            preview_button.configure(state="disabled", cursor="arrow")
     export = getattr(app, "export_code_block", None)
     if callable(export):
         save_button = _button(app, actions, "Save as\u2026", lambda: export(block), colors)

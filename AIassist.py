@@ -1,4 +1,5 @@
 import json
+import http.client
 import os
 import queue
 import threading
@@ -13,6 +14,8 @@ import urllib.parse
 
 from model_downloads import ModelDownloadDialog
 from workspace_ui import WorkspaceMixin
+from response_metrics import response_metrics
+from backend_ui import BackendMixin
 
 
 def ollama_url():
@@ -112,11 +115,11 @@ def set_model_running(model, start=True, context_length=None):
     ollama_api("/api/generate", payload, timeout=300)
 
 
-def request_ollama(messages, model=None, context_length=None):
+def request_ollama(messages, model=None, context_length=None, on_chunk=None, on_metrics=None):
     """Send the conversation to the local Ollama chat API."""
     host = ollama_url()
     model = model or os.environ.get("OLLAMA_MODEL", "qwen3:30b")
-    payload = {"model": model, "messages": messages, "stream": False, "keep_alive": -1}
+    payload = {"model": model, "messages": messages, "stream": True, "keep_alive": -1}
     if context_length is not None:
         payload["options"] = {"num_ctx": context_length}
     request = urllib.request.Request(
@@ -128,9 +131,39 @@ def request_ollama(messages, model=None, context_length=None):
 
     try:
         with urllib.request.urlopen(request, timeout=120) as response:
-            result = json.loads(response.read().decode("utf-8"))
+            parts = []
+            received = 0
+            while True:
+                line = response.readline(1024 * 1024 + 1)
+                if not line:
+                    raise RuntimeError("The response connection closed before Ollama finished. Please retry.")
+                received += len(line)
+                if len(line) > 1024 * 1024 or received > 16 * 1024 * 1024:
+                    raise RuntimeError("Ollama returned too much chat output.")
+                if not line.strip():
+                    continue
+                result = json.loads(line)
+                if not isinstance(result, dict):
+                    raise RuntimeError("Ollama returned an invalid response.")
+                if result.get("error"):
+                    raise RuntimeError(f"Ollama could not complete the response: {result['error']}")
+                message = result.get("message", {})
+                content = message.get("content", "") if isinstance(message, dict) else None
+                if not isinstance(content, str):
+                    raise RuntimeError("Ollama returned an invalid message.")
+                if content:
+                    parts.append(content)
+                    if on_chunk:
+                        on_chunk(content)
+                if result.get("done") is True:
+                    if on_metrics:
+                        on_metrics(response_metrics(result))
+                    break
     except urllib.error.HTTPError as error:
-        details = error.read().decode("utf-8", errors="replace").strip()
+        try:
+            details = error.read(2000).decode("utf-8", errors="replace").strip()
+        finally:
+            error.close()
         raise RuntimeError(
             f"Ollama returned HTTP {error.code}: {details or error.reason}"
         ) from error
@@ -140,12 +173,13 @@ def request_ollama(messages, model=None, context_length=None):
         ) from error
     except TimeoutError as error:
         raise RuntimeError("The Ollama request timed out.") from error
-    except json.JSONDecodeError as error:
+    except (ValueError, UnicodeError) as error:
         raise RuntimeError("Ollama returned an invalid response.") from error
+    except (OSError, http.client.HTTPException) as error:
+        raise RuntimeError(f"The Ollama connection failed: {error}") from error
 
-    message = result.get("message") if isinstance(result, dict) else None
-    content = message.get("content") if isinstance(message, dict) else None
-    if not isinstance(content, str) or not content.strip():
+    content = "".join(parts)
+    if not content.strip():
         raise RuntimeError("Ollama's response did not contain a message.")
     return content.strip()
 
@@ -255,9 +289,11 @@ class OllamaAssistantBase:
             relief="flat", borderwidth=0, highlightthickness=0,
             cursor="hand2", padx=14, pady=10, **options,
         )
-        button.bind("<Enter>", lambda event: button.config(bg=hover)
+        button._appearance_bg = bg
+        button._appearance_hover = hover
+        button.bind("<Enter>", lambda event: button.config(bg=button._appearance_hover)
                     if button["state"] == "normal" else None)
-        button.bind("<Leave>", lambda event: button.config(bg=bg)
+        button.bind("<Leave>", lambda event: button.config(bg=button._appearance_bg)
                     if button["state"] == "normal" else None)
         return button
 
@@ -548,9 +584,26 @@ class OllamaAssistantBase:
 
 
     def fetch_response(self, messages, user_input, model, context_length=None):
+        request_id = self.request_serial
+        pending = []
+        last_update = time.monotonic()
+
+        def chunk(text):
+            nonlocal last_update
+            pending.append(text)
+            if time.monotonic() - last_update >= .05:
+                self.workspace_events.put(("chat_chunk", request_id, "".join(pending), None))
+                pending.clear()
+                last_update = time.monotonic()
+
         try:
-            response = (request_ollama(messages, model, context_length=context_length) if context_length is not None
-                        else request_ollama(messages, model))
+            options = dict(on_chunk=chunk, on_metrics=lambda data: self.workspace_events.put(
+                ("chat_metrics", request_id, data, None)))
+            if context_length is not None:
+                options["context_length"] = context_length
+            response = request_ollama(messages, model, **options)
+            if pending:
+                self.workspace_events.put(("chat_chunk", request_id, "".join(pending), None))
             self.response_queue.put((user_input, response, None))
         except (RuntimeError, ValueError) as error:
             self.response_queue.put((user_input, None, str(error)))
@@ -558,6 +611,8 @@ class OllamaAssistantBase:
 
     def close(self):
         self.closed = True
+        if hasattr(self, "update_checker"):
+            self.update_checker.close()
         if self.download_dialog is not None:
             self.download_dialog.close()
         if hasattr(self, "poll_id"):
@@ -566,7 +621,7 @@ class OllamaAssistantBase:
         self.root.destroy()
 
 
-class AIAssistantGUI(WorkspaceMixin, OllamaAssistantBase):
+class AIAssistantGUI(BackendMixin, WorkspaceMixin, OllamaAssistantBase):
     """Saved chats, developer tools, and capabilities over the Ollama runtime."""
 
 

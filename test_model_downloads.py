@@ -1,6 +1,7 @@
 """Exercise the download UI without fetching model weights."""
 
 import io
+import gc
 import json
 import os
 import tempfile
@@ -40,6 +41,8 @@ def variants(name):
 
 class DownloadUITests(unittest.TestCase):
     def setUp(self):
+        gc.collect()
+        self.addCleanup(gc.collect)
         try:
             self.root = tk.Tk()
         except tk.TclError as error:
@@ -83,6 +86,12 @@ class DownloadUITests(unittest.TestCase):
     def tearDown(self):
         if hasattr(self, "app"):
             self.app.close()
+            deadline = time.monotonic() + 5
+            while not self.app.closed and time.monotonic() < deadline:
+                self.root.update()
+                time.sleep(.01)
+            self.assertTrue(self.app.closed)
+            self.app.saver.thread.join(timeout=2)
         elif hasattr(self, "root"):
             self.root.destroy()
         for item in reversed(getattr(self, "patches", [])):
@@ -254,7 +263,8 @@ class DownloadUITests(unittest.TestCase):
         with patch("AIassist.request_ollama", return_value="Hello back") as request:
             self.app.send_prompt()
             self.wait(lambda: not self.app.is_waiting)
-            self.assertEqual(request.call_args.kwargs, {"context_length": 4096})
+            self.assertEqual(request.call_args.kwargs["context_length"], 4096)
+            self.assertTrue(callable(request.call_args.kwargs["on_chunk"]))
         self.assertEqual(self.app.conversation[-1]["content"], "Hello back")
 
     def test_failed_hardware_scan_can_be_retried(self):
@@ -292,7 +302,7 @@ class ContextContractTests(unittest.TestCase):
     def test_recommended_context_is_sent_to_chat_and_default_context_is_preserved(self):
         for context in (None, 4096):
             with self.subTest(context=context), patch("AIassist.urllib.request.urlopen", return_value=io.BytesIO(
-                    b'{"message":{"content":"Hello"}}')) as opened:
+                    b'{"message":{"content":"Hello"},"done":true}\n')) as opened:
                 self.assertEqual(AIassist.request_ollama([], "test:1b", context), "Hello")
                 payload = json.loads(opened.call_args.args[0].data)
                 if context is None:

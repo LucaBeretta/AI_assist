@@ -188,7 +188,8 @@ class ChatStore:
             raise ChatStoreError("Chat mode must be 'chat' or 'dev'.")
         self.errors.clear()
         try:
-            paths = sorted(path for path in self.directory.iterdir() if path.suffix == ".json")
+            paths = sorted(path for path in self.directory.iterdir()
+                           if path.suffix == ".json" and path.name != "appearance.json")
         except OSError as error:
             message = f"Could not list saved chats: {error}"
             self._note_error(message)
@@ -216,6 +217,10 @@ class ChatStore:
 
     def create(self, model="", mode="chat", title=NEW_CHAT_TITLE, project_path=""):
         """Create and persist an empty conversation."""
+        return self.save(self.new_record(model, mode, title, project_path))
+
+    def new_record(self, model="", mode="chat", title=NEW_CHAT_TITLE, project_path=""):
+        """Build an empty record without disk I/O for queued persistence."""
         now = _utc_now()
         chat = {
             "id": str(uuid.uuid4()),
@@ -233,7 +238,7 @@ class ChatStore:
             "updated_at": now,
             "_manual_title": title != NEW_CHAT_TITLE,
         }
-        return self.save(chat)
+        return chat
 
     def load(self, chat_id):
         """Read one chat, raising a diagnostic error for damaged files."""

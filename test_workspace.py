@@ -3,13 +3,14 @@
 from contextlib import ExitStack
 from copy import deepcopy
 from pathlib import Path
+import gc
 import os
 import tempfile
 import threading
 import time
 import tkinter as tk
 import unittest
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 from AIassist import AIAssistantGUI
 
@@ -28,6 +29,8 @@ def descendants(widget):
 
 class WorkspaceIntegrationTests(unittest.TestCase):
     def setUp(self):
+        gc.collect()
+        self.addCleanup(gc.collect)
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.folder = Path(self.temporary.name)
@@ -55,6 +58,7 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         self.agent_metadata = self.mocks.enter_context(patch("workspace_ui.fetch_model_capabilities",
                                                            side_effect=model_metadata))
         # This is a tripwire for any code path accidentally bypassing the fake APIs.
+        self.mocks.enter_context(patch("update_checker.UpdateChecker.check", lambda self: None))
         self.mocks.enter_context(patch("urllib.request.urlopen", side_effect=AssertionError("Network access in workspace test")))
         try:
             self.root = tk.Tk()
@@ -72,6 +76,23 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         self.assertEqual(self.app.model_name.get(), "alpha:8b")
         self.assertEqual(self.app.chat_store.directory, self.history_folder.resolve())
 
+    def test_settings_contains_update_check_and_replaces_sidebar_link(self):
+        self.assertEqual(str(self.root.cget("menu")), str(self.app.menubar))
+        self.assertEqual(self.app.menubar.entrycget(1, "label"), "Settings")
+        self.assertFalse(hasattr(self.app, "settings_button"))
+        self.assertFalse(hasattr(self.app, "backend_button"))
+        self.assertFalse(hasattr(self.app, "updates_button"))
+        self.assertEqual(self.app.settings_menu.entrycget(1, "label"), "AI backend: Ollama...")
+        self.assertEqual(self.app.settings_menu.entrycget(3, "label"), "Check for updates...")
+
+        self.app.settings_menu.invoke(0)
+        self.assertEqual(self.app.appearance.window.title(), "Settings")
+        update_button = next(
+            widget for widget in descendants(self.app.appearance.window)
+            if widget.winfo_class() == "Button" and widget.cget("text") == "Check for updates"
+        )
+        self.assertTrue(update_button.winfo_exists())
+
     def close_workspace(self):
         for release in self.worker_releases:
             release.set()
@@ -82,6 +103,13 @@ class WorkspaceIntegrationTests(unittest.TestCase):
             self.root.tk.call("after", "cancel", scheduled)
         if self.app is not None and not self.app.closed:
             self.app.close()
+            deadline = time.monotonic() + 5
+            while not self.app.closed and time.monotonic() < deadline:
+                self.root.update()
+                time.sleep(.01)
+            if not self.app.closed:
+                self.fail(f"Close stalled: {self.app.status_label.cget('text')}; pending={self.app.pending_saves}; callbacks={self.callback_errors}")
+            self.app.saver.thread.join(timeout=2)
         elif self.app is None:
             self.root.destroy()
         for finished in self.worker_finished:
@@ -97,6 +125,304 @@ class WorkspaceIntegrationTests(unittest.TestCase):
             time.sleep(.01)
         self.fail(f"Timed out waiting for {description}; status={self.app.status_label.cget('text')!r}; "
                   f"callback errors={[str(error[1]) for error in self.callback_errors]!r}")
+
+    def load_saved(self, identity):
+        self.app.saver.jobs.join()
+        self.app.process_saves()
+        return self.app.chat_store.load(identity)
+
+    def list_saved(self):
+        self.app.saver.jobs.join()
+        self.app.process_saves()
+        return self.app.chat_store.list_chats()
+
+    def test_context_picker_persists_choice_and_can_restore_server_default(self):
+        self.app.start_new_chat()
+        self.app.context_choice.set("32768")
+        self.app.change_context()
+        self.assertEqual(self.app.model_contexts["alpha:8b"], 32768)
+        identity = self.app.current_chat["id"]
+        self.assertEqual(self.load_saved(identity)["context_length"], 32768)
+        self.app.context_choice.set("Server default")
+        self.app.change_context()
+        self.assertNotIn("alpha:8b", self.app.model_contexts)
+        self.assertIsNone(self.load_saved(identity)["context_length"])
+
+    def test_generated_html_has_browser_preview_action(self):
+        self.app.display_message("AI Assist", "```html\n<h1>Preview me</h1>\n```", "ai")
+        self.assertEqual(str(self.app.preview_code_button.cget("state")), "normal")
+        with patch.object(self.app.html_previews, "preview_block", return_value="http://127.0.0.1:1234/index.html") as preview:
+            self.app.preview_code_button.invoke()
+        self.assertIn("Preview me", preview.call_args.args[0]["code"])
+        buttons = [widget for widget in descendants(self.app.message_frame)
+                   if isinstance(widget, tk.Button) and widget.cget("text") == "Preview"]
+        self.assertEqual(len(buttons), 1)
+
+    def test_selected_project_html_is_previewed_in_browser(self):
+        (self.project / "page.html").write_text("<h1>Project</h1>", encoding="utf-8")
+        self.enter_project()
+        index = next(index for index, item in enumerate(self.app.project_files) if item["path"] == "page.html")
+        self.app.files_list.selection_set(index)
+        with patch.object(self.app.html_previews, "preview_file", return_value="http://127.0.0.1:1234/page.html") as preview:
+            self.app.preview_file_button.invoke()
+        preview.assert_called_once_with(str(self.project.resolve()), "page.html")
+
+    def test_deploy_button_runs_vercel_flow_and_displays_result(self):
+        (self.project / "index.html").write_text("<h1>Website</h1>", encoding="utf-8")
+        self.app.open_deploy()
+        dialog = self.app.deploy_dialog
+        dialog.folder.set(str(self.project))
+        dialog.project.set("my-site")
+        dialog.domain.set("example.com")
+        dialog.token.set("test-token")
+        result = dict(url="https://my-site-abcd.vercel.app", domain="example.com", domain_assigned=True, domain_error="")
+        with patch("deploy_dialog.deploy_project", return_value=result) as deploy:
+            dialog.deploy_button.invoke()
+            self.wait_for(lambda: not dialog.running and dialog.result is not None, "Vercel deployment result")
+        self.assertEqual(deploy.call_args.args[:4], (self.project.resolve(), "my-site", "", "example.com"))
+        self.assertEqual(deploy.call_args.kwargs["token"], "test-token")
+        self.assertIn("Deployment created", dialog.status.cget("text"))
+        with patch("deploy_dialog.webbrowser.open") as browser:
+            dialog.open_button.invoke()
+            browser.assert_called_once_with(result["url"])
+        self.assertFalse(self.app.busy())
+
+    def test_deployment_can_be_stopped_and_does_not_freeze_workspace(self):
+        from vercel_deploy import DeploymentCancelled
+        (self.project / "index.html").write_text("Website", encoding="utf-8")
+        self.app.open_deploy()
+        dialog = self.app.deploy_dialog
+        dialog.folder.set(str(self.project))
+        dialog.project.set("my-site")
+        entered, finished = threading.Event(), threading.Event()
+        dialog.token.set("test-token")
+        self.worker_finished.append(finished)
+
+        def deploy(folder, project, scope, domain, output, cancel, *, token):
+            entered.set()
+            try:
+                cancel.wait(3)
+                raise DeploymentCancelled("Stopped locally")
+            finally:
+                finished.set()
+
+        with patch("deploy_dialog.deploy_project", side_effect=deploy):
+            dialog.start()
+            self.wait_for(entered.is_set, "deployment worker")
+            self.assertTrue(self.app.busy())
+            self.assertEqual(str(self.app.choose_project_button.cget("state")), "disabled")
+            dialog.cancel_button.invoke()
+            self.wait_for(lambda: not dialog.running, "deployment cancellation")
+        self.assertIn("Stopped locally", dialog.status.cget("text"))
+        self.assertFalse(self.app.busy())
+
+    def test_deploy_rejects_desktop_folder_before_starting_worker(self):
+        self.app.open_deploy()
+        dialog = self.app.deploy_dialog
+        dialog.folder.set(str(self.project))
+        dialog.project.set("my-site")
+        with patch("deploy_dialog.deploy_project") as deploy:
+            dialog.start()
+        deploy.assert_not_called()
+        self.assertFalse(dialog.running)
+        self.assertIn("Tkinter", dialog.status.cget("text"))
+
+    def test_shared_note_is_sent_to_a_new_chat(self):
+        self.app.shared_memory.remember("Remember that my preferred language is Python.")
+        self.app.start_new_chat()
+        self.set_input("Which language should we use?")
+        self.app.send_prompt()
+        self.wait_for(lambda: not self.app.is_waiting, "shared memory response")
+        sent = self.request.call_args.args[0]
+        self.assertEqual(sent[0]["role"], "system")
+        self.assertIn("my preferred language is Python", sent[0]["content"])
+
+    def test_add_to_shared_memory_saves_locally_without_model_claims(self):
+        self.set_input("Add to shared memory: I prefer Python")
+        self.app.send_prompt()
+        self.request.assert_not_called()
+        from shared_memory import SharedMemory
+        self.assertEqual(SharedMemory(self.app.chat_store.directory).notes, "I prefer Python")
+        self.assertIn("Saved to shared memory", self.app.conversation[-1]["content"])
+        self.assertEqual(self.app.input_box.get("1.0", "end-1c"), "")
+
+    def test_add_this_to_memory_saves_previous_assistant_reply(self):
+        self.app.conversation.append(dict(role="assistant", content="Use semicolon separators for exports."))
+        self.set_input("Add this to shared memory")
+        self.app.send_prompt()
+        self.request.assert_not_called()
+        self.assertEqual(self.app.shared_memory.notes, "Use semicolon separators for exports.")
+
+    def test_memory_message_button_persists_the_selected_message(self):
+        self.app.display_message("AI Assist", "Use UTF-8 encoding.", "ai")
+        button = next(widget for widget in descendants(self.app.message_frame)
+                      if isinstance(widget, tk.Button) and widget.cget("text") == "Add to memory")
+        button.invoke()
+        self.assertEqual(self.app.shared_memory.notes, "Use UTF-8 encoding.")
+
+    def test_disabled_or_failed_memory_save_keeps_prompt_and_reports_error(self):
+        self.set_input("Add to shared memory: Keep this note")
+        self.app.shared_memory.save("", False)
+        self.app.send_prompt()
+        self.assertIn("disabled", self.app.status_label.cget("text"))
+        self.assertEqual(self.app.input_box.get("1.0", "end-1c"), "Add to shared memory: Keep this note")
+        self.app.shared_memory.save("", True)
+        with patch.object(self.app.shared_memory, "save", side_effect=OSError("disk full")):
+            self.app.send_prompt()
+        self.assertIn("disk full", self.app.status_label.cget("text"))
+        self.request.assert_not_called()
+        self.assertFalse(self.app.conversation)
+
+    def test_shared_memory_is_sent_to_developer_agent(self):
+        self.app.shared_memory.save("Use semicolon separators for CSV files.")
+        self.enter_project()
+        with patch("workspace_ui.run_agent", return_value={"assistant_text": "Ready"}) as agent:
+            self.set_input("Create a CSV export")
+            self.app.send_prompt()
+            self.wait_for(lambda: not self.app.is_waiting, "developer shared memory")
+        sent = agent.call_args.args[3]
+        self.assertTrue(any("Use semicolon separators" in item.get("content", "") for item in sent))
+
+    def test_shared_memory_editor_saves_and_can_disable_recall(self):
+        self.app.open_shared_memory()
+        window = self.app.memory_window
+        editor = next(widget for widget in descendants(window) if isinstance(widget, tk.Text))
+        editor.insert("1.0", "Prefer small dependencies.")
+        checkbox = next(widget for widget in descendants(window) if isinstance(widget, tk.Checkbutton))
+        checkbox.invoke()
+        save = next(widget for widget in descendants(window) if isinstance(widget, tk.Button) and widget.cget("text") == "Save")
+        save.invoke()
+        self.assertEqual(self.app.shared_memory.notes, "Prefer small dependencies.")
+        self.assertFalse(self.app.shared_memory.enabled)
+
+    def test_deleted_chat_is_removed_from_shared_recall(self):
+        self.set_input("I use semicolon CSV exports.")
+        self.app.conversation.append(dict(role="user", content="I use semicolon CSV exports."))
+        self.app.persist_current()
+        identity = self.app.current_chat["id"]
+        self.load_saved(identity)
+        self.assertIn("semicolon", self.app.shared_memory.context("CSV", self.app.history_records))
+        with patch("workspace_ui.messagebox.askyesno", return_value=True):
+            self.app.delete_chat()
+        self.assertEqual(self.app.shared_memory.context("CSV", self.app.history_records), "")
+
+    def test_new_file_review_opens_save_picker_and_cancel_releases_agent(self):
+        decision = dict(approved=False, event=threading.Event(), action=dict(kind="write_file",
+            path="new.py", destination=str(self.project / "new.py"), content="pass\n", exists=False))
+        with patch("workspace_ui.filedialog.asksaveasfilename", return_value="") as picker:
+            self.app.review_action(decision)
+        picker.assert_called_once()
+        self.assertTrue(decision["event"].is_set())
+        self.assertFalse(decision["approved"])
+        self.assertFalse(self.app.approvals)
+        self.assertFalse((self.project / "new.py").exists())
+
+    def test_picking_another_file_returns_destination_for_fresh_review(self):
+        chosen = self.folder / "chosen.py"
+        decision = dict(approved=False, event=threading.Event(), action=dict(kind="write_file",
+            path="new.py", destination=str(self.project / "new.py"), content="pass\n", exists=False))
+        with patch("workspace_ui.filedialog.asksaveasfilename", return_value=str(chosen)):
+            self.app.review_action(decision)
+        self.assertTrue(decision["event"].is_set())
+        self.assertTrue(decision["approved"])
+        self.assertEqual(decision["destination"], str(chosen.resolve()))
+        self.assertFalse(chosen.exists())
+
+    def test_typed_folder_is_created_selected_and_saved(self):
+        self.app.show_section("dev")
+        destination = self.folder / "new workspace" / "output"
+        self.app.project_directory.set(str(destination))
+        self.app.use_project_button.invoke()
+        self.wait_for(lambda: self.app.project_ready, "typed destination folder")
+        self.assertTrue(destination.is_dir())
+        self.assertEqual(self.app.project_path, str(destination.resolve()))
+        self.set_input("Create a README here")
+        self.app.persist_current()
+        saved = self.load_saved(self.app.current_chat["id"])
+        self.assertEqual(saved["project_path"], str(destination.resolve()))
+
+    def test_file_cannot_be_selected_as_output_folder(self):
+        self.app.show_section("dev")
+        self.app.project_directory.set(str(self.project / "main.py"))
+        self.app.use_project_directory()
+        self.assertFalse(self.app.project_ready)
+        self.assertIn("Could not use this folder", self.app.status_label.cget("text"))
+
+    def test_stream_is_visible_before_completion_and_final_message_appears_once(self):
+        release = threading.Event()
+        self.worker_releases.append(release)
+
+        def stream(messages, model, on_chunk, on_metrics, **options):
+            time.sleep(.06)
+            on_chunk("Hello ")
+            release.wait(3)
+            on_chunk("world")
+            on_metrics(dict(eval_count=10, eval_duration=2000000000))
+            return "Hello world"
+
+        self.request.side_effect = stream
+        self.set_input("Stream a reply")
+        self.app.send_prompt()
+        self.wait_for(lambda: self.app.stream_card is not None, "partial streaming response")
+        self.assertTrue(self.app.is_waiting)
+        self.assertEqual(self.app.stream_text.get("1.0", "end-1c"), "Hello ")
+        self.assertEqual(len(self.app.conversation), 1)
+        release.set()
+        self.wait_for(lambda: not self.app.is_waiting, "completed stream")
+        self.assertIsNone(self.app.stream_card)
+        self.assertEqual(self.app.conversation[-1]["content"], "Hello world")
+        self.assertEqual(len(self.app.conversation), 2)
+        self.assertIn("5.0 tokens/s", self.app.status_label.cget("text"))
+
+    def test_slow_save_keeps_ui_responsive_and_pending_chat_can_be_reopened(self):
+        entered, release = threading.Event(), threading.Event()
+        self.worker_releases.append(release)
+        original = self.app.chat_store.save
+
+        def blocked(record):
+            entered.set()
+            release.wait(3)
+            return original(record)
+
+        with patch.object(self.app.chat_store, "save", side_effect=blocked):
+            self.set_input("Draft waiting for disk")
+            self.app.persist_current()
+            identity = self.app.current_chat["id"]
+            self.assertTrue(entered.wait(1))
+            ticked = []
+            self.root.after(1, lambda: ticked.append(True))
+            self.wait_for(lambda: ticked, "UI timer during blocked disk write")
+            self.app.new_chat_button.invoke()
+            self.app.open_chat(identity)
+            self.assertEqual(self.app.input_box.get("1.0", "end-1c"), "Draft waiting for disk")
+            release.set()
+            self.app.saver.jobs.join()
+        self.assertEqual(self.load_saved(identity)["draft"], "Draft waiting for disk")
+
+    def test_failed_save_prevents_close_and_can_be_retried(self):
+        self.set_input("Keep this draft after a disk failure")
+        with patch.object(self.app.chat_store, "save", side_effect=OSError("disk full")):
+            self.app.close()
+            self.wait_for(lambda: not self.app.closing, "save error during close")
+            self.assertFalse(self.app.closed)
+            self.assertTrue(self.root.winfo_exists())
+            self.assertIn("disk full", self.app.status_label.cget("text"))
+            self.assertEqual(self.app.input_box.get("1.0", "end-1c"), "Keep this draft after a disk failure")
+        self.app.persist_current()
+        identity = self.app.current_chat["id"]
+        self.assertEqual(self.load_saved(identity)["draft"], "Keep this draft after a disk failure")
+
+    def test_failed_delete_restores_history_row(self):
+        self.app.start_new_chat()
+        identity = self.app.current_chat["id"]
+        self.load_saved(identity)
+        with patch.object(self.app.chat_store, "delete", side_effect=OSError("file locked")), patch(
+                "workspace_ui.messagebox.askyesno", return_value=True):
+            self.app.delete_chat()
+            self.wait_for(lambda: not self.app.pending_saves, "delete failure")
+        self.assertTrue(any(record["id"] == identity for record in self.app.history_records))
+        self.assertIn("file locked", self.app.status_label.cget("text"))
+        self.assertEqual(self.load_saved(identity)["id"], identity)
 
     def set_input(self, text):
         self.assertEqual(str(self.app.input_box.cget("state")), "normal")
@@ -157,7 +483,7 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         return run
 
     def test_new_chat_and_resume_preserve_messages_draft_and_context(self):
-        self.assertEqual(self.app.chat_store.list_chats(), [], "Startup should not create empty chat files")
+        self.assertEqual(self.list_saved(), [], "Startup should not create empty chat files")
         self.app.model_contexts["alpha:8b"] = 8192
         self.request.return_value = "Exact café answer\n```python\nprint('工具')\n```"
         self.set_input("Explain this project")
@@ -166,11 +492,11 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         original_id = self.app.current_chat["id"]
         messages = [{"role": "user", "content": "Explain this project"},
                     {"role": "assistant", "content": self.request.return_value}]
-        self.assertEqual(self.app.chat_store.load(original_id)["messages"], messages)
+        self.assertEqual(self.load_saved(original_id)["messages"], messages)
         draft = "  Follow up later\nwith café and 工具  "
         self.set_input(draft)
-        self.wait_for(lambda: self.app.chat_store.load(original_id)["draft"] == draft, "debounced draft save")
-        original = self.app.chat_store.load(original_id)
+        self.wait_for(lambda: self.load_saved(original_id)["draft"] == draft, "debounced draft save")
+        original = self.load_saved(original_id)
         self.app.new_chat_button.invoke()
         new_id = self.app.current_chat["id"]
         self.assertNotEqual(new_id, original_id)
@@ -178,10 +504,10 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         self.assertEqual(self.app.heading_label.cget("text"), "New chat")
         self.assertEqual(self.app.conversation, [])
         self.assertEqual(self.app.input_box.get("1.0", "end-1c"), "")
-        self.assertEqual(len(self.app.chat_store.list_chats()), 2)
-        self.assertEqual(self.app.chat_store.load(new_id)["messages"], [])
-        self.assertEqual(self.app.chat_store.load(new_id)["draft"], "")
-        self.assertEqual(self.app.chat_store.load(original_id), original)
+        self.assertEqual(len(self.list_saved()), 2)
+        self.assertEqual(self.load_saved(new_id)["messages"], [])
+        self.assertEqual(self.load_saved(new_id)["draft"], "")
+        self.assertEqual(self.load_saved(original_id), original)
         self.assertEqual(self.app.history_buttons[0].cget("text"), "New chat")
         self.assertEqual(self.app.history_buttons[0].winfo_manager(), "pack")
         original_button = next(button for button in self.app.history_buttons if button.cget("text") == original["title"])
@@ -190,7 +516,8 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         self.assertEqual(self.app.conversation, messages)
         self.assertEqual(self.app.input_box.get("1.0", "end-1c"), draft)
         self.assertEqual(self.app.model_contexts["alpha:8b"], 8192)
-        self.request.assert_called_once_with([messages[0]], "alpha:8b", context_length=8192)
+        self.request.assert_called_once_with([messages[0]], "alpha:8b", context_length=8192,
+                                             on_chunk=ANY, on_metrics=ANY)
 
     def test_new_chat_is_visible_after_clearing_a_nonmatching_history_search(self):
         self.app.history_search.set("a query that never matches New chat")
@@ -202,7 +529,7 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         self.assertEqual(self.app.history_buttons[0].cget("text"), "New chat")
         self.assertEqual(self.app.history_buttons[0].winfo_manager(), "pack")
         self.assertEqual(self.app.history_buttons[0].cget("bg"), self.app.COLORS["sidebar_hover"])
-        self.assertEqual(self.app.chat_store.load(identity)["messages"], [])
+        self.assertEqual(self.load_saved(identity)["messages"], [])
 
     def test_model_change_saves_draft_under_original_model(self):
         self.app.model_contexts["alpha:8b"] = 8192
@@ -211,7 +538,7 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         self.app.model_name.set("beta:3b")
         self.app.select_model()
         self.wait_for(lambda: not self.app.busy(), "new model startup")
-        records = self.app.chat_store.list_chats()
+        records = self.list_saved()
         self.assertEqual(len(records), 1)
         alpha = records[0]
         self.assertEqual((alpha["model"], alpha["draft"], alpha["context_length"]),
@@ -223,9 +550,9 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         self.app.open_chat(alpha["id"])
         self.assertEqual(self.app.model_name.get(), "alpha:8b")
         self.assertEqual(self.app.input_box.get("1.0", "end-1c"), alpha_draft)
-        beta = next(record for record in self.app.chat_store.list_chats() if record["model"] == "beta:3b")
+        beta = next(record for record in self.list_saved() if record["model"] == "beta:3b")
         self.assertEqual(beta["draft"], beta_draft)
-        self.assertEqual(self.app.chat_store.load(alpha["id"])["model"], "alpha:8b")
+        self.assertEqual(self.load_saved(alpha["id"])["model"], "alpha:8b")
 
     def test_project_scan_disables_model_changes_without_relabeling_history(self):
         self.enter_project()
@@ -238,7 +565,7 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         self.assertFalse(self.app.select_recommended_model("beta:3b", 8192))
         self.assertEqual(self.app.model_name.get(), "alpha:8b")
         self.app.persist_current()
-        saved = self.app.chat_store.load(identity)
+        saved = self.load_saved(identity)
         self.assertEqual(saved["model"], "alpha:8b")
         self.assertEqual(saved["draft"], "Keep the alpha developer draft")
         self.app.project_loading = False
@@ -254,7 +581,7 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         self.app.open_chat(default["id"])
         self.assertNotIn("alpha:8b", self.app.model_contexts)
         self.app.persist_current()
-        self.assertIsNone(self.app.chat_store.load(default["id"])["context_length"])
+        self.assertIsNone(self.load_saved(default["id"])["context_length"])
 
     def test_capabilities_navigation_preserves_draft_and_returns_to_chat(self):
         draft = "Keep these chat notes\n雪"
@@ -263,7 +590,7 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         identity = self.app.current_chat["id"]
         self.assertEqual(self.app.current_section, "capabilities")
         self.assertEqual(self.app.heading_label.cget("text"), "Capabilities")
-        self.assertEqual(self.app.chat_store.load(identity)["draft"], draft)
+        self.assertEqual(self.load_saved(identity)["draft"], draft)
         self.app.nav_buttons["chat"].invoke()
         self.assertEqual(self.app.current_section, "chat")
         self.assertEqual(self.app.current_chat["id"], identity)
@@ -295,7 +622,7 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         self.set_input("Resume this project later")
         self.app.persist_current()
         identity = self.app.current_chat["id"]
-        saved = self.app.chat_store.load(identity)
+        saved = self.load_saved(identity)
         self.assertEqual(saved["project_files"], ["main.py"])
         self.assertNotIn("project_context", saved)
         self.app.nav_buttons["chat"].invoke()
@@ -345,7 +672,7 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         self.assertEqual(run.call_args.args[1:3], ("alpha:8b", str(self.project.resolve())))
         self.assertEqual(run.call_args.kwargs["context_length"], 8192)
         identity = self.app.current_chat["id"]
-        saved = self.app.chat_store.load(identity)
+        saved = self.load_saved(identity)
         self.assertEqual(saved["messages"], [{"role": "user", "content": "Improve main.py"},
                                              {"role": "assistant", "content": "Updated main.py and checked the result."}])
         self.assertEqual(saved["activity"], self.app.dev_activity)
@@ -397,7 +724,7 @@ class WorkspaceIntegrationTests(unittest.TestCase):
             self.app.send_button.invoke()
             self.wait_for(lambda: not self.app.is_waiting, "native agent history")
             identity = self.app.current_chat["id"]
-            self.assertEqual(self.app.chat_store.load(identity)["agent_history"], native)
+            self.assertEqual(self.load_saved(identity)["agent_history"], native)
             self.app.new_chat_button.invoke()
             self.app.open_chat(identity)
             self.wait_for(lambda: not self.app.project_loading, "restored native agent history")
@@ -408,7 +735,7 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         self.assertEqual(received[1][1:-1], [item for item in native if item["role"] != "system"])
         self.assertEqual(received[1][-1], {"role": "user", "content": "What did the file say?"})
         self.assertEqual(sum(item["role"] == "system" for item in received[1]), 1)
-        saved = self.app.chat_store.load(identity)
+        saved = self.load_saved(identity)
         self.assertEqual([item["role"] for item in saved["messages"]], ["user", "assistant", "user", "assistant"])
         native_tool = next(item for item in saved["agent_history"] if item["role"] == "tool")
         self.assertEqual(native_tool, {"role": "tool", "tool_name": "read_file", "content": self.original_code})
@@ -485,7 +812,7 @@ class WorkspaceIntegrationTests(unittest.TestCase):
             self.wait_for(lambda: not self.app.is_waiting, "metadata failure")
         run.assert_not_called()
         self.assertEqual(self.app.status_label.cget("text"), error)
-        saved = self.app.chat_store.load(self.app.current_chat["id"])
+        saved = self.load_saved(self.app.current_chat["id"])
         self.assertEqual(saved["messages"], [{"role": "user", "content": "Inspect after reconnecting"}])
         self.assertFalse(self.app.agent_active)
         self.assertEqual(str(self.app.send_button.cget("state")), "normal")

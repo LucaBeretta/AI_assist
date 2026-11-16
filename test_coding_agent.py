@@ -106,6 +106,41 @@ class AgentTests(unittest.TestCase):
         self.assertIn("+new\n\\ No newline", self.approvals[0]["diff"])
         self.assertIn("Successfully updated", self.tool_results(result)[0])
 
+    def test_user_picked_destination_gets_its_own_overwrite_review(self):
+        selected = self.root.parent / "picked.py"
+        selected.write_text("old\n", encoding="utf-8")
+        reviews = []
+
+        def approve(action):
+            reviews.append(action)
+            if not action.get("destination_selected"):
+                return {"approved": True, "destination": str(selected)}
+            self.assertTrue(action["exists"])
+            self.assertIn("-old", action["diff"])
+            self.assertEqual(selected.read_text(encoding="utf-8"), "old\n")
+            return True
+
+        result, _ = self.run_responses([tool_response("write_file", {"path": "new.py", "content": "new\n"}),
+                                        final_response()], approval=approve)
+        self.assertEqual(len(reviews), 2)
+        self.assertEqual(selected.read_text(encoding="utf-8"), "new\n")
+        self.assertFalse((self.root / "new.py").exists())
+        self.assertIn(str(selected), self.tool_results(result)[0])
+
+    def test_denied_review_at_picked_destination_leaves_both_files_untouched(self):
+        selected = self.root.parent / "picked.py"
+        selected.write_text("keep", encoding="utf-8")
+
+        def approve(action):
+            if not action.get("destination_selected"):
+                return {"approved": True, "destination": str(selected)}
+            return False
+
+        self.run_responses([tool_response("write_file", {"path": "new.py", "content": "replace"}),
+                            final_response()], approval=approve)
+        self.assertEqual(selected.read_text(encoding="utf-8"), "keep")
+        self.assertFalse((self.root / "new.py").exists())
+
     def test_denial_and_approval_failure_never_write_or_execute(self):
         for approval in (lambda action: False, lambda action: 1,
                          lambda action: (_ for _ in ()).throw(RuntimeError("dialog closed"))):
@@ -284,6 +319,30 @@ class AgentTests(unittest.TestCase):
         self.assertLess(len(json.dumps(messages)), 13000)
         self.assertTrue(any(message.get("content") == "Fix the latest bug." for message in messages))
         self.assertLessEqual(prediction, 1024)
+
+    def test_long_followup_keeps_original_request_and_recent_dialogue(self):
+        history = [
+            {"role": "user", "content": "Use CSV files and write everything into the selected folder."},
+            {"role": "assistant", "content": "We agreed to use semicolon separators."},
+            {"role": "tool", "tool_name": "read_file", "content": "x" * 20000},
+            {"role": "user", "content": "Now add the export button."},
+        ]
+        messages, _ = coding_agent._request_messages(history, 4096)
+        text = "\n".join(message.get("content", "") for message in messages)
+        self.assertIn("Use CSV files", text)
+        self.assertIn("semicolon separators", text)
+        self.assertIn("Now add the export button.", text)
+        self.assertNotIn("x" * 100, text)
+        self.assertLess(len(json.dumps(messages)), 13000)
+
+    def test_conversation_excerpts_are_bounded_and_do_not_echo_tool_calls(self):
+        history = [{"role": "user", "content": "Remember CSV. " + "x" * 20000}]
+        history += [{"role": "assistant", "content": "Earlier plan " * 1000,
+                     "tool_calls": [{"function": {"name": "write_file", "arguments": {}}}]}] * 10
+        memory = coding_agent._conversation_memory(history, 1000)
+        self.assertLessEqual(len(memory[0]["content"]), 1000)
+        self.assertIn("Remember CSV.", memory[0]["content"])
+        self.assertNotIn("tool_calls", memory[0])
 
     def test_native_chat_protocol_uses_tools_options_and_bounded_http_response(self):
         with patch("coding_agent.urllib.request.urlopen", return_value=io.BytesIO(json.dumps(final_response("Done")).encode())) as opened:

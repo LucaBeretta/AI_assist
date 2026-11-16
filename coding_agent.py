@@ -24,6 +24,7 @@ import urllib.parse
 import urllib.request
 
 import developer_tools as projects
+from response_metrics import metrics_summary
 
 
 _MAX_FILE_BYTES = 64000
@@ -125,16 +126,20 @@ def _snapshot(target):
     return data
 
 
-def _approved(approve_action, action):
+def _approved(approve_action, action, allow_destination=False):
     try:
         approved = approve_action(dict(action))
     except Exception as error:
         raise ValueError(f"Approval could not be completed; no action was taken: {str(error)[:250]}") from error
+    if (allow_destination and isinstance(approved, dict) and approved.get("approved") is True
+            and isinstance(approved.get("destination"), str) and approved["destination"]):
+        return approved["destination"]
     if approved is not True:
         raise ValueError("The user declined this action. No action was taken; do not repeat it.")
+    return True
 
 
-def _write_file(project, arguments, approve_action, cancel_event, on_event):
+def _write_file(project, arguments, approve_action, cancel_event, on_event, destination_selected=False):
     target, path = _safe_target(project, arguments.get("path"))
     content = arguments.get("content")
     if not isinstance(content, str):
@@ -157,9 +162,23 @@ def _write_file(project, arguments, approve_action, cancel_event, on_event):
     diff = "".join(line if line.endswith("\n") else line + "\n\\ No newline at end of file\n"
                    for line in diff_lines)
     _check_cancelled(cancel_event)
-    _approved(approve_action, {"kind": "write_file", "path": path, "content": content,
-                             "diff": diff, "exists": old_bytes is not None})
+    approved = _approved(approve_action, {"kind": "write_file", "path": path, "content": content,
+                             "diff": diff, "exists": old_bytes is not None, "destination": str(target),
+                             "destination_selected": destination_selected},
+                         allow_destination=old_bytes is None and not destination_selected)
     _check_cancelled(cancel_event)
+    if isinstance(approved, str):
+        chosen = Path(approved).expanduser()
+        if not chosen.is_absolute():
+            raise ValueError("The chosen save destination must be an absolute file path.")
+        chosen = chosen.resolve()
+        if chosen != target:
+            # Only the approval UI can supply this override. Recompute the
+            # diff at that destination and require review before any write.
+            projects._check_components(chosen.parts)
+            result = _write_file(chosen.parent, {"path": chosen.name, "content": content},
+                                 approve_action, cancel_event, on_event, destination_selected=True)
+            return f"User-selected destination: {chosen}\n{result}\nThe originally proposed path was not written."
 
     def recheck():
         current, _ = _safe_target(project, path)
@@ -319,6 +338,22 @@ def _execute_tool(project, name, arguments, approve_action, cancel_event, on_eve
     raise ValueError(f"Unknown tool '{name}'. Use one of the provided tools.")
 
 
+def _conversation_memory(history, limit):
+    """Keep the original request and recent dialogue as bounded excerpts."""
+    dialogue = [(index, message) for index, message in enumerate(history)
+                if message.get("role") in {"user", "assistant"} and message.get("content", "").strip()]
+    if not dialogue:
+        return []
+    first_user = next((item for item in dialogue if item[1]["role"] == "user"), dialogue[0])
+    selected = dict([first_user] + dialogue[-4:])
+    allowance = max(1, (limit - 180) // len(selected) - 30)
+    excerpts = [f"{message['role']}: {_shorten(message['content'], allowance, 'Excerpt shortened.')}"
+                for _, message in sorted(selected.items())]
+    text = ("Earlier conversation excerpts (incomplete historical context; tool results are omitted):\n"
+            + "\n".join(excerpts))
+    return [{"role": "assistant", "content": _shorten(text, limit, "Earlier dialogue shortened.")}]
+
+
 def _request_messages(history, context_length):
     """Bound requests; retain the latest user instruction and recent tool work."""
     prediction = min(1024, max(256, context_length // 4))
@@ -330,7 +365,8 @@ def _request_messages(history, context_length):
                 "Earlier context shortened.")} for message in history[:latest] if message.get("role") == "system"][:2]
     user = {"role": "user", "content": _shorten(history[latest].get("content", ""), budget // 2,
             "Selected context shortened; use file tools to inspect the project.")}
-    remaining = max(1000, budget - len(json.dumps(systems + [user])))
+    memory = _conversation_memory(history[:latest], budget // 4)
+    remaining = max(1000, budget - len(json.dumps(systems + memory + [user], ensure_ascii=False)))
     groups = []
     for message in history[latest + 1:]:
         if message.get("role") == "tool" and groups and groups[-1][0].get("tool_calls"):
@@ -350,7 +386,7 @@ def _request_messages(history, context_length):
             break
         else:
             break
-    return [{"role": "system", "content": _SYSTEM}] + systems + [user] + kept, prediction
+    return [{"role": "system", "content": _SYSTEM}] + systems + memory + [user] + kept, prediction
 
 
 def _chat(host, model, messages, context_length, cancel_event):
@@ -396,7 +432,7 @@ def _chat(host, model, messages, context_length, cancel_event):
 
 
 def run_agent(host, model, project_root, messages, on_event, approve_action,
-              cancel_event=None, context_length=4096, max_steps=12):
+              cancel_event=None, context_length=4096, max_steps=12, chat_fn=None):
     """Run tools on a worker thread, returning the updated native chat history.
 
     ``approve_action`` must return exactly True to allow a reviewed operation.
@@ -425,7 +461,10 @@ def run_agent(host, model, project_root, messages, on_event, approve_action,
     _emit(on_event, "status", "Developer agent is inspecting the project.")
     for step in range(max_steps):
         _check_cancelled(cancel_event)
-        response = _chat(host, model, history, context_length, cancel_event)
+        response = (chat_fn or _chat)(host, model, history, context_length, cancel_event)
+        summary = metrics_summary(response)
+        if summary:
+            _emit(on_event, "metrics", f"Step {step + 1}: {summary}")
         message = response.get("message")
         if not isinstance(message, dict) or not isinstance(message.get("content", ""), str):
             raise RuntimeError("Ollama returned an unreadable agent message.")

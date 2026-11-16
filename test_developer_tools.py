@@ -17,6 +17,16 @@ from developer_tools import (
 
 
 class ProjectToolsTests(unittest.TestCase):
+    def test_binary_control_detection_preserves_allowed_whitespace(self):
+        for code in range(32):
+            data = ("before" + chr(code) + "after").encode("utf-8")
+            with self.subTest(code=code):
+                if chr(code) in "\t\n\r\f":
+                    self.assertEqual(developer_tools._decode_text(data), data.decode("utf-8"))
+                else:
+                    with self.assertRaisesRegex(ValueError, "Binary"):
+                        developer_tools._decode_text(data)
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
