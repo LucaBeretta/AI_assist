@@ -1452,7 +1452,6 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
                 self.log_activity(data)
                 if data.get("type") == "tool_start" and isinstance(data.get("step"), int):
                     self.agent_step = data["step"]
-                if data.get("type") == "status":
                 if data.get("type") in ("status", "hybrid_stage"):
                     self.set_status(data.get("text", "Agent working..."))
             elif request == self.request_serial and kind == "approval":
