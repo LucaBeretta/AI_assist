@@ -100,6 +100,33 @@ _MALFORMED_CALL = (
 )
 
 
+# When a command keeps failing with the same error, models without "thinking"
+# tend to retry blind fixes. After the 2nd identical failure ask for a
+# line-by-line trace; after the 4th, ask it to stop and report.
+_STUCK_NUDGES = {
+    2: ("The same failure happened again: {error}\n"
+        "Stop guessing. Read the exact lines that produce this value again. For the failing input, write "
+        "down line by line what each variable and each string operation produces (e.g. what a slice "
+        "returns, character by character). Only then make one small fix. The original task still applies."),
+    4: ("The same failure keeps happening: {error}\n"
+        "Do not try another fix. Stop now and report: the failing line, what you tried, and your best guess "
+        "at the cause."),
+}
+
+
+def _failure_signature(tool, result):
+    """The decisive error line of a failed command, used to spot a model going in circles."""
+    if tool != "run_command" or not isinstance(result, str) or not result.startswith("Command exited with code"):
+        return ""
+    if result.startswith("Command exited with code 0"):
+        return ""
+    lines = [line.strip() for line in result.splitlines() if line.strip()]
+    # Prefer the failing test's name (stable while the model tries fixes), then the error line.
+    tests = [line for line in lines if re.match(r"^(FAIL|ERROR): ", line)]
+    errors = [line for line in lines if re.match(r"^\w*(Error|Exception)\b", line)]
+    return (tests or errors or lines[-1:] or [""])[-1][:200]
+
+
 def _retry_message(history):
     """Ask for a readable retry and repeat the task, so the retry is not taken as the new task."""
     task = next((message.get("content", "") for message in reversed(history)
@@ -628,6 +655,7 @@ def _run_agent(host, model, project_root, messages, on_event, approve_action,
     if not isinstance(messages, list) or not messages or any(not isinstance(message, dict) for message in messages):
         raise ValueError("Provide at least one conversation message.")
     history = copy.deepcopy(messages)
+    failures = {}
     output_limit = min(12000, max(2000, context_length * 2))
     _emit(on_event, "status", "Developer agent is inspecting the project.")
     for step in range(max_steps):
@@ -701,7 +729,15 @@ def _run_agent(host, model, project_root, messages, on_event, approve_action,
             _emit(on_event, "tool_result", result, tool=name, step=step + 1)
             history.append({"role": "tool", "tool_name": name,
                             "content": _shorten(result, output_limit)})
-    final = f"Developer agent stopped after {max_steps} steps. Review the activity and changes before continuing."
+            signature = _failure_signature(name, result)
+            if signature:
+                failures[signature] = failures.get(signature, 0) + 1
+                nudge = _STUCK_NUDGES.get(failures[signature])
+                if nudge:
+                    history.append({"role": "user", "content": nudge.format(error=signature)})
+                    _emit(on_event, "status", f"Step {step + 1}: the same failure repeated; asking the model to "
+                          + ("trace the code line by line." if failures[signature] == 2 else "stop and report."))
+    final =f"Developer agent stopped after {max_steps} steps. Review the activity and changes before continuing."
     history.append({"role": "assistant", "content": final})
     _emit(on_event, "status", final)
     return {"messages": history, "assistant_text": final}

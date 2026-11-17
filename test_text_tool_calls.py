@@ -107,6 +107,27 @@ class AgentRecoveryTests(unittest.TestCase):
         self.assertIn("Check main.py", retries[0]["content"])
         self.assertTrue(any("retry" in event.get("text", "") for event in self.events if isinstance(event, dict)))
 
+    def test_repeated_test_failure_asks_for_a_trace_then_a_report(self):
+        failing = ("Command exited with code 1.\n.F\n=====\nFAIL: test_format (test_m.T.test_format)\n"
+                   "AssertionError: '1.' != '{}'\nFAILED (failures=1)")
+        outputs = iter([failing.format("1k"), failing.format("1M"), failing.format("1k"), failing.format("1k")])
+        command = {"message": {"role": "assistant", "content": "", "tool_calls": [
+            {"function": {"name": "run_command", "arguments": {"command": "python -m unittest"}}}]}}
+        with patch("coding_agent._run_command", side_effect=lambda *args, **kwargs: next(outputs)):
+            result = self.run_replies([command, command, command, command, reply("Stopped: [:-2] is wrong.")])
+        nudges = [message["content"] for message in result["messages"] if message["role"] == "user"][1:]
+        self.assertEqual(len(nudges), 2)
+        self.assertIn("line by line", nudges[0])
+        self.assertIn("FAIL: test_format", nudges[0])
+        self.assertIn("Stop now and report", nudges[1])
+
+    def test_failure_signature_ignores_success_and_other_tools(self):
+        self.assertEqual(coding_agent._failure_signature("run_command", "Command exited with code 0.\nOK"), "")
+        self.assertEqual(coding_agent._failure_signature("read_file", "Command exited with code 1."), "")
+        self.assertEqual(coding_agent._failure_signature(
+            "run_command", "Command exited with code 1.\nSyntaxError: invalid decimal literal"),
+            "SyntaxError: invalid decimal literal")
+
     def test_default_step_limit_is_raised_and_offered(self):
         self.assertEqual(DEFAULT_MAX_STEPS, 20)
         self.assertIn(DEFAULT_MAX_STEPS, STEP_LIMIT_CHOICES)
