@@ -13,6 +13,7 @@ import json
 import os
 from pathlib import Path, PureWindowsPath
 import queue
+import re
 import signal
 import stat
 import subprocess
@@ -30,6 +31,9 @@ from response_metrics import metrics_summary
 _MAX_FILE_BYTES = 64000
 # Sizes the user can allow the agent to read and edit (Developer > Files).
 FILE_LIMIT_CHOICES = (64000, 128000, 256000, 512000, 1000000)
+# Steps (model turns) the user can allow per task (Developer > Files).
+STEP_LIMIT_CHOICES = (12, 20, 30)
+DEFAULT_MAX_STEPS = 20
 # Per-run settings for the worker thread running the agent: the chosen file
 # limit and the model's context, which decides when a file is read in parts.
 _run = threading.local()
@@ -50,7 +54,8 @@ _SYSTEM = (
     "edit, and verify the selected project. Never claim to have edited files or run a "
     "command unless a successful tool result confirms it. Read files before editing. "
     "To change an existing file use edit_file: copy old_text exactly from read_file output "
-    "(a few unique lines) and give its replacement. Use write_file only for new files or "
+    "(only the few lines that change plus enough context to be unique, never the whole file) "
+    "and give its replacement. After a failed test, read the relevant lines again before editing. Use write_file only for new files or "
     "complete rewrites. Large files are returned in parts: read the rest with start_line and "
     "end_line. Every edit and shell command is reviewed "
     "by the user; respect denials and explain what remains. Request narrow read_file line "
@@ -74,7 +79,8 @@ TOOLS = [
             {"path": {"type": "string"}, "start_line": {"type": "integer", "minimum": 1},
              "end_line": {"type": "integer", "minimum": 1}}, ("path",)),
     _schema("edit_file", "Request approval to replace one exact block of text in an existing project file. "
-            "old_text must match the file exactly and appear once (or set replace_all).",
+            "old_text must match the file exactly and appear once (or set replace_all). "
+            "Keep old_text short: only the lines being changed plus a little unique context.",
             {"path": {"type": "string"}, "old_text": {"type": "string"}, "new_text": {"type": "string"},
              "replace_all": {"type": "boolean"}}, ("path", "old_text", "new_text")),
     _schema("write_file", "Request approval to create a new project text file, or replace one completely, using its complete contents.",
@@ -83,6 +89,60 @@ TOOLS = [
             {"command": {"type": "string"}, "description": {"type": "string"},
              "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 120}}, ("command",)),
 ]
+
+
+_TEXT_CALL = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
+_XML_FUNCTION = re.compile(r"<function=([A-Za-z_][\w-]*)>(.*?)</function>", re.DOTALL)
+_XML_PARAMETER = re.compile(r"<parameter=([A-Za-z_]\w*)>\n?(.*?)\n?</parameter>", re.DOTALL)
+_CALL_MARKERS = ("<tool_call>", "<function=")
+_MALFORMED_CALL = (
+    "Your last message contained a tool call written as text that could not be read "
+    "(it was malformed or cut off). Nothing was executed. Call the tool again using native "
+    "tool calling, and keep edit_file old_text to the few lines that change."
+)
+
+
+def _typed_value(tool, key, text):
+    """Convert an XML parameter to the JSON type the tool schema declares."""
+    schema = next((item["function"]["parameters"]["properties"] for item in TOOLS
+                   if item["function"]["name"] == tool), {})
+    kind = schema.get(key, {}).get("type")
+    if kind == "integer" and re.fullmatch(r"\s*-?\d+\s*", text):
+        return int(text)
+    if kind == "boolean" and text.strip().lower() in {"true", "false"}:
+        return text.strip().lower() == "true"
+    return text
+
+
+def text_tool_calls(content):
+    """Recover tool calls a model wrote into its text instead of native tool_calls.
+
+    Supports Qwen's XML form (``<tool_call><function=name><parameter=key>value</parameter>
+    </function></tool_call>``) and the JSON form (``<tool_call>{"name": ..., "arguments": {...}}
+    </tool_call>``). Returns ``(calls, remaining_text, malformed)``; ``malformed`` is True when
+    the text looks like a tool call that could not be read (for example, cut off).
+    """
+    calls = []
+    for body in _TEXT_CALL.findall(content):
+        function = _XML_FUNCTION.search(body)
+        if function:
+            name = function.group(1)
+            arguments = {key: _typed_value(name, key, value)
+                         for key, value in _XML_PARAMETER.findall(function.group(2))}
+            calls.append({"function": {"name": name, "arguments": arguments}})
+            continue
+        try:
+            data = json.loads(body)
+        except ValueError:
+            return [], content, True
+        if not isinstance(data, dict) or not isinstance(data.get("name"), str):
+            return [], content, True
+        calls.append({"function": {"name": data["name"], "arguments": data.get("arguments", {})}})
+    remaining = _TEXT_CALL.sub("", content).strip()
+    malformed = not calls and any(marker in content for marker in _CALL_MARKERS)
+    if calls and any(marker in remaining for marker in _CALL_MARKERS):
+        malformed = True
+    return calls, remaining, malformed
 
 
 class AgentCancelled(RuntimeError):
@@ -517,7 +577,7 @@ def _chat(host, model, messages, context_length, cancel_event):
 
 
 def run_agent(host, model, project_root, messages, on_event, approve_action,
-              cancel_event=None, context_length=4096, max_steps=12, chat_fn=None, file_limit=None):
+              cancel_event=None, context_length=4096, max_steps=DEFAULT_MAX_STEPS, chat_fn=None, file_limit=None):
     """Run the agent with ``file_limit`` bytes as the largest file it may read or
     edit (default 64,000; FILE_LIMIT_CHOICES lists what the app offers)."""
     if file_limit is None:
@@ -533,7 +593,7 @@ def run_agent(host, model, project_root, messages, on_event, approve_action,
 
 
 def _run_agent(host, model, project_root, messages, on_event, approve_action,
-               cancel_event=None, context_length=4096, max_steps=12, chat_fn=None):
+               cancel_event=None, context_length=4096, max_steps=DEFAULT_MAX_STEPS, chat_fn=None):
     """Run tools on a worker thread, returning the updated native chat history.
 
     ``approve_action`` must return exactly True to allow a reviewed operation.
@@ -565,11 +625,22 @@ def _run_agent(host, model, project_root, messages, on_event, approve_action,
         response = (chat_fn or _chat)(host, model, history, context_length, cancel_event)
         summary = metrics_summary(response)
         if summary:
-            _emit(on_event, "metrics", f"Step {step + 1}: {summary}")
+            _emit(on_event, "metrics", f"Step {step + 1}/{max_steps}: {summary}")
         message = response.get("message")
         if not isinstance(message, dict) or not isinstance(message.get("content", ""), str):
             raise RuntimeError("Ollama returned an unreadable agent message.")
         calls = copy.deepcopy(message.get("tool_calls") or [])
+        content = message.get("content", "")
+        if not calls and content:
+            calls, remaining, malformed = text_tool_calls(content)
+            if malformed:
+                history.append({"role": "assistant", "content": content})
+                history.append({"role": "user", "content": _MALFORMED_CALL})
+                _emit(on_event, "status", f"Step {step + 1}: the model wrote an unreadable tool call; asking it to retry.")
+                continue
+            if calls:
+                content = remaining
+                _emit(on_event, "status", f"Step {step + 1}: recovered a tool call the model wrote as text.")
         if not isinstance(calls, list) or len(calls) > _MAX_TOOL_CALLS:
             raise RuntimeError("Ollama returned too many or invalid tool calls in one step.")
         argument_errors = {}
@@ -589,7 +660,7 @@ def _run_agent(host, model, project_root, messages, on_event, approve_action,
                 # malformed argument JSON. Its tool result explains the error.
                 function["arguments"] = {}
                 argument_errors[index] = str(error)
-        assistant = {"role": "assistant", "content": message.get("content", "")}
+        assistant = {"role": "assistant", "content": content}
         if isinstance(message.get("thinking"), str) and message["thinking"]:
             assistant["thinking"] = message["thinking"]
         if calls:
