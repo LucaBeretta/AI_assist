@@ -91,6 +91,7 @@ class WorkspaceMixin(FeedbackMixin, DeveloperPanelMixin):
         "muted": "#657089", "border": "#dce3ed", "accent": "#5260d8",
         "accent_hover": "#424fc0", "user": "#eef2ff", "success": "#237b64", "error": "#b34545",
         "code_background": "#f3f5f9", "code_header": "#e8edf4",
+        "input_border": "#8190a8",
     }
 
     def __init__(self, root):
@@ -265,7 +266,7 @@ class WorkspaceMixin(FeedbackMixin, DeveloperPanelMixin):
                                         c["sidebar"], c["ink"], c["sidebar_hover"], anchor="w")
         self.memory_button.config(pady=9, padx=16)
         self.memory_button.pack(fill="x", padx=14, pady=2)
-        tk.Label(self.sidebar, text="Recent chats", bg=c["sidebar"], fg=c["muted"],
+        tk.Label(self.sidebar, text="Search chats", bg=c["sidebar"], fg=c["muted"],
                  font=("Segoe UI", 9, "bold"), anchor="w").pack(fill="x", padx=22, pady=(24, 10))
         self.history_search = tk.StringVar(self.root)
         search = ttk.Entry(self.sidebar, textvariable=self.history_search, font=("Segoe UI", 10))
@@ -336,17 +337,21 @@ class WorkspaceMixin(FeedbackMixin, DeveloperPanelMixin):
 
         composer_area = tk.Frame(self.chat_frame, bg=c["background"])
         composer_area.pack(side="bottom", fill="x", pady=(12, 22))
-        self.composer_frame = tk.Frame(composer_area, bg=c["surface"], highlightbackground=c["border"], highlightthickness=1)
+        self.composer_frame = tk.Frame(composer_area, bg=c["surface"], highlightbackground=c["input_border"], highlightthickness=1)
         self.composer_frame.pack(fill="x", padx=32)
         composer_area.bind("<Configure>", lambda event: self.composer_frame.pack_configure(
             padx=max(24, (event.width - 880) // 2)))
+        self.composer_label = tk.Label(self.composer_frame, text="Message", bg=c["surface"], fg=c["muted"],
+                                       font=("Segoe UI", 9, "bold"), anchor="w")
+        self.composer_label.pack(fill="x", padx=20, pady=(12, 0))
         self.input_box = tk.Text(self.composer_frame, height=3, width=1, wrap="word", font=("Segoe UI", 12),
                                  bg=c["surface"], fg=c["ink"], insertbackground=c["accent"], selectbackground=c["user"],
-                                 relief="flat", borderwidth=0, highlightthickness=0, padx=20, pady=16, undo=True)
+                                 selectforeground=c["ink"], relief="flat", borderwidth=0, highlightthickness=0,
+                                 padx=20, pady=10, undo=True)
         self.input_box.pack(fill="x")
         self.input_box.bind("<Return>", self.handle_enter)
         self.input_box.bind("<FocusIn>", lambda event: self.composer_frame.config(highlightbackground=c["accent"]))
-        self.input_box.bind("<FocusOut>", lambda event: self.composer_frame.config(highlightbackground=c["border"]))
+        self.input_box.bind("<FocusOut>", lambda event: self.composer_frame.config(highlightbackground=c["input_border"]))
         footer = tk.Frame(self.composer_frame, bg=c["surface"])
         footer.pack(fill="x", padx=14, pady=(0, 12))
         self.composer_hint = tk.Label(footer, text="Choose a model to begin", bg=c["surface"], fg=c["muted"], font=("Segoe UI", 9), anchor="w", wraplength=330, justify="left")
@@ -473,6 +478,7 @@ class WorkspaceMixin(FeedbackMixin, DeveloperPanelMixin):
         for label in ("Rename chat", "Export chat...", "Delete chat"):
             self.chat_menu.entryconfigure(label, state="normal" if self.current_chat else "disabled")
         ready = bool(self.model_name.get()) and not busy and (self.current_mode != "dev" or self.project_ready)
+        self.composer_label.config(text="Describe your task" if self.current_mode == "dev" else "Message")
         self.input_box.config(state="normal" if ready else "disabled")
         if self.is_waiting and not self.closing:
             # While an answer or the agent runs, the same button stops it.
@@ -482,6 +488,8 @@ class WorkspaceMixin(FeedbackMixin, DeveloperPanelMixin):
                                     bg=self.COLORS["accent"] if ready else self.COLORS["border"])
         if self.project_loading:
             self.composer_hint.config(text="Preparing project context...")
+        elif not self.model_name.get():
+            self.composer_hint.config(text="Choose a model in the sidebar to start")
         elif self.current_mode == "dev":
             self.composer_hint.config(text="Choose a project to begin" if not self.project_path else "Edits and commands are reviewed before they run")
         else:

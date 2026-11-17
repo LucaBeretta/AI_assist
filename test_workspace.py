@@ -106,6 +106,17 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         self.app.hide_model_controls()
         self.assertEqual(self.app.model_controls_window.state(), "withdrawn")
 
+    def test_composer_is_labelled_and_has_a_visible_boundary(self):
+        for theme in ("Light", "Dark", "Warm"):
+            self.app.appearance.apply(theme, "Modern")
+            self.assertEqual(self.app.composer_label.cget("text"), "Message")
+            self.assertEqual(self.app.composer_frame.cget("highlightbackground"), self.app.COLORS["input_border"])
+            self.assertEqual(self.app.input_box.cget("selectforeground"), self.app.COLORS["ink"])
+        self.app.model_name.set("")
+        self.app.update_controls()
+        self.assertIn("Choose a model", self.app.composer_hint.cget("text"))
+        self.assertEqual(str(self.app.send_button.cget("state")), "disabled")
+
     def test_suggestion_cards_reflow_in_the_developer_workspace(self):
         self.root.deiconify()
         self.root.geometry("1280x860")

@@ -5,6 +5,21 @@ import tkinter as tk
 from tkinter import ttk, font
 
 
+def _set_native_appearance(window, theme):
+    """Keep Cocoa controls in the same light/dark mode as the explicit palette."""
+    try:
+        if window.tk.call("tk", "windowingsystem") != "aqua":
+            return
+        mode = "darkaqua" if theme == "Dark" else "aqua"
+        if getattr(window, "_appearance_native_mode", None) != mode:
+            window.tk.call("tk::unsupported::MacWindowStyle", "appearance", window._w, mode)
+            window._appearance_native_mode = mode
+    except tk.TclError:
+        # Older supported builds may not expose the per-window Cocoa command.
+        # The explicit widget palette and clam styles still apply.
+        pass
+
+
 class Appearance:
     def __init__(self, app):
         self.app = app
@@ -15,6 +30,7 @@ class Appearance:
             "muted": "#787166", "border": "#dfdbd1", "accent": "#b65e40",
             "accent_hover": "#9f4f34", "user": "#f0ede5", "success": "#42816b", "error": "#a64137",
             "code_background": "#f5f2eb", "code_header": "#ece8de",
+            "input_border": "#968875",
         }
         self.themes = {
             "Warm": self.warm,
@@ -31,6 +47,8 @@ class Appearance:
                          success="#70d3b0", error="#ff9d93",
                          code_background="#171d28", code_header="#242d3c"),
         }
+        self.themes["Light"]["input_border"] = "#8190a8"
+        self.themes["Dark"]["input_border"] = "#71809a"
         # Keep the same dictionary: existing event callbacks hold references to it.
         self.theme = "Light"
         self.style = "Modern"
@@ -100,6 +118,8 @@ class Appearance:
                                        original["weight"], original["slant"]))
 
     def walk(self, widget, colors, previous):
+        if isinstance(widget, (tk.Tk, tk.Toplevel)):
+            _set_native_appearance(widget, self.theme)
         self.update_widget(widget, colors, previous)
         for child in widget.winfo_children():
             self.walk(child, colors, previous)
@@ -122,7 +142,7 @@ class Appearance:
         for name in ("TCombobox", "Model.TCombobox", "TEntry"):
             native.configure(name, fieldbackground=c["surface"], foreground=c["ink"],
                              background=c["surface"], arrowcolor=c["muted"], padding=(10, 7),
-                             bordercolor=c["border"], lightcolor=c["border"], darkcolor=c["border"],
+                             bordercolor=c["input_border"], lightcolor=c["input_border"], darkcolor=c["input_border"],
                              insertcolor=c["ink"], selectbackground=c["accent"], selectforeground="white")
             native.map(name,
                        fieldbackground=[("disabled", c["sidebar"]), ("readonly", c["surface"])],

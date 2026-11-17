@@ -687,6 +687,10 @@ class AIAssistantGUI(BackendMixin, WorkspaceMixin, OllamaAssistantBase):
 
 
 if __name__ == "__main__":
-    root = tk.Tk()
+    from gui_runtime import GUIRuntimeError, create_root
+    try:
+        root = create_root()
+    except GUIRuntimeError as error:
+        raise SystemExit(f"AI Assist could not start: {error}") from None
     app = AIAssistantGUI(root)
     root.mainloop()

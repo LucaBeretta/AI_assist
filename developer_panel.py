@@ -45,6 +45,8 @@ class DeveloperPanelMixin:
                  font=("Segoe UI", 12, "bold"), anchor="w").pack(side="left")
 
         self.project_directory = tk.StringVar(self.root)
+        tk.Label(self.dev_panel, text="Project folder", bg=c["sidebar"], fg=c["muted"],
+                 font=("Segoe UI", 9), anchor="w").pack(fill="x", padx=14, pady=(0, 5))
         self.project_entry = ttk.Entry(self.dev_panel, textvariable=self.project_directory,
                                        font=("Segoe UI", 9))
         self.project_entry.pack(fill="x", padx=14)

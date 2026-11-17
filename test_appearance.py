@@ -7,8 +7,9 @@ import tkinter as tk
 from tkinter import ttk
 from types import SimpleNamespace
 import unittest
+from unittest.mock import Mock
 
-from appearance import Appearance
+from appearance import Appearance, _set_native_appearance
 from chat_store import ChatStore
 from message_widgets import render_message
 from ui_widgets import HoverButton
@@ -16,6 +17,53 @@ from workspace_ui import WorkspaceMixin
 
 
 class AppearanceTests(unittest.TestCase):
+    def test_native_mac_controls_follow_the_app_theme_when_available(self):
+        calls = []
+        def call(*args):
+            calls.append(args)
+            return "aqua" if args == ("tk", "windowingsystem") else ""
+        window = SimpleNamespace(tk=SimpleNamespace(call=call), _w=".preview")
+        for theme in ("Dark", "Light", "Warm"):
+            _set_native_appearance(window, theme)
+        self.assertEqual([args for args in calls if args[0] == "tk::unsupported::MacWindowStyle"], [
+            ("tk::unsupported::MacWindowStyle", "appearance", ".preview", "darkaqua"),
+            ("tk::unsupported::MacWindowStyle", "appearance", ".preview", "aqua"),
+        ])
+        window = SimpleNamespace(tk=SimpleNamespace(call=Mock(return_value="win32")), _w=".")
+        _set_native_appearance(window, "Dark")
+        window.tk.call.assert_called_once_with("tk", "windowingsystem")
+
+    def test_missing_mac_appearance_command_is_nonfatal(self):
+        native = Mock(side_effect=["aqua", tk.TclError("Unsupported appearance command")])
+        window = SimpleNamespace(tk=SimpleNamespace(call=native), _w=".")
+        _set_native_appearance(window, "Dark")
+        self.assertFalse(hasattr(window, "_appearance_native_mode"))
+
+    def test_entry_text_and_outline_remain_distinct_across_themes(self):
+        appearance = Appearance(self.app)
+        entry = ttk.Entry(self.root)
+        entry.insert(0, "Project folder")
+        native = ttk.Style(self.root)
+
+        def contrast(first, second):
+            def luminance(color):
+                channels = [value / 65535 for value in self.root.winfo_rgb(color)]
+                linear = [value / 12.92 if value <= .04045 else ((value + .055) / 1.055) ** 2.4
+                          for value in channels]
+                return sum(weight * value for weight, value in zip((.2126, .7152, .0722), linear))
+            values = sorted((luminance(first), luminance(second)))
+            return (values[1] + .05) / (values[0] + .05)
+
+        for theme in ("Light", "Dark", "Warm", "Light"):
+            appearance.apply(theme, "Modern")
+            background = native.lookup("TEntry", "fieldbackground")
+            self.assertGreaterEqual(contrast(native.lookup("TEntry", "foreground"), background), 4.5)
+            self.assertGreaterEqual(contrast(native.lookup("TEntry", "bordercolor"), background), 3)
+            disabled_bg = native.lookup("TEntry", "fieldbackground", state=("disabled",))
+            disabled_fg = native.lookup("TEntry", "foreground", state=("disabled",))
+            self.assertGreaterEqual(contrast(disabled_fg, disabled_bg), 3)
+            self.assertEqual(entry.get(), "Project folder")
+
     def setUp(self):
         self.folder = tempfile.TemporaryDirectory()
         self.addCleanup(self.folder.cleanup)
