@@ -16,7 +16,8 @@ import unittest
 from unittest.mock import patch
 
 from AIassist import AIAssistantGUI
-from colibri_panel import card_text, comparison_text
+from colibri_panel import card_text, comparison_text, download_text
+from colibri_launcher import transfer_metrics
 from test_colibri_launcher import CATALOG, FakeGateway, completion, join_workers, make_fake_colibri
 
 
@@ -26,6 +27,18 @@ def ollama_metadata(host, model):
 
 
 class PanelTextTests(unittest.TestCase):
+    def test_download_speed_and_remaining_time(self):
+        self.assertIn("50.0 MB/s  |  About 2m 5s remaining",
+                      download_text("model", 1e9, 2e9, 50e6, 125))
+        self.assertIn("About 1h 1m remaining", download_text("model", 0, 2e9, eta=3661))
+        self.assertEqual(download_text("model", None, None), "Downloading model: ? / ?")
+        self.assertNotIn("MB/s", download_text("model", 0, 1, rate=0))
+        for invalid in (True, -1, float("nan"), float("inf"), "50"):
+            self.assertEqual(transfer_metrics({"install": {"rate": invalid, "eta_seconds": invalid}}),
+                             (None, None))
+        self.assertEqual(transfer_metrics({}), (None, None))
+        self.assertEqual(transfer_metrics({"install": {"rate": 10, "eta_seconds": 0}}), (10, 0))
+
     def test_cards_and_comparison(self):
         coder = dict(CATALOG[0], tools=True)
         glm = dict(CATALOG[1], tools=True)
@@ -208,10 +221,12 @@ class ColibriWorkspaceTests(unittest.TestCase):
             panel.refresh()
             self.wait_for(lambda: not panel.loading and any(row["id"] == "qwen36-35b" for row, _ in panel.card_buttons),
                           "new catalog")
+            panel.context_choice.set("Automatic")
             with patch("colibri_panel.messagebox.askyesno", return_value=True):
                 panel.choose(next(row for row, _ in panel.card_buttons if row["id"] == "qwen36-35b"))
             self.wait_for(lambda: panel.installing is None and not panel.loading, "fake install", timeout=20)
             self.assertEqual(self.state()["model"], "qwen36-35b")
+            self.assertEqual(json.loads((self.colibri / "c" / "setup.json").read_text())["ctx"], 0)
             self.assertIn("Qwen3.6-35B is set up and starting", panel.message.cget("text"))
             replacement = FakeGateway([], model="qwen36-35b")
             self.addCleanup(replacement.close)
@@ -288,6 +303,9 @@ class ColibriWorkspaceTests(unittest.TestCase):
     def test_missing_colibri_folder_keeps_the_server_only_mode(self):
         with patch.dict(os.environ, {"COLIBRI_DIR": ""}), patch("colibri_launcher.find_directory", return_value=None):
             self.app.colibri_dir = None
+            # Use the fixture's closed port, even when a real Colibri server is
+            # running on the normal port on this development machine.
+            self.app.colibri_url = self.gateway.url + "/v1"
             self.gateway.close()
             self.app.engine_choice.set("Colibri")
             self.app.choose_engine()

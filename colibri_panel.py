@@ -18,6 +18,19 @@ def readable(value):
     return f"{value / 1e9:.1f} GB" if isinstance(value, (int, float)) else "?"
 
 
+def download_text(model, done, total, rate=None, eta=None):
+    text = f"Downloading {model}: {readable(done)} / {readable(total)}"
+    if rate is not None and rate > 0:
+        text += f"  |  {rate / 1e6:.1f} MB/s"
+    if eta is not None:
+        seconds = max(0, int(eta))
+        hours, remainder = divmod(seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        remaining = f"{hours}h {minutes}m" if hours else (f"{minutes}m {seconds}s" if minutes else f"{seconds}s")
+        text += f"  |  About {remaining} remaining"
+    return text
+
+
 def context_label(value):
     return "Automatic" if not value else f"{value:,} tokens"
 
@@ -80,10 +93,10 @@ def load_worker(events, request, directory):
 
 
 def install_worker(events, directory, row, cancel_event, ctx=None):
-    def progress(phase, done, total):
-        events.put(("progress", row["id"], (phase, done, total), None))
+    def progress(phase, done, total, rate=None, eta=None):
+        events.put(("progress", row["id"], (phase, done, total, rate, eta), None))
     try:
-        colibri_client.install_model(directory, row["id"], progress, cancel_event, ctx=ctx or None)
+        colibri_client.install_model(directory, row["id"], progress, cancel_event, ctx=ctx)
         events.put(("installed", row["id"], row, None))
     except colibri_client.ColibriCancelled as error:
         events.put(("installed", row["id"], row, "cancelled: " + str(error)))
@@ -399,10 +412,10 @@ class ColibriRecommendationsPanel:
                 self.update_comparison()
                 self.update_controls()
             elif kind == "progress" and request == self.installing and not self.cancel_event.is_set():
-                phase, done, total = data
+                phase, done, total, rate, eta = data
                 if phase == "download" and total:
                     self.progress.config(value=min(100, max(0, done / total * 100)))
-                    self.message.config(text=f"Downloading {request}: {readable(done)} / {readable(total)}")
+                    self.message.config(text=download_text(request, done, total, rate, eta))
                 elif phase:
                     self.message.config(text=f"colibri setup: {phase}...")
             elif kind == "context" and request == self.installing:

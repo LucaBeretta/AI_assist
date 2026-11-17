@@ -16,6 +16,7 @@ from model_downloads import ModelDownloadDialog
 from workspace_ui import WorkspaceMixin
 from response_metrics import response_metrics
 from backend_ui import BackendMixin
+from ui_widgets import HoverButton
 
 
 def ollama_url():
@@ -278,22 +279,23 @@ class OllamaAssistantBase:
     def configure_styles(self):
         style = ttk.Style(self.root)
         style.theme_use("clam")
+        c = self.COLORS
         style.configure(
-            "Model.TCombobox", padding=(10, 10), arrowsize=14,
-            fieldbackground="#252f43", background="#252f43",
-            foreground="#f5f7fc", arrowcolor="#bdc8db",
-            bordercolor="#35415a", lightcolor="#35415a", darkcolor="#35415a",
+            "Model.TCombobox", padding=(10, 7), arrowsize=12,
+            fieldbackground=c["surface"], background=c["sidebar"],
+            foreground=c["ink"], arrowcolor=c["muted"],
+            bordercolor=c["border"], lightcolor=c["border"], darkcolor=c["border"],
         )
         style.map(
             "Model.TCombobox",
-            fieldbackground=[("readonly", "#252f43"), ("disabled", "#20283a")],
-            foreground=[("disabled", "#8f9bb0"), ("readonly", "#f5f7fc")],
-            selectbackground=[("readonly", "#252f43")],
-            selectforeground=[("readonly", "#f5f7fc")],
-            bordercolor=[("focus", "#8294fa")],
+            fieldbackground=[("disabled", c["sidebar"]), ("readonly", c["surface"])],
+            foreground=[("disabled", c["muted"]), ("readonly", c["ink"])],
+            selectbackground=[("readonly", c["surface"])],
+            selectforeground=[("readonly", c["ink"])],
+            bordercolor=[("focus", c["accent"])],
         )
         style.configure(
-            "Chat.Vertical.TScrollbar", background="#ccd3df", troughcolor=self.COLORS["background"],
+            "Chat.Vertical.TScrollbar", background=c["border"], troughcolor=c["background"],
             borderwidth=0, width=8, gripcount=0, troughborderwidth=0,
             lightcolor=self.COLORS["background"], darkcolor=self.COLORS["background"],
             bordercolor=self.COLORS["background"],
@@ -303,37 +305,41 @@ class OllamaAssistantBase:
                 ("Vertical.Scrollbar.thumb", {"expand": "1", "sticky": "nswe"}),
             ]}),
         ])
-        style.map("Chat.Vertical.TScrollbar", background=[("active", "#aeb9cd")])
+        style.map("Chat.Vertical.TScrollbar", background=[("active", c["muted"])])
         style.configure(
-            "Sidebar.Vertical.TScrollbar", background="#35415a", troughcolor=self.COLORS["sidebar"],
+            "Sidebar.Vertical.TScrollbar", background=c["border"], troughcolor=c["sidebar"],
             borderwidth=0, width=6, gripcount=0, troughborderwidth=0,
             lightcolor=self.COLORS["sidebar"], darkcolor=self.COLORS["sidebar"],
             bordercolor=self.COLORS["sidebar"],
         )
         style.layout("Sidebar.Vertical.TScrollbar", style.layout("Chat.Vertical.TScrollbar"))
+        style.configure("Code.Horizontal.TScrollbar", background=c["border"],
+                        troughcolor=c.get("code_background", c["background"]),
+                        borderwidth=0, width=8, gripcount=0)
+        style.layout("Code.Horizontal.TScrollbar", [
+            ("Horizontal.Scrollbar.trough", {"sticky": "ew", "children": [
+                ("Horizontal.Scrollbar.thumb", {"expand": "1", "sticky": "nswe"}),
+            ]}),
+        ])
+        style.map("Code.Horizontal.TScrollbar", background=[("active", c["muted"])])
         style.configure(
             "Activity.Horizontal.TProgressbar", background=self.COLORS["accent"],
-            troughcolor="#e7eaf4", borderwidth=0, thickness=3,
+            troughcolor=c["sidebar_hover"], borderwidth=0, thickness=3,
         )
-        self.root.option_add("*TCombobox*Listbox.background", "#252f43")
-        self.root.option_add("*TCombobox*Listbox.foreground", "#f5f7fc")
-        self.root.option_add("*TCombobox*Listbox.selectBackground", "#4c61d8")
+        self.root.option_add("*TCombobox*Listbox.background", c["surface"])
+        self.root.option_add("*TCombobox*Listbox.foreground", c["ink"])
+        self.root.option_add("*TCombobox*Listbox.selectBackground", c["accent"])
+        self.root.option_add("*TCombobox*Listbox.selectForeground", "white")
         self.root.option_add("*TCombobox*Listbox.font", ("Segoe UI", 10))
 
     def button(self, parent, text, command, bg, fg, hover, **options):
-        button = tk.Button(
+        button = HoverButton(
             parent, text=text, command=command, bg=bg, fg=fg,
             activebackground=hover, activeforeground=fg,
-            disabledforeground="#8794aa", font=("Segoe UI", 10),
+            disabledforeground=self.COLORS["muted"], font=("Segoe UI", 10),
             relief="flat", borderwidth=0, highlightthickness=0,
             cursor="hand2", padx=14, pady=10, **options,
         )
-        button._appearance_bg = bg
-        button._appearance_hover = hover
-        button.bind("<Enter>", lambda event: button.config(bg=button._appearance_hover)
-                    if button["state"] == "normal" else None)
-        button.bind("<Leave>", lambda event: button.config(bg=button._appearance_bg)
-                    if button["state"] == "normal" else None)
         return button
 
 

@@ -62,7 +62,8 @@ FAKE_COLI = textwrap.dedent('''\
         model = args[args.index("--model") + 1]
         ctx = int(args[args.index("--ctx") + 1]) if "--ctx" in args else None
         for done in (0, 50, 100):
-            state["install"] = {"phase": "download", "done": done, "total": 100, "running": True}
+            state["install"] = {"phase": "download", "done": done, "total": 100, "running": True,
+                                "rate": 25, "eta_seconds": (100 - done) / 25}
             save(state)
             time.sleep(state.get("step_seconds", 0.3))
         state.update(model=model, ready=True, server="ready", install={"phase": "started", "running": False})
@@ -245,7 +246,8 @@ class LauncherTests(unittest.TestCase):
         colibri_client.install_model(self.colibri, "qwen3-coder-30b", lambda *item: progress.append(item),
                                      cancel, poll_seconds=0.05)
         self.assertIn("setup --model qwen3-coder-30b --yes --json --no-browser", self.calls())
-        self.assertTrue(any(phase == "download" and total == 100 for phase, done, total in progress))
+        self.assertTrue(any(phase == "download" and total == 100 and rate == 25 and eta >= 0
+                            for phase, done, total, rate, eta in progress))
         report = colibri_client.status(self.colibri)
         self.assertEqual(report["setup"]["model"]["id"], "qwen3-coder-30b")
         with self.assertRaises(colibri_client.ColibriError):

@@ -29,6 +29,8 @@ On macOS, double-click **Start AI Assist.command**. It looks for a Python 3 that
 
 Choose a model in the sidebar before chatting. Click **Refresh models** after adding models or restarting Ollama. Switching models starts a new conversation.
 
+The workspace starts with the Light theme and Modern typography. Use **Settings > Appearance...** to choose Dark or Warm, or restore Classic headings; existing appearance preferences are preserved. The sidebar keeps recent chats visible, with context size, Refresh, Run all, Stop all, and runtime details under **Model controls...**. Conversation width stays comfortable on large screens, and starter suggestions reflow in the developer workspace.
+
 Chat replies appear while they are generated. The finished reply is formatted with copy and code-export actions. If a stream fails before completion, the app reports the failure rather than saving a partial answer as complete. While a reply or the developer agent runs, **Send** becomes **Stop**; stopping a reply keeps the part already written (Enter never stops it). The status line shows Ollama's reported loading and prompt-processing times and generation rate when available; click model status to view the last summary. Developer step timings appear in **Activity**.
 
 ## Chats and developer workspace
@@ -113,7 +115,7 @@ For a Windows release archive, use `coli.cmd serve --model D:\models\your-model 
 
 - The **Engine** picker in the sidebar switches between Ollama and Colibri (the same choice as the Settings dialog). The folder is found in `COLIBRI_DIR`, beside AI Assist, or in your home, Documents, Desktop or Downloads folder (including `colibri-main` from a ZIP); otherwise choose it in the colibri tab.
 - Colibri serves one model at a time. Selecting the engine, **Run all**, or sending a message starts it; **Stop all** stops it. The sidebar shows Colibri's measured speed on the last answer.
-- **Find & download models** opens on **colibri engine (RAM + SSD)**: Colibri's own assessment of this PC (`coli setup --list --json`) with download size, RAM needed, whether a model runs from RAM or streams experts from the SSD, and whether it supports the coding agent's tools, plus a line comparing it with the Ollama (GPU) pick. **Install & use** runs `coli setup --model <id>` (resumable download, engine build, server start). **Context** sets Colibri's context for an install, and **Apply to the current model** restarts it with a new one.
+- **Find & download models** opens on **colibri engine (RAM + SSD)**: Colibri's own assessment of this PC (`coli setup --list --json`) with download size, RAM needed, whether a model runs from RAM or streams experts from the SSD, and whether it supports the coding agent's tools, plus a line comparing it with the Ollama (GPU) pick. **Install & use** runs `coli setup --model <id>` (resumable download, engine build, server start). Downloads show speed and estimated time remaining when Colibri reports them. **Context** sets Colibri's context for an install, and **Apply to the current model** restarts it with a new one.
 - The first developer-agent request in a session asks for confirmation unless the last answer ran at 15 tokens per second or more; a model family without tool calls is refused before the agent starts.
 
 A server on another computer, or one without a known folder, is used as it runs: its models are listed and chats work, while installs and start/stop stay in Colibri.

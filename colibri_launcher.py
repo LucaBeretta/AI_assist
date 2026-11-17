@@ -9,6 +9,7 @@ server through colibri_backend.ColibriClient.
 
 import glob
 import json
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -282,6 +283,18 @@ def install_progress(report):
     return install.get("phase"), number("done"), number("total"), install.get("running") is True
 
 
+def transfer_metrics(report):
+    """Validated download bytes/second and estimated seconds remaining, if supplied."""
+    install = report.get("install") if isinstance(report, dict) else None
+    if not isinstance(install, dict):
+        return None, None
+    def number(key):
+        value = install.get(key)
+        return (value if isinstance(value, (int, float)) and not isinstance(value, bool)
+                and math.isfinite(value) and value >= 0 else None)
+    return number("rate"), number("eta_seconds")
+
+
 CONTEXT_CHOICES = (0, 4096, 8192, 16384, 32768, 65536, 131072)
 
 
@@ -340,8 +353,9 @@ def install_model(directory, model_id, on_progress, cancel_event, poll_seconds=2
             if time.monotonic() - last_poll >= poll_seconds:
                 last_poll = time.monotonic()
                 try:
-                    phase, done, total, _ = install_progress(status(directory))
-                    on_progress(phase, done, total)
+                    report = status(directory)
+                    phase, done, total, _ = install_progress(report)
+                    on_progress(phase, done, total, *transfer_metrics(report))
                 except ColibriError:
                     pass
             time.sleep(0.2)

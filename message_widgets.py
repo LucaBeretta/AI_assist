@@ -2,6 +2,7 @@
 
 import re
 import tkinter as tk
+from tkinter import ttk
 
 from developer_tools import extract_code_blocks
 from html_preview import is_html
@@ -142,14 +143,12 @@ def _render_code(parent, block, app, colors):
     code_widget.configure(state="disabled")
     code_widget.grid(row=0, column=0, sticky="nsew")
     if line_count > 14:
-        vertical = tk.Scrollbar(body, orient="vertical", command=code_widget.yview,
-                                bg=colors["code_header"], troughcolor=colors["code_background"],
-                                relief="flat", borderwidth=0, width=10)
+        vertical = ttk.Scrollbar(body, orient="vertical", command=code_widget.yview,
+                                 style="Chat.Vertical.TScrollbar")
         vertical.grid(row=0, column=1, sticky="ns", padx=(5, 0))
         code_widget.configure(yscrollcommand=vertical.set)
-    horizontal = tk.Scrollbar(body, orient="horizontal", command=code_widget.xview,
-                              bg=colors["code_header"], troughcolor=colors["code_background"],
-                              relief="flat", borderwidth=0, width=9)
+    horizontal = ttk.Scrollbar(body, orient="horizontal", command=code_widget.xview,
+                               style="Code.Horizontal.TScrollbar")
     horizontal.grid(row=1, column=0, sticky="ew", pady=(3, 0))
     code_widget.configure(xscrollcommand=horizontal.set)
     return panel

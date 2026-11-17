@@ -93,6 +93,32 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         )
         self.assertTrue(update_button.winfo_exists())
 
+    def test_model_controls_keep_navigation_and_chat_available(self):
+        self.root.deiconify()
+        self.wait_for(lambda: self.app.sidebar_canvas.winfo_height() > 1, "sidebar layout")
+        previous = (self.app.current_section, self.app.model_name.get())
+        history_height = self.app.sidebar_canvas.winfo_height()
+        self.app.model_controls_button.invoke()
+        self.wait_for(lambda: self.app.model_controls_window.state() == "normal", "model controls")
+        self.assertTrue(self.app.context_picker.winfo_ismapped())
+        self.assertEqual(self.app.sidebar_canvas.winfo_height(), history_height)
+        self.assertEqual((self.app.current_section, self.app.model_name.get()), previous)
+        self.app.hide_model_controls()
+        self.assertEqual(self.app.model_controls_window.state(), "withdrawn")
+
+    def test_suggestion_cards_reflow_in_the_developer_workspace(self):
+        self.root.deiconify()
+        self.root.geometry("1280x860")
+        self.wait_for(lambda: self.app.suggestion_buttons[-1].grid_info().get("column") == 1,
+                      "two-column chat suggestions")
+        self.app.show_section("dev")
+        self.root.geometry("1060x700")
+        self.wait_for(lambda: self.app.suggestion_buttons[-1].grid_info().get("row") == 3,
+                      "one-column developer suggestions")
+        self.assertTrue(all(button.winfo_x() + button.winfo_width() <= button.master.winfo_width()
+                            for button in self.app.suggestion_buttons))
+        self.assertFalse(self.callback_errors)
+
     def close_workspace(self):
         for release in self.worker_releases:
             release.set()

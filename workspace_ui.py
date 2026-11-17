@@ -84,10 +84,11 @@ def file_limit_warning(limit, context, ram_free=None):
 
 class WorkspaceMixin:
     COLORS = {
-        "background": "#faf9f5", "surface": "#fffefa", "sidebar": "#eeece5",
-        "sidebar_hover": "#e3dfd5", "sidebar_muted": "#81796d", "ink": "#302d27",
-        "muted": "#787166", "border": "#dfdbd1", "accent": "#b65e40",
-        "accent_hover": "#9f4f34", "user": "#f0ede5", "success": "#42816b", "error": "#a64137",
+        "background": "#f8fafc", "surface": "#ffffff", "sidebar": "#f1f5f9",
+        "sidebar_hover": "#e2e8f0", "sidebar_muted": "#6b778c", "ink": "#172033",
+        "muted": "#657089", "border": "#dce3ed", "accent": "#5260d8",
+        "accent_hover": "#424fc0", "user": "#eef2ff", "success": "#237b64", "error": "#b34545",
+        "code_background": "#f3f5f9", "code_header": "#e8edf4",
     }
 
     def __init__(self, root):
@@ -175,50 +176,66 @@ class WorkspaceMixin:
 
     def build_sidebar(self):
         c = self.COLORS
-        self.sidebar = tk.Frame(self.root, bg=c["sidebar"], width=252)
+        self.sidebar = tk.Frame(self.root, bg=c["sidebar"], width=260)
         self.sidebar.pack(side="left", fill="y")
         self.sidebar.pack_propagate(False)
         footer = tk.Frame(self.sidebar, bg=c["sidebar"])
-        footer.pack(side="bottom", fill="x", padx=16, pady=(10, 16))
+        footer.pack(side="bottom", fill="x", padx=18, pady=(12, 16))
         tk.Frame(footer, height=1, bg=c["border"]).pack(fill="x", pady=(0, 12))
-        tk.Label(footer, text="ENGINE", bg=c["sidebar"], fg=c["muted"],
-                 font=("Segoe UI", 8, "bold"), anchor="w").pack(fill="x", pady=(0, 6))
+        tk.Label(footer, text="Local engine", bg=c["sidebar"], fg=c["muted"],
+                 font=("Segoe UI", 9), anchor="w").pack(fill="x", pady=(0, 5))
         self.engine_choice = tk.StringVar(self.root, value=self.backend)
         self.engine_picker = ttk.Combobox(footer, textvariable=self.engine_choice, values=("Ollama", "Colibri"),
                                           style="Model.TCombobox", state="readonly", font=("Segoe UI", 9))
         self.engine_picker.pack(fill="x", pady=(0, 8))
         self.engine_picker.bind("<<ComboboxSelected>>", self.choose_engine)
-        tk.Label(footer, text="YOUR MODEL", bg=c["sidebar"], fg=c["muted"],
-                 font=("Segoe UI", 8, "bold"), anchor="w").pack(fill="x", pady=(0, 6))
+        tk.Label(footer, text="Model", bg=c["sidebar"], fg=c["muted"],
+                 font=("Segoe UI", 9), anchor="w").pack(fill="x", pady=(0, 5))
         self.model_picker = ttk.Combobox(footer, textvariable=self.model_name, style="Model.TCombobox", state="disabled", font=("Segoe UI", 9))
         self.model_picker.pack(fill="x")
         self.model_picker.bind("<<ComboboxSelected>>", self.select_model)
+        self.model_controls_button = self.button(footer, "Model controls...", self.toggle_model_controls,
+                                                c["sidebar"], c["muted"], c["sidebar_hover"], anchor="w")
+        self.model_controls_button.config(font=("Segoe UI", 9), padx=0, pady=6)
+        self.model_controls_button.pack(fill="x", pady=(4, 0))
+        self.model_controls_window = tk.Toplevel(self.root)
+        self.model_controls_window.withdraw()
+        self.model_controls_window.title("Model controls")
+        self.model_controls_window.transient(self.root)
+        self.model_controls_window.configure(bg=c["sidebar"])
+        self.model_controls_window.geometry("360x340")
+        self.model_controls_window.resizable(False, False)
+        self.model_controls_window.protocol("WM_DELETE_WINDOW", self.hide_model_controls)
+        self.model_controls_window.bind("<Escape>", lambda event: self.hide_model_controls())
+        self.model_controls = tk.Frame(self.model_controls_window, bg=c["sidebar"])
+        self.model_controls.pack(fill="both", expand=True, padx=20, pady=16)
+        self.model_controls_expanded = False
         self.context_choice = tk.StringVar(self.root, value="Server default")
-        self.context_picker = ttk.Combobox(footer, textvariable=self.context_choice,
+        self.context_picker = ttk.Combobox(self.model_controls, textvariable=self.context_choice,
             values=("Server default", "4096", "8192", "16384", "32768", "65536", "131072"),
             state="readonly", width=14, font=("Segoe UI", 9))
-        tk.Label(footer, text="CONTEXT TOKENS", bg=c["sidebar"], fg=c["muted"],
-                 font=("Segoe UI", 8)).pack(anchor="w", pady=(7, 2))
+        tk.Label(self.model_controls, text="Context tokens", bg=c["sidebar"], fg=c["muted"],
+                 font=("Segoe UI", 9)).pack(anchor="w", pady=(4, 4))
         self.context_picker.pack(fill="x")
         self.context_picker.bind("<<ComboboxSelected>>", self.change_context)
-        self.model_help = tk.Label(footer, text="Connecting...", bg=c["sidebar"], fg=c["muted"],
-                                   font=("Segoe UI", 8), wraplength=210, justify="left", anchor="w", height=2)
+        self.model_help = tk.Label(self.model_controls, text="Connecting...", bg=c["sidebar"], fg=c["muted"],
+                                   font=("Segoe UI", 9), wraplength=310, justify="left", anchor="w")
         self.model_help.pack(fill="x", pady=(5, 3))
-        actions = tk.Frame(footer, bg=c["sidebar"])
+        actions = tk.Frame(self.model_controls, bg=c["sidebar"])
         actions.pack(fill="x")
         self.refresh_button = self.button(actions, "Refresh", self.refresh_models, c["sidebar"], c["muted"], c["sidebar_hover"])
         self.run_all_button = self.button(actions, "Run all", lambda: self.manage_models("start_all"), c["sidebar"], c["muted"], c["sidebar_hover"])
         self.stop_all_button = self.button(actions, "Stop all", lambda: self.manage_models("stop_all"), c["sidebar"], c["muted"], c["sidebar_hover"])
         for button in (self.refresh_button, self.run_all_button, self.stop_all_button):
-            button.config(font=("Segoe UI", 8), padx=7, pady=5)
+            button.config(font=("Segoe UI", 9), padx=7, pady=5)
             button.pack(side="left")
         self.download_models_button = self.button(footer, "Find & download models", self.open_downloads,
-                                                  c["sidebar_hover"], c["ink"], "#d9d4c9")
+                                                  c["surface"], c["ink"], c["sidebar_hover"])
         self.download_models_button.config(font=("Segoe UI", 9), pady=7)
         self.download_models_button.pack(fill="x", pady=(7, 6))
-        self.model_status = tk.Label(footer, text="Checking models...", bg=c["sidebar"], fg=c["muted"],
-                                     font=("Segoe UI", 8), wraplength=210, justify="left", anchor="nw", height=2, cursor="hand2")
-        self.model_status.pack(fill="x")
+        self.model_status = tk.Label(self.model_controls, text="Checking models...", bg=c["sidebar"], fg=c["muted"],
+                                     font=("Segoe UI", 9), wraplength=310, justify="left", anchor="nw", height=4, cursor="hand2")
+        self.model_status.pack(fill="x", pady=(12, 0))
         self.model_status.bind("<Button-1>", self.show_runtime_status)
         connection = tk.Frame(footer, bg=c["sidebar"])
         connection.pack(fill="x", pady=(8, 0))
@@ -228,27 +245,27 @@ class WorkspaceMixin:
         self.connection_label.pack(side="left")
 
         brand = tk.Frame(self.sidebar, bg=c["sidebar"])
-        brand.pack(fill="x", padx=20, pady=(24, 18))
-        tk.Label(brand, text="\u2733", bg=c["sidebar"], fg=c["accent"], font=("Segoe UI", 24)).pack(side="left", padx=(0, 8))
-        tk.Label(brand, text="AI Assist", bg=c["sidebar"], fg=c["ink"], font=("Georgia", 21)).pack(side="left")
+        brand.pack(fill="x", padx=22, pady=(26, 22))
+        tk.Label(brand, text="\u25c8", bg=c["sidebar"], fg=c["accent"], font=("Segoe UI", 24)).pack(side="left", padx=(0, 10))
+        tk.Label(brand, text="AI Assist", bg=c["sidebar"], fg=c["ink"], font=("Georgia", 19, "bold")).pack(side="left")
         self.new_chat_button = self.button(self.sidebar, "+  New chat", self.start_new_chat,
-                                           c["sidebar"], c["ink"], c["sidebar_hover"], anchor="w")
-        self.new_chat_button.pack(fill="x", padx=12, pady=(0, 10))
+                                           c["accent"], "white", c["accent_hover"], anchor="w")
+        self.new_chat_button.pack(fill="x", padx=18, pady=(0, 20))
         self.nav_buttons = {}
         for mode, label in (("chat", "Chats"), ("dev", "Developer"), ("capabilities", "Capabilities")):
             button = self.button(self.sidebar, label, lambda value=mode: self.show_section(value),
                                  c["sidebar"], c["ink"], c["sidebar_hover"], anchor="w")
-            button.config(pady=7)
-            button.pack(fill="x", padx=12, pady=1)
+            button.config(pady=9, padx=16)
+            button.pack(fill="x", padx=14, pady=2)
             self.nav_buttons[mode] = button
         self.memory_button = self.button(self.sidebar, "Shared memory", self.open_shared_memory,
                                         c["sidebar"], c["ink"], c["sidebar_hover"], anchor="w")
-        self.memory_button.config(pady=7)
-        self.memory_button.pack(fill="x", padx=12, pady=1)
-        tk.Label(self.sidebar, text="RECENT CHATS", bg=c["sidebar"], fg=c["muted"],
-                 font=("Segoe UI", 8, "bold"), anchor="w").pack(fill="x", padx=22, pady=(20, 8))
+        self.memory_button.config(pady=9, padx=16)
+        self.memory_button.pack(fill="x", padx=14, pady=2)
+        tk.Label(self.sidebar, text="Recent chats", bg=c["sidebar"], fg=c["muted"],
+                 font=("Segoe UI", 9, "bold"), anchor="w").pack(fill="x", padx=22, pady=(24, 10))
         self.history_search = tk.StringVar(self.root)
-        search = ttk.Entry(self.sidebar, textvariable=self.history_search, font=("Segoe UI", 9))
+        search = ttk.Entry(self.sidebar, textvariable=self.history_search, font=("Segoe UI", 10))
         search.pack(fill="x", padx=18, pady=(0, 8), ipady=4)
         self.history_search.trace_add("write", self.search_history)
         self.sidebar_canvas = tk.Canvas(self.sidebar, bg=c["sidebar"], highlightthickness=0, width=1)
@@ -258,6 +275,22 @@ class WorkspaceMixin:
         self.sidebar_canvas.bind("<Configure>", lambda event: self.sidebar_canvas.itemconfigure(self.sidebar_window, width=event.width))
         self.sidebar_content.bind("<Configure>", lambda event: self.sidebar_canvas.configure(scrollregion=self.sidebar_canvas.bbox("all")))
         self.history_buttons = []
+
+    def toggle_model_controls(self):
+        if self.model_controls_expanded:
+            self.hide_model_controls()
+        else:
+            self.model_controls_expanded = True
+            x = max(0, min(self.sidebar.winfo_rootx() + self.sidebar.winfo_width() + 8,
+                           self.root.winfo_screenwidth() - 380))
+            y = max(0, min(self.model_controls_button.winfo_rooty(), self.root.winfo_screenheight() - 390))
+            self.model_controls_window.geometry(f"360x340+{x}+{y}")
+            self.model_controls_window.deiconify()
+            self.model_controls_window.lift()
+
+    def hide_model_controls(self):
+        self.model_controls_expanded = False
+        self.model_controls_window.withdraw()
 
     def build_workspace(self):
         c = self.COLORS
@@ -272,10 +305,10 @@ class WorkspaceMixin:
         self.main_frame = tk.Frame(self.root, bg=c["background"])
         self.main_frame.pack(side="left", fill="both", expand=True)
         header = tk.Frame(self.main_frame, bg=c["background"])
-        header.pack(fill="x", padx=28, pady=(21, 15))
+        header.pack(fill="x", padx=32, pady=(22, 20))
         heading = tk.Frame(header, bg=c["background"])
         heading.pack(side="left", fill="x", expand=True)
-        self.heading_label = tk.Label(heading, text="New chat", bg=c["background"], fg=c["ink"], font=("Georgia", 21), anchor="w", wraplength=610)
+        self.heading_label = tk.Label(heading, text="New chat", bg=c["background"], fg=c["ink"], font=("Georgia", 19, "bold"), anchor="w", wraplength=610)
         self.heading_label.pack(fill="x")
         self.chat_subtitle = tk.Label(heading, text="Your ideas. Your models. Your workspace.", bg=c["background"], fg=c["muted"], font=("Segoe UI", 9), anchor="w")
         self.chat_subtitle.pack(fill="x", pady=(4, 0))
@@ -299,19 +332,21 @@ class WorkspaceMixin:
         self.capabilities_view = CapabilitiesView(self.content_area, self)
 
         composer_area = tk.Frame(self.chat_frame, bg=c["background"])
-        composer_area.pack(side="bottom", fill="x", padx=26, pady=(10, 20))
+        composer_area.pack(side="bottom", fill="x", pady=(12, 22))
         self.composer_frame = tk.Frame(composer_area, bg=c["surface"], highlightbackground=c["border"], highlightthickness=1)
-        self.composer_frame.pack(fill="x")
-        self.input_box = tk.Text(self.composer_frame, height=3, width=1, wrap="word", font=("Segoe UI", 11),
-                                 bg=c["surface"], fg=c["ink"], insertbackground=c["accent"], selectbackground="#e7d9ca",
-                                 relief="flat", borderwidth=0, highlightthickness=0, padx=16, pady=14, undo=True)
+        self.composer_frame.pack(fill="x", padx=32)
+        composer_area.bind("<Configure>", lambda event: self.composer_frame.pack_configure(
+            padx=max(24, (event.width - 880) // 2)))
+        self.input_box = tk.Text(self.composer_frame, height=3, width=1, wrap="word", font=("Segoe UI", 12),
+                                 bg=c["surface"], fg=c["ink"], insertbackground=c["accent"], selectbackground=c["user"],
+                                 relief="flat", borderwidth=0, highlightthickness=0, padx=20, pady=16, undo=True)
         self.input_box.pack(fill="x")
         self.input_box.bind("<Return>", self.handle_enter)
         self.input_box.bind("<FocusIn>", lambda event: self.composer_frame.config(highlightbackground=c["accent"]))
         self.input_box.bind("<FocusOut>", lambda event: self.composer_frame.config(highlightbackground=c["border"]))
         footer = tk.Frame(self.composer_frame, bg=c["surface"])
         footer.pack(fill="x", padx=14, pady=(0, 12))
-        self.composer_hint = tk.Label(footer, text="Choose a model to begin", bg=c["surface"], fg=c["muted"], font=("Segoe UI", 8), anchor="w", wraplength=330, justify="left")
+        self.composer_hint = tk.Label(footer, text="Choose a model to begin", bg=c["surface"], fg=c["muted"], font=("Segoe UI", 9), anchor="w", wraplength=330, justify="left")
         self.composer_hint.pack(side="left", fill="x", expand=True)
         self.send_button = self.button(footer, "Send  \u2191", self.send_or_stop, c["accent"], "white", c["accent_hover"])
         self.send_button.pack(side="right")
@@ -329,6 +364,11 @@ class WorkspaceMixin:
         self.chat_window = self.chat_canvas.create_window((0, 0), window=self.message_frame, anchor="nw", width=700)
         self.chat_canvas.bind("<Configure>", self.resize_chat)
         self.message_frame.bind("<Configure>", lambda event: self.chat_canvas.configure(scrollregion=self.chat_canvas.bbox("all")))
+
+    def resize_chat(self, event):
+        width = min(928, event.width)
+        self.chat_canvas.itemconfigure(self.chat_window, width=width)
+        self.chat_canvas.coords(self.chat_window, max(0, (event.width - width) // 2), 0)
 
     def build_developer_panel(self):
         c = self.COLORS
@@ -400,22 +440,48 @@ class WorkspaceMixin:
     def show_empty_state(self):
         c = self.COLORS
         self.empty_state = tk.Frame(self.message_frame, bg=c["background"])
-        self.empty_state.pack(fill="x", padx=25, pady=(65, 30))
-        tk.Label(self.empty_state, text="\u2733", font=("Segoe UI", 38), bg=c["background"], fg=c["accent"]).pack(pady=(0, 12))
-        title = "Let's build something." if self.current_mode == "dev" else "Where should we begin?"
-        tk.Label(self.empty_state, text=title, font=("Georgia", 25), bg=c["background"], fg=c["ink"], wraplength=480).pack()
+        self.empty_state.pack(fill="x", padx=40, pady=(60, 30))
+        tk.Label(self.empty_state, text="\u25c8  YOUR LOCAL WORKSPACE", font=("Segoe UI", 9, "bold"),
+                 bg=c["background"], fg=c["accent"]).pack(anchor="w", pady=(0, 18))
+        title = "Let's build something." if self.current_mode == "dev" else "What are we working on?"
+        title_label = tk.Label(self.empty_state, text=title, font=("Georgia", 28), bg=c["background"],
+                               fg=c["ink"], wraplength=620, anchor="w", justify="left")
+        title_label.pack(fill="x")
         description = ("Choose a project and a tool-capable model. Review changes and commands as the agent works."
-                       if self.current_mode == "dev" else "A quiet place for questions, writing, and ideas. Powered by your local models.")
-        tk.Label(self.empty_state, text=description, font=("Segoe UI", 10), bg=c["background"], fg=c["muted"], wraplength=450, justify="center").pack(pady=(12, 22))
+                       if self.current_mode == "dev" else "A question, a rough idea, a fresh start. Bring it here.\nYour models run locally, on your computer.")
+        description_label = tk.Label(self.empty_state, text=description, font=("Segoe UI", 11),
+                                     bg=c["background"], fg=c["muted"], wraplength=620, justify="left", anchor="w")
+        description_label.pack(fill="x", pady=(12, 28))
         self.suggestion_buttons = []
-        prompts = ([('Explore this project', 'Inspect this project and explain its structure. Suggest the most useful next improvement.'),
-                    ('Fix a problem', 'Find a concrete bug in this project, explain it, and propose a focused fix with tests.')]
-                   if self.current_mode == 'dev' else [('Explain an idea', 'Explain a complex idea with a useful everyday example.'),
-                                                     ('Help me write', 'Help me turn a rough idea into clear, concise writing.')])
+        prompts = ([('Explore this project  \u2197', 'Inspect this project and explain its structure. Suggest the most useful next improvement.'),
+                    ('Fix a problem  \u2197', 'Find a concrete bug in this project, explain it, and propose a focused fix with tests.'),
+                    ('Plan a feature  \u2197', 'Inspect this project and help me plan a new feature. Ask what I want to build.'),
+                    ('Review the code  \u2197', 'Review this project for concrete correctness issues. Explain your findings before proposing edits.')]
+                   if self.current_mode == 'dev' else [('Explain an idea  \u2197', 'Explain a complex idea with a useful everyday example.'),
+                                                     ('Help me write  \u2197', 'Help me turn a rough idea into clear, concise writing.'),
+                                                     ('Think it through  \u2197', 'Help me think through a decision. Start by asking what I am deciding.'),
+                                                     ('Learn something  \u2197', 'Help me learn something new. Ask what topic I want to explore.')])
+        suggestions = tk.Frame(self.empty_state, bg=c["background"])
+        suggestions.pack(fill="x")
+        suggestions.columnconfigure((0, 1), weight=1, uniform="suggestions")
         for label, prompt in prompts:
-            button = self.button(self.empty_state, label, lambda text=prompt: self.use_suggestion(text), c["surface"], c["ink"], c["user"])
-            button.pack(fill="x", padx=20, pady=4)
+            button = self.button(suggestions, label, lambda text=prompt: self.use_suggestion(text),
+                                 c["surface"], c["ink"], c["user"], anchor="w")
+            button.config(padx=18, pady=18, font=("Segoe UI", 10))
             self.suggestion_buttons.append(button)
+
+        def resize_empty(event):
+            title_label.config(wraplength=max(100, event.width))
+            description_label.config(wraplength=max(100, event.width))
+            columns = 2 if event.width >= 540 else 1
+            for index, button in enumerate(self.suggestion_buttons):
+                button.grid(row=index // columns, column=index % columns, sticky="ew",
+                            padx=(0, 10) if columns == 2 and index % 2 == 0 else 0, pady=(0, 10))
+            suggestions.columnconfigure(0, uniform="suggestions" if columns == 2 else "")
+            suggestions.columnconfigure(1, weight=1 if columns == 2 else 0, minsize=0,
+                                        uniform="suggestions" if columns == 2 else "")
+
+        self.empty_state.bind("<Configure>", resize_empty)
 
     def busy(self):
         return (self.closing or self.is_waiting or self.is_loading_models or self.lifecycle_busy or self.project_loading
@@ -451,7 +517,7 @@ class WorkspaceMixin:
         self.input_box.config(state="normal" if ready else "disabled")
         if self.is_waiting and not self.closing:
             # While an answer or the agent runs, the same button stops it.
-            self.send_button.config(state="normal", text="Stop  \u25a0", bg=self.COLORS["ink"])
+            self.send_button.config(state="normal", text="Stop  \u25a0", bg=self.COLORS["accent_hover"])
         else:
             self.send_button.config(state="normal" if ready else "disabled", text="Run agent" if self.current_mode == "dev" else "Send  \u2191",
                                     bg=self.COLORS["accent"] if ready else self.COLORS["border"])
@@ -845,7 +911,7 @@ class WorkspaceMixin:
             self.empty_state = None
             self.suggestion_buttons = []
         c = self.COLORS
-        bg = c["user"] if role == "user" else c["background"]
+        bg = c["user"] if role == "user" else c["surface"]
         card = tk.Frame(self.message_frame, bg=bg)
         card.pack(fill="x", padx=24, pady=(16, 6))
         heading = tk.Frame(card, bg=bg)

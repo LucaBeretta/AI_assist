@@ -1,6 +1,7 @@
 """Message layout checks without running generated code or opening windows."""
 
 import tkinter as tk
+from tkinter import ttk
 import unittest
 
 from developer_tools import extract_code_blocks
@@ -77,7 +78,7 @@ class MessageWidgetTests(unittest.TestCase):
         self.assertTrue(code_widget._aiassist_code)
         self.assertEqual(int(code_widget["width"]), 1)
         self.assertEqual(int(code_widget["height"]), 14)
-        self.assertEqual(len([widget for widget in widgets if isinstance(widget, tk.Scrollbar)]), 2)
+        self.assertEqual(len([widget for widget in widgets if isinstance(widget, ttk.Scrollbar)]), 2)
         self.assertEqual(self.app.exports, [])
         save = next(widget for widget in widgets if isinstance(widget, tk.Button) and widget["text"].startswith("Save as"))
         save.invoke()

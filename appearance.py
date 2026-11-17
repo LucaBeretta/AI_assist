@@ -9,22 +9,31 @@ class Appearance:
     def __init__(self, app):
         self.app = app
         self.window = None
-        self.warm = dict(app.COLORS)
+        self.warm = {
+            "background": "#faf9f5", "surface": "#fffefa", "sidebar": "#eeece5",
+            "sidebar_hover": "#e3dfd5", "sidebar_muted": "#81796d", "ink": "#302d27",
+            "muted": "#787166", "border": "#dfdbd1", "accent": "#b65e40",
+            "accent_hover": "#9f4f34", "user": "#f0ede5", "success": "#42816b", "error": "#a64137",
+            "code_background": "#f5f2eb", "code_header": "#ece8de",
+        }
         self.themes = {
             "Warm": self.warm,
-            "Light": dict(self.warm, background="#f5f6fa", surface="#ffffff",
-                          sidebar="#e9edf5", sidebar_hover="#dce2ef", user="#edf0ff",
-                          ink="#243047", muted="#65738b", sidebar_muted="#65738b",
-                          border="#d5dcea", accent="#4c61d8", accent_hover="#3c4fbd"),
-            "Dark": dict(self.warm, background="#191c24", surface="#232834",
-                         sidebar="#202430", sidebar_hover="#343c4d", user="#30384c",
-                         ink="#edf0f7", muted="#b0bacd", sidebar_muted="#b0bacd",
-                         border="#414b60", accent="#8096f4", accent_hover="#6b81df",
-                         success="#70d3b0", error="#ff9d93"),
+            "Light": dict(self.warm, background="#f8fafc", surface="#ffffff",
+                          sidebar="#f1f5f9", sidebar_hover="#e2e8f0", user="#eef2ff",
+                          ink="#172033", muted="#657089", sidebar_muted="#6b778c",
+                          border="#dce3ed", accent="#5260d8", accent_hover="#424fc0",
+                          success="#237b64", error="#b34545",
+                          code_background="#f3f5f9", code_header="#e8edf4"),
+            "Dark": dict(self.warm, background="#151922", surface="#1e2430",
+                         sidebar="#1a202b", sidebar_hover="#2c3546", user="#29324b",
+                         ink="#edf0f7", muted="#a5b1c5", sidebar_muted="#9aa8bf",
+                         border="#354156", accent="#5967db", accent_hover="#4a58c8",
+                         success="#70d3b0", error="#ff9d93",
+                         code_background="#171d28", code_header="#242d3c"),
         }
         # Keep the same dictionary: existing event callbacks hold references to it.
-        self.theme = "Warm"
-        self.style = "Classic"
+        self.theme = "Light"
+        self.style = "Modern"
         self.path = app.chat_store.directory / "appearance.settings" if app.chat_store else None
         selected = {}
         if self.path:
@@ -35,15 +44,15 @@ class Appearance:
                 pass
         if not isinstance(selected, dict):
             selected = {}
-        self.apply(selected.get("theme", "Warm"), selected.get("style", "Classic"))
+        self.apply(selected.get("theme", "Light"), selected.get("style", "Modern"))
         app.root.bind_all("<Map>", self.mapped, add="+")
 
     def color_map(self, previous):
         c = self.app.COLORS
         colors = {value.lower(): c[key] for key, value in previous.items()}
         colors.update({"#d9d4c9": c["border"], "#e7d9ca": c["user"],
-                       "#e5e9f2": c["border"], "#f5f2eb": c["background"],
-                       "#ece8de": c["sidebar_hover"]})
+                       "#e5e9f2": c["border"], "#f5f2eb": c["code_background"],
+                       "#ece8de": c["code_header"]})
         return colors
 
     def update_widget(self, widget, colors, previous):
@@ -51,12 +60,20 @@ class Appearance:
         roles = getattr(widget, "_appearance_roles", {})
         role_colors = {value.lower(): key for key, value in previous.items()}
         for option in ("background", "foreground", "activebackground", "activeforeground",
-                       "disabledforeground", "insertbackground", "selectbackground",
-                       "highlightbackground", "troughcolor"):
+                       "disabledforeground", "insertbackground", "selectbackground", "selectforeground",
+                       "highlightbackground", "highlightcolor", "troughcolor", "readonlybackground"):
             if option in options:
                 value = str(widget.cget(option)).lower()
+                if option == "background" and getattr(widget, "_hovered", False):
+                    value = widget._appearance_bg.lower()
+                # White action labels and selection text are intentional. A light
+                # surface has the same RGB value, but a different semantic role.
+                if value in ("white", "#ffffff") and (
+                        option == "selectforeground" or
+                        isinstance(widget, tk.Button) and option in ("foreground", "activeforeground")):
+                    continue
                 role = roles.get(option)
-                if role and value == previous[role].lower():
+                if role and value == previous.get(role, "").lower():
                     widget.configure(**{option: self.app.COLORS[role]})
                 elif value in role_colors:
                     roles[option] = role_colors[value]
@@ -68,6 +85,9 @@ class Appearance:
             if hasattr(widget, attr):
                 value = getattr(widget, attr)
                 setattr(widget, attr, colors.get(value.lower(), value))
+        refresh_hover = getattr(widget, "refresh_hover", None)
+        if refresh_hover is not None:
+            refresh_hover()
         if "font" in options:
             current = font.Font(root=self.app.root, font=widget.cget("font"))
             family = current.actual("family")
@@ -89,21 +109,45 @@ class Appearance:
             self.walk(event.widget, self.color_map(self.warm), self.warm)
 
     def apply(self, theme, style):
-        theme = theme if isinstance(theme, str) and theme in self.themes else "Warm"
-        style = style if style in ("Classic", "Modern") else "Classic"
+        theme = theme if isinstance(theme, str) and theme in self.themes else "Light"
+        style = style if style in ("Classic", "Modern") else "Modern"
         previous = dict(self.app.COLORS)
         self.theme, self.style = theme, style
         self.app.COLORS.update(self.themes[theme])
         self.app.configure_styles()
         c = self.app.COLORS
         native = ttk.Style(self.app.root)
-        native.configure(".", background=c["sidebar"], foreground=c["ink"])
-        for name in ("TCombobox", "TEntry"):
-            native.configure(name, fieldbackground=c["surface"], foreground=c["ink"])
-            native.map(name, fieldbackground=[("readonly", c["surface"])],
-                       selectbackground=[("!disabled", c["accent"])])
-        native.configure("TNotebook.Tab", background=c["sidebar"], foreground=c["ink"])
-        native.map("TNotebook.Tab", background=[("selected", c["surface"])])
+        native.configure(".", background=c["sidebar"], foreground=c["ink"], font=("Segoe UI", 10),
+                         bordercolor=c["border"], lightcolor=c["border"], darkcolor=c["border"])
+        for name in ("TCombobox", "Model.TCombobox", "TEntry"):
+            native.configure(name, fieldbackground=c["surface"], foreground=c["ink"],
+                             background=c["surface"], arrowcolor=c["muted"], padding=(10, 7),
+                             bordercolor=c["border"], lightcolor=c["border"], darkcolor=c["border"],
+                             insertcolor=c["ink"], selectbackground=c["accent"], selectforeground="white")
+            native.map(name,
+                       fieldbackground=[("disabled", c["sidebar"]), ("readonly", c["surface"])],
+                       foreground=[("disabled", c["muted"]), ("readonly", c["ink"])],
+                       bordercolor=[("focus", c["accent"])],
+                       lightcolor=[("focus", c["accent"])], darkcolor=[("focus", c["accent"])])
+            if name != "TEntry":
+                native.map(name, selectbackground=[("readonly", c["surface"])],
+                           selectforeground=[("readonly", c["ink"])])
+        native.configure("TNotebook", background=c["sidebar"], borderwidth=0, tabmargins=(0, 4, 0, 0))
+        native.configure("TNotebook.Tab", background=c["sidebar"], foreground=c["muted"],
+                         padding=(14, 9), borderwidth=0, focuscolor=c["accent"])
+        native.map("TNotebook.Tab", background=[("selected", c["surface"]), ("active", c["sidebar_hover"])],
+                   foreground=[("selected", c["ink"]), ("active", c["ink"])])
+        native.configure("Horizontal.TProgressbar", background=c["accent"], troughcolor=c["sidebar_hover"],
+                         borderwidth=0, thickness=4)
+        for name in ("TCheckbutton", "TRadiobutton"):
+            native.configure(name, background=c["sidebar"], foreground=c["ink"], focuscolor=c["accent"])
+            native.map(name, background=[("active", c["sidebar"])],
+                       foreground=[("disabled", c["muted"])])
+        for name in ("Vertical.TScrollbar", "Horizontal.TScrollbar", "Chat.Vertical.TScrollbar", "Sidebar.Vertical.TScrollbar"):
+            native.configure(name, background=c["border"], troughcolor=c["background"],
+                             bordercolor=c["background"], lightcolor=c["background"], darkcolor=c["background"],
+                             arrowcolor=c["muted"], borderwidth=0)
+            native.map(name, background=[("active", c["muted"]), ("pressed", c["muted"])])
         self.walk(self.app.root, self.color_map(previous), previous)
 
     def open(self):
@@ -112,7 +156,7 @@ class Appearance:
             return
         window = self.window = tk.Toplevel(self.app.root)
         window.title("Settings")
-        window.geometry("430x390")
+        window.geometry("430x460")
         window.resizable(False, False)
         window.transient(self.app.root)
         c = self.app.COLORS
