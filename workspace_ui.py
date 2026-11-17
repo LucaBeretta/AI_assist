@@ -23,6 +23,7 @@ from appearance import DARK_THEMES, Appearance
 from status_bar import StatusBar, mono_family
 from developer_panel import DeveloperPanelMixin
 from feedback_ui import FeedbackMixin
+from hybrid_ui import HybridMixin, QUALITY_GUIDANCE
 from update_checker import UpdateChecker
 
 
@@ -85,7 +86,7 @@ def file_limit_warning(limit, context, ram_free=None):
     return "\n\n".join(lines)
 
 
-class WorkspaceMixin(FeedbackMixin, DeveloperPanelMixin):
+class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
     COLORS = {
         "background": "#f8fafc", "surface": "#ffffff", "sidebar": "#f1f5f9",
         "sidebar_hover": "#e2e8f0", "sidebar_muted": "#6b778c", "ink": "#172033",
@@ -150,6 +151,7 @@ class WorkspaceMixin(FeedbackMixin, DeveloperPanelMixin):
             self.storage_error = str(error)
         self.saver = BackgroundSaves(self.chat_store) if self.chat_store else None
         self.initialize_backend()
+        self.initialize_hybrid()
         self.agent_settings = self.chat_store.directory / "agent.settings" if self.chat_store else None
         self.agent_file_limit = load_file_limit(self.agent_settings)
         if self.chat_store:
@@ -474,6 +476,7 @@ class WorkspaceMixin(FeedbackMixin, DeveloperPanelMixin):
 
     def busy(self):
         return (self.closing or self.is_waiting or self.is_loading_models or self.lifecycle_busy or self.project_loading
+                or self.hybrid_preparing
                 or (self.deploy_dialog is not None and self.deploy_dialog.running))
 
     def update_controls(self):
@@ -527,6 +530,7 @@ class WorkspaceMixin(FeedbackMixin, DeveloperPanelMixin):
         for button in getattr(self, "suggestion_buttons", []):
             button.config(state="normal" if ready else "disabled")
         self.update_feedback_controls()
+        self.update_hybrid_controls()
 
     def update_heading(self):
         if self.current_section == "capabilities":
@@ -1122,6 +1126,8 @@ class WorkspaceMixin(FeedbackMixin, DeveloperPanelMixin):
             record["path"] = event["path"]
         if isinstance(event.get("command"), str):
             record["command"] = event["command"]
+        if record["type"] == "changed" and isinstance(event.get("destination"), str):
+            record["destination"] = event["destination"]
         if record["type"] == "changed" and isinstance(event.get("diff"), str):
             record["diff"] = event["diff"][:40000]
             if len(event["diff"]) > 40000:
@@ -1178,6 +1184,11 @@ class WorkspaceMixin(FeedbackMixin, DeveloperPanelMixin):
             return "break"
         if self.current_mode == "dev" and not self.confirm_colibri_agent():
             return "break"
+        try:
+            self.capture_hybrid_request()
+        except ValueError as error:
+            self.set_status(str(error), error=True)
+            return "break"
         self.conversation.append({"role": "user", "content": prompt})
         self.display_message("You", prompt, "user")
         self.input_box.delete("1.0", END)
@@ -1212,6 +1223,8 @@ class WorkspaceMixin(FeedbackMixin, DeveloperPanelMixin):
                       "Create requested files using write_file, including files in new subfolders. Use paths relative to this folder in file tools. "
                       "If the user gives an absolute path inside this folder, convert it to a relative path. "
                       "If they request another destination, ask them to select that folder in the workspace first.")
+            if self.active_hybrid_config:
+                prefix += "\nQuality requirements for cooperative work:\n" + QUALITY_GUIDANCE
             if self.project_context:
                 prefix += "\nPinned project context:\n" + self.project_context
             recent_results = [item for item in self.dev_activity if item["type"] in ("tool_result", "changed")][-6:]
@@ -1318,8 +1331,18 @@ class WorkspaceMixin(FeedbackMixin, DeveloperPanelMixin):
                     continue
             if "tools" not in metadata["capabilities"]:
                 raise RuntimeError("This model does not advertise tool calling. Select Qwen Coder or another tool-capable model in the sidebar.")
-            result = run_agent(host, model, root, messages, event, approval, cancel_event=cancel, context_length=context,
-                               file_limit=self.agent_file_limit)
+            if self.active_hybrid_config:
+                snapshot = dict(self.active_hybrid_config)
+                def worker(worker_messages, emit):
+                    return run_agent(host, model, root, worker_messages, emit, approval,
+                                     cancel_event=cancel, context_length=context, file_limit=self.agent_file_limit)
+                try:
+                    result = self.run_with_quality_review(worker, messages, root, event, cancel, host, model, snapshot)
+                finally:
+                    self.health_poll_at = 0
+            else:
+                result = run_agent(host, model, root, messages, event, approval, cancel_event=cancel, context_length=context,
+                                   file_limit=self.agent_file_limit)
             self.workspace_events.put(("agent_done", request, result, None))
         except Exception as error:
             self.workspace_events.put(("agent_done", request, None, str(error)))
@@ -1430,6 +1453,7 @@ class WorkspaceMixin(FeedbackMixin, DeveloperPanelMixin):
                 if data.get("type") == "tool_start" and isinstance(data.get("step"), int):
                     self.agent_step = data["step"]
                 if data.get("type") == "status":
+                if data.get("type") in ("status", "hybrid_stage"):
                     self.set_status(data.get("text", "Agent working..."))
             elif request == self.request_serial and kind == "approval":
                 if self.agent_cancel.is_set():
@@ -1481,11 +1505,12 @@ class WorkspaceMixin(FeedbackMixin, DeveloperPanelMixin):
         if hasattr(self, "update_checker"):
             self.update_checker.poll()
         self.process_saves()
+        self.process_hybrid_events()
         if self.closing:
             self.poll_id = self.root.after(100, self.process_responses)
             return
         self.process_lifecycle()
-        if not self.lifecycle_busy and not self.is_waiting and not self.project_loading and time.monotonic() >= self.health_poll_at:
+        if not self.lifecycle_busy and not self.is_waiting and not self.project_loading and not self.hybrid_preparing and time.monotonic() >= self.health_poll_at:
             self.manage_models("refresh")
         self.process_models()
         self.process_workspace_events()
@@ -1640,6 +1665,7 @@ class WorkspaceMixin(FeedbackMixin, DeveloperPanelMixin):
         for record in list(self.failed_saves.values()):
             self.queue_save(record)
         self.closing = True
+        self.close_hybrid()
         self.chat_cancel.set()
         if self.deploy_dialog is not None:
             self.deploy_dialog.close(force=True)

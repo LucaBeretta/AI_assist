@@ -121,9 +121,9 @@ class ChatStore:
             if (not isinstance(event, dict)
                     or not isinstance(event.get("type"), str)
                     or not isinstance(event.get("text"), str)
-                    or not set(event).issubset({"type", "text", "path", "command", "diff"})
+                    or not set(event).issubset({"type", "text", "path", "command", "diff", "destination"})
                     or any(not isinstance(value, str) for value in event.values())):
-                raise ChatStoreError("Each chat activity entry needs text type/text fields and optional text path/command/diff fields.")
+                raise ChatStoreError("Each chat activity entry needs text type/text fields and optional text path/command/diff/destination fields.")
         agent_history = chat.get("agent_history", [])
         if not isinstance(agent_history, list):
             raise ChatStoreError("Chat agent_history must be a list.")

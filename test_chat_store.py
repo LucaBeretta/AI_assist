@@ -100,19 +100,21 @@ class ChatStoreTests(unittest.TestCase):
                 " print(message)\n\\ No newline at end of file\n")
         chat["activity"] = [
             {"type": "status", "text": "Inspecting project"},
-            {"type": "changed", "text": "Updated src/greeting.py", "path": "src/greeting.py", "diff": diff},
+            {"type": "changed", "text": "Updated src/greeting.py", "path": "src/greeting.py", "diff": diff,
+             "destination": "C:/Projects/demo/src/greeting.py"},
         ]
         self.store.save(chat)
         restored = ChatStore(self.directory).load(chat["id"])
         self.assertEqual(restored["activity"], chat["activity"])
         path = self.directory / f"{chat['id']}.json"
         original = path.read_bytes()
-        for invalid in (None, 42, True, [], {}):
-            changed = deepcopy(restored)
-            changed["activity"][1]["diff"] = invalid
-            with self.subTest(diff=invalid), self.assertRaises(ChatStoreError):
-                self.store.save(changed)
-            self.assertEqual(path.read_bytes(), original)
+        for field in ("diff", "destination"):
+            for invalid in (None, 42, True, [], {}):
+                changed = deepcopy(restored)
+                changed["activity"][1][field] = invalid
+                with self.subTest(field=field, value=invalid), self.assertRaises(ChatStoreError):
+                    self.store.save(changed)
+                self.assertEqual(path.read_bytes(), original)
 
     def test_native_agent_history_preserves_tools_thinking_and_json_arguments(self):
         chat = self.store.create(mode="dev")

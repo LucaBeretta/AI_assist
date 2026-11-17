@@ -4,6 +4,7 @@ from copy import deepcopy
 import http.client
 import json
 import queue
+import socket
 import threading
 import time
 import urllib.error
@@ -78,6 +79,111 @@ class ColibriClient:
             raise RuntimeError("The selected model is no longer served by Colibri.")
         return dict(name=model, capabilities=[], context_length=None, family=None,
                     parameter_size=None, quantization=None, source="Colibri /v1/models")
+
+    def review(self, messages, model, cancel_event, max_tokens=768, timeout=120):
+        """One bounded, text-only review request; its output cannot call tools.
+
+        Keep a handle to the actual socket so Stop can interrupt pending reads
+        instead of merely abandoning an HTTP worker while it waits for a model.
+        A remote server may still ignore client disconnection; the application
+        owns any additional lifecycle cleanup for a local managed server.
+        """
+        from coding_agent import _check_cancelled
+        _check_cancelled(cancel_event)
+        if not isinstance(model, str) or not model.strip() or len(model) > 2000:
+            raise ValueError("Choose a Colibri review model.")
+        if isinstance(max_tokens, bool) or not isinstance(max_tokens, int) or not 256 <= max_tokens <= 1024:
+            raise ValueError("Review output must be between 256 and 1,024 tokens.")
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not .1 <= timeout <= 120:
+            raise ValueError("Review timeout must be between 0.1 and 120 seconds.")
+        if (not isinstance(messages, list) or not messages or any(
+                not isinstance(message, dict) or set(message) != {"role", "content"}
+                or not isinstance(message["role"], str) or message["role"] not in {"system", "user", "assistant"}
+                or not isinstance(message["content"], str) for message in messages)):
+            raise ValueError("Review messages must contain plain text without tool history.")
+        payload = dict(model=model, messages=messages, stream=False, max_tokens=max_tokens)
+        body = json.dumps(payload).encode("utf-8")
+        if len(body) > 128000:
+            raise ValueError("The review context is too large.")
+        parsed = urllib.parse.urlsplit(self.url)
+        cls = http.client.HTTPSConnection if parsed.scheme == "https" else http.client.HTTPConnection
+        connection = cls(parsed.hostname, parsed.port, timeout=timeout)
+        headers = {"Content-Type": "application/json", "Accept": "application/json"}
+        if self.key:
+            headers["Authorization"] = "Bearer " + self.key
+        completed, sockets = queue.Queue(maxsize=1), []
+        abort = threading.Event()
+
+        def request_worker():
+            response = None
+            try:
+                connection.connect()
+                sockets.append(connection.sock)
+                if abort.is_set():
+                    return
+                _check_cancelled(cancel_event)
+                connection.request("POST", parsed.path.rstrip("/") + "/chat/completions", body=body, headers=headers)
+                response = connection.getresponse()
+                if not 200 <= response.status < 300:
+                    raise RuntimeError(f"Colibri review returned HTTP {response.status}. Check its model and server settings.")
+                data = response.read(2 * 1024 * 1024 + 1)
+                if len(data) > 2 * 1024 * 1024:
+                    raise ValueError("Review response is too large.")
+                result = json.loads(data)
+                if not isinstance(result, dict) or result.get("error"):
+                    raise ValueError("Invalid review response.")
+                choices = result.get("choices")
+                if not isinstance(choices, list) or len(choices) != 1 or not isinstance(choices[0], dict):
+                    raise ValueError("Invalid review choices.")
+                choice = choices[0]
+                message = choice.get("message")
+                if (choice.get("finish_reason") != "stop" or not isinstance(message, dict)
+                        or message.get("role") != "assistant" or message.get("tool_calls") not in (None, [])
+                        or message.get("function_call") is not None or not isinstance(message.get("content"), str)
+                        or not message["content"].strip() or len(message["content"]) > 32000):
+                    raise ValueError("Review was truncated, empty, or attempted a tool call.")
+                completed.put((message["content"].strip(), None))
+            except Exception as error:
+                completed.put((None, error))
+            finally:
+                if response is not None:
+                    response.close()
+                connection.close()
+
+        def disconnect():
+            abort.set()
+            for active in list(sockets):
+                if active is not None:
+                    try:
+                        active.shutdown(socket.SHUT_RDWR)
+                    except OSError:
+                        pass
+                    active.close()
+
+        worker = threading.Thread(target=request_worker, daemon=True)
+        deadline = time.monotonic() + timeout
+        worker.start()
+        try:
+            while True:
+                _check_cancelled(cancel_event)
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise RuntimeError("Colibri review exceeded its time limit.")
+                try:
+                    result, error = completed.get(timeout=min(.1, remaining))
+                except queue.Empty:
+                    continue
+                _check_cancelled(cancel_event)
+                if error is not None:
+                    if isinstance(error, RuntimeError):
+                        # Only our own status-code error reaches this branch;
+                        # do not expose a server's potentially sensitive body.
+                        raise error
+                    raise RuntimeError("Colibri review failed or returned an invalid response.") from error
+                return result
+        finally:
+            disconnect()
+            worker.join(timeout=1)
 
     def chat(self, messages, model, on_chunk=None, on_metrics=None):
         payload = dict(model=model, messages=messages, stream=True,

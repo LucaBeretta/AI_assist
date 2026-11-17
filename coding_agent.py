@@ -293,7 +293,7 @@ def _write_file(project, arguments, approve_action, cancel_event, on_event, dest
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
     _emit(on_event, "changed", f"Updated {path}" if old_bytes is not None else f"Created {path}",
-          path=path, diff=diff)
+          path=path, diff=diff, destination=str(target))
     return f"Successfully {'updated' if old_bytes is not None else 'created'} {path} ({len(new_bytes):,} bytes)."
 
 
