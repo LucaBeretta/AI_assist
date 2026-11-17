@@ -5,12 +5,25 @@ import tkinter as tk
 from tkinter import ttk, font
 
 
+DARK_THEMES = ("Dark", "Night")
+# The console pair: one switch in the header flips between them.
+CONSOLE_PAIR = {"Night": "Day", "Day": "Night"}
+DEFAULT_THEME = "Night"
+
+
+def toggled_theme(theme):
+    """Night <-> Day; from any other theme, to the console theme of the opposite brightness."""
+    if theme in CONSOLE_PAIR:
+        return CONSOLE_PAIR[theme]
+    return "Day" if theme in DARK_THEMES else "Night"
+
+
 def _set_native_appearance(window, theme):
     """Keep Cocoa controls in the same light/dark mode as the explicit palette."""
     try:
         if window.tk.call("tk", "windowingsystem") != "aqua":
             return
-        mode = "darkaqua" if theme == "Dark" else "aqua"
+        mode = "darkaqua" if theme in DARK_THEMES else "aqua"
         if getattr(window, "_appearance_native_mode", None) != mode:
             window.tk.call("tk::unsupported::MacWindowStyle", "appearance", window._w, mode)
             window._appearance_native_mode = mode
@@ -31,6 +44,8 @@ class Appearance:
             "accent_hover": "#9f4f34", "user": "#f0ede5", "success": "#42816b", "error": "#a64137",
             "code_background": "#f5f2eb", "code_header": "#ece8de",
             "input_border": "#968875",
+            # Status bar ground, the Colibri/attention tone, and text on accent fills.
+            "status": "#e6e2d8", "amber": "#8f5410", "on_accent": "#ffffff",
         }
         self.themes = {
             "Warm": self.warm,
@@ -49,8 +64,26 @@ class Appearance:
         }
         self.themes["Light"]["input_border"] = "#8190a8"
         self.themes["Dark"]["input_border"] = "#71809a"
+        self.themes["Light"]["status"] = "#e9eef5"
+        self.themes["Dark"].update(status="#121620", amber="#f2b866")
+        # Night console: graphite, one mint accent, dark text on accent fills.
+        # Every role has its own value: the live recolouring maps values back to roles.
+        self.themes["Night"] = dict(self.warm, background="#0d0f12", surface="#161a20", sidebar="#111418",
+                                    sidebar_hover="#1e232b", sidebar_muted="#8f98a6", ink="#e3e7ed",
+                                    muted="#a7b0bd", border="#222831", accent="#5ee6d0",
+                                    accent_hover="#7febda", user="#1a1f26", success="#45d483",
+                                    error="#ff7a7a", code_background="#08090b", code_header="#14181e",
+                                    input_border="#4a5361", status="#0a0b0e", amber="#f5b54a",
+                                    on_accent="#0b0d10")
+        self.themes["Day"] = dict(self.warm, background="#f7f8fa", surface="#ffffff", sidebar="#fbfcfd",
+                                  sidebar_hover="#e7ebf0", sidebar_muted="#5f6976", ink="#1b1f25",
+                                  muted="#4f5966", border="#e2e6ec", accent="#0b7a6c",
+                                  accent_hover="#096559", user="#eef2f5", success="#1e7a45",
+                                  error="#b42318", code_background="#f1f3f6", code_header="#e4e8ee",
+                                  input_border="#8a94a3", status="#eef1f5", amber="#a35a00",
+                                  on_accent="#fffffe")
         # Keep the same dictionary: existing event callbacks hold references to it.
-        self.theme = "Light"
+        self.theme = DEFAULT_THEME
         self.style = "Modern"
         self.path = app.chat_store.directory / "appearance.settings" if app.chat_store else None
         selected = {}
@@ -62,12 +95,13 @@ class Appearance:
                 pass
         if not isinstance(selected, dict):
             selected = {}
-        self.apply(selected.get("theme", "Light"), selected.get("style", "Modern"))
+        self.apply(selected.get("theme", DEFAULT_THEME), selected.get("style", "Modern"))
         app.root.bind_all("<Map>", self.mapped, add="+")
 
     def color_map(self, previous):
         c = self.app.COLORS
-        colors = {value.lower(): c[key] for key, value in previous.items()}
+        # on_accent can share its value with a light surface; buttons get it from update_accent_text.
+        colors = {value.lower(): c[key] for key, value in previous.items() if key != "on_accent"}
         colors.update({"#d9d4c9": c["border"], "#e7d9ca": c["user"],
                        "#e5e9f2": c["border"], "#f5f2eb": c["code_background"],
                        "#ece8de": c["code_header"]})
@@ -76,7 +110,7 @@ class Appearance:
     def update_widget(self, widget, colors, previous):
         options = widget.keys()
         roles = getattr(widget, "_appearance_roles", {})
-        role_colors = {value.lower(): key for key, value in previous.items()}
+        role_colors = {value.lower(): key for key, value in previous.items() if key != "on_accent"}
         for option in ("background", "foreground", "activebackground", "activeforeground",
                        "disabledforeground", "insertbackground", "selectbackground", "selectforeground",
                        "highlightbackground", "highlightcolor", "troughcolor", "readonlybackground"):
@@ -99,6 +133,8 @@ class Appearance:
                 elif value in colors:
                     widget.configure(**{option: colors[value]})
         widget._appearance_roles = roles
+        if isinstance(widget, tk.Button):
+            self.update_accent_text(widget)
         for attr in ("_appearance_bg", "_appearance_hover"):
             if hasattr(widget, attr):
                 value = getattr(widget, attr)
@@ -117,6 +153,15 @@ class Appearance:
                 widget.configure(font=(family, original["size"],
                                        original["weight"], original["slant"]))
 
+    def update_accent_text(self, widget):
+        """Text on an accent fill uses the theme's on_accent colour (dark on Night's mint)."""
+        c = self.app.COLORS
+        base = str(getattr(widget, "_appearance_bg", widget.cget("background"))).lower()
+        accents = (c["accent"].lower(), c["accent_hover"].lower())
+        known = {"white", "#ffffff"} | {theme["on_accent"].lower() for theme in self.themes.values()}
+        if base in accents and str(widget.cget("foreground")).lower() in known:
+            tk.Button.configure(widget, foreground=c["on_accent"], activeforeground=c["on_accent"])
+
     def walk(self, widget, colors, previous):
         if isinstance(widget, (tk.Tk, tk.Toplevel)):
             _set_native_appearance(widget, self.theme)
@@ -129,7 +174,7 @@ class Appearance:
             self.walk(event.widget, self.color_map(self.warm), self.warm)
 
     def apply(self, theme, style):
-        theme = theme if isinstance(theme, str) and theme in self.themes else "Light"
+        theme = theme if isinstance(theme, str) and theme in self.themes else DEFAULT_THEME
         style = style if style in ("Classic", "Modern") else "Modern"
         previous = dict(self.app.COLORS)
         self.theme, self.style = theme, style
@@ -143,7 +188,7 @@ class Appearance:
             native.configure(name, fieldbackground=c["surface"], foreground=c["ink"],
                              background=c["surface"], arrowcolor=c["muted"], padding=(10, 7),
                              bordercolor=c["input_border"], lightcolor=c["input_border"], darkcolor=c["input_border"],
-                             insertcolor=c["ink"], selectbackground=c["accent"], selectforeground="white")
+                             insertcolor=c["ink"], selectbackground=c["accent"], selectforeground=c["on_accent"])
             native.map(name,
                        fieldbackground=[("disabled", c["sidebar"]), ("readonly", c["surface"])],
                        foreground=[("disabled", c["muted"]), ("readonly", c["ink"])],
@@ -157,6 +202,7 @@ class Appearance:
                          padding=(14, 9), borderwidth=0, focuscolor=c["accent"])
         native.map("TNotebook.Tab", background=[("selected", c["surface"]), ("active", c["sidebar_hover"])],
                    foreground=[("selected", c["ink"]), ("active", c["ink"])])
+        self.app.root.option_add("*TCombobox*Listbox.selectForeground", c["on_accent"])
         native.configure("Horizontal.TProgressbar", background=c["accent"], troughcolor=c["sidebar_hover"],
                          borderwidth=0, thickness=4)
         for name in ("TCheckbutton", "TRadiobutton"):
@@ -169,6 +215,26 @@ class Appearance:
                              arrowcolor=c["muted"], borderwidth=0)
             native.map(name, background=[("active", c["muted"]), ("pressed", c["muted"])])
         self.walk(self.app.root, self.color_map(previous), previous)
+        refresh = getattr(self.app, "refresh_theme_controls", None)
+        if refresh is not None:
+            refresh()
+
+    def save(self):
+        """Remember the theme and style; returns an error message or None."""
+        if not self.path:
+            return None
+        try:
+            temporary = self.path.with_suffix(".tmp")
+            temporary.write_text(json.dumps({"theme": self.theme, "style": self.style}), encoding="utf-8")
+            temporary.replace(self.path)
+        except OSError as error:
+            return str(error)
+        return None
+
+    def toggle(self):
+        """The header's day/night switch."""
+        self.apply(toggled_theme(self.theme), self.style)
+        return self.save()
 
     def open(self):
         if self.window is not None and self.window.winfo_exists():
@@ -204,12 +270,8 @@ class Appearance:
 
         def change():
             self.apply(theme.get(), style.get())
-            if self.path:
-                try:
-                    temporary = self.path.with_suffix(".tmp")
-                    temporary.write_text(json.dumps({"theme": self.theme, "style": self.style}), encoding="utf-8")
-                    temporary.replace(self.path)
-                except OSError as error:
-                    status.configure(text=f"Applied, but could not save preferences: {error}")
+            error = self.save()
+            if error:
+                status.configure(text=f"Applied, but could not save preferences: {error}")
 
         self.app.button(window, "Done", window.destroy, c["accent"], "white", c["accent_hover"]).pack(anchor="e", padx=24)
