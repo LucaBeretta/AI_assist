@@ -80,6 +80,23 @@ def running_models():
     return {m["name"] for m in models if isinstance(m, dict) and "name" in m}
 
 
+def running_details():
+    """Per running model: its size, the part in GPU memory, and its context length
+    when Ollama reports one (``/api/ps``). Used by the status bar."""
+    result = ollama_api("/api/ps")
+    models = result.get("models")
+    if not isinstance(models, list):
+        raise RuntimeError("Ollama returned an invalid running-model list.")
+    details = {}
+    for model in models:
+        if not isinstance(model, dict) or not isinstance(model.get("name"), str):
+            continue
+        number = lambda key: model.get(key) if type(model.get(key)) is int and model.get(key) >= 0 else None
+        details[model["name"]] = {"size": number("size") or 0, "size_vram": number("size_vram") or 0,
+                                  "context_length": number("context_length")}
+    return details
+
+
 def ensure_ollama(progress):
     try:
         running_models()
@@ -237,7 +254,14 @@ class OllamaAssistantBase:
         "user": "#edf0ff",
         "success": "#51c7a4",
         "error": "#ad473e",
+        "status": "#e9eef5",
+        "amber": "#8f5410",
+        "on_accent": "#ffffff",
     }
+    # Plain functions the status bar's poll thread can call without touching Tk.
+    # Resolved at call time, so tests can patch the module functions.
+    running_details = staticmethod(lambda: running_details())
+    ollama_url = staticmethod(lambda: ollama_url())
 
     def __init__(self, root):
         self.root = root

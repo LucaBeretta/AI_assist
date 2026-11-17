@@ -19,7 +19,8 @@ from developer_tools import build_project_context, extract_code_blocks, fetch_mo
 from message_widgets import render_message
 from response_metrics import metrics_summary, response_metrics
 from shared_memory import MAX_NOTES, SharedMemory, memory_note
-from appearance import Appearance
+from appearance import DARK_THEMES, Appearance
+from status_bar import StatusBar, mono_family
 from developer_panel import DeveloperPanelMixin
 from feedback_ui import FeedbackMixin
 from hybrid_ui import HybridMixin, QUALITY_GUIDANCE
@@ -92,7 +93,7 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         "muted": "#657089", "border": "#dce3ed", "accent": "#5260d8",
         "accent_hover": "#424fc0", "user": "#eef2ff", "success": "#237b64", "error": "#b34545",
         "code_background": "#f3f5f9", "code_header": "#e8edf4",
-        "input_border": "#8190a8",
+        "input_border": "#8190a8", "status": "#e9eef5", "amber": "#8f5410", "on_accent": "#ffffff",
     }
 
     def __init__(self, root):
@@ -137,6 +138,8 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         self.pending_engine = None
         self.agent_file_limit = 64000
         self.last_metrics = {}
+        self.agent_step = 0
+        self.mono = mono_family(root)
         self.shared_memory = None
         self.memory_window = None
         self.deploy_dialog = None
@@ -165,6 +168,10 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         self.root.bind("<Control-n>", self.start_new_chat)
         self.refresh_history()
         self.appearance = Appearance(self)
+        self.status_bar = StatusBar(self)
+        self.root.bind("<Control-Shift-L>", lambda event: self.appearance.toggle())
+        self.root.bind("<Control-Shift-l>", lambda event: self.appearance.toggle())
+        self.refresh_theme_controls()
         self.update_checker = UpdateChecker(self)
 
     def configure_styles(self):
@@ -188,15 +195,15 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         footer = tk.Frame(self.sidebar, bg=c["sidebar"])
         footer.pack(side="bottom", fill="x", padx=18, pady=(12, 16))
         tk.Frame(footer, height=1, bg=c["border"]).pack(fill="x", pady=(0, 12))
-        tk.Label(footer, text="Local engine", bg=c["sidebar"], fg=c["muted"],
-                 font=("Segoe UI", 9), anchor="w").pack(fill="x", pady=(0, 5))
+        tk.Label(footer, text="ENGINE", bg=c["sidebar"], fg=c["sidebar_muted"],
+                 font=(self.mono, 8), anchor="w").pack(fill="x", pady=(0, 5))
         self.engine_choice = tk.StringVar(self.root, value=self.backend)
         self.engine_picker = ttk.Combobox(footer, textvariable=self.engine_choice, values=("Ollama", "Colibri"),
                                           style="Model.TCombobox", state="readonly", font=("Segoe UI", 9))
         self.engine_picker.pack(fill="x", pady=(0, 8))
         self.engine_picker.bind("<<ComboboxSelected>>", self.choose_engine)
-        tk.Label(footer, text="Model", bg=c["sidebar"], fg=c["muted"],
-                 font=("Segoe UI", 9), anchor="w").pack(fill="x", pady=(0, 5))
+        tk.Label(footer, text="MODEL", bg=c["sidebar"], fg=c["sidebar_muted"],
+                 font=(self.mono, 8), anchor="w").pack(fill="x", pady=(0, 5))
         self.model_picker = ttk.Combobox(footer, textvariable=self.model_name, style="Model.TCombobox", state="disabled", font=("Segoe UI", 9))
         self.model_picker.pack(fill="x")
         self.model_picker.bind("<<ComboboxSelected>>", self.select_model)
@@ -252,26 +259,30 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
 
         brand = tk.Frame(self.sidebar, bg=c["sidebar"])
         brand.pack(fill="x", padx=22, pady=(26, 22))
-        tk.Label(brand, text="\u25c8", bg=c["sidebar"], fg=c["accent"], font=("Segoe UI", 24)).pack(side="left", padx=(0, 10))
-        tk.Label(brand, text="AI Assist", bg=c["sidebar"], fg=c["ink"], font=("Georgia", 19, "bold")).pack(side="left")
-        self.new_chat_button = self.button(self.sidebar, "+  New chat", self.start_new_chat,
-                                           c["accent"], "white", c["accent_hover"], anchor="w")
-        self.new_chat_button.pack(fill="x", padx=18, pady=(0, 20))
+        tk.Label(brand, text="\u25c7", bg=c["sidebar"], fg=c["accent"], font=(self.mono, 15)).pack(side="left", padx=(0, 8))
+        tk.Label(brand, text="ai-assist", bg=c["sidebar"], fg=c["ink"], font=(self.mono, 13, "bold")).pack(side="left")
+        tk.Label(brand, text="local", bg=c["sidebar"], fg=c["sidebar_muted"], font=(self.mono, 8)).pack(side="left", padx=(8, 0), pady=(4, 0))
+        self.new_chat_button = self.button(self.sidebar, "+  new chat", self.start_new_chat,
+                                           c["user"], c["ink"], c["sidebar_hover"], anchor="w")
+        self.new_chat_button.config(font=(self.mono, 10), pady=8, highlightthickness=1, highlightbackground=c["border"])
+        self.new_chat_button.pack(fill="x", padx=18, pady=(0, 18))
+        tk.Label(self.sidebar, text="WORKSPACE", bg=c["sidebar"], fg=c["sidebar_muted"],
+                 font=(self.mono, 8), anchor="w").pack(fill="x", padx=24, pady=(0, 4))
         self.nav_buttons = {}
-        for mode, label in (("chat", "Chats"), ("dev", "Developer"), ("capabilities", "Capabilities")):
+        for mode, label in (("chat", "\u203a chats"), ("dev", "\u203a developer"), ("capabilities", "\u203a capabilities")):
             button = self.button(self.sidebar, label, lambda value=mode: self.show_section(value),
                                  c["sidebar"], c["ink"], c["sidebar_hover"], anchor="w")
-            button.config(pady=9, padx=16)
+            button.config(pady=6, padx=12, font=(self.mono, 10))
             button.pack(fill="x", padx=14, pady=2)
             self.nav_buttons[mode] = button
-        self.memory_button = self.button(self.sidebar, "Shared memory", self.open_shared_memory,
+        self.memory_button = self.button(self.sidebar, "\u203a shared memory", self.open_shared_memory,
                                         c["sidebar"], c["ink"], c["sidebar_hover"], anchor="w")
-        self.memory_button.config(pady=9, padx=16)
+        self.memory_button.config(pady=6, padx=12, font=(self.mono, 10))
         self.memory_button.pack(fill="x", padx=14, pady=2)
-        tk.Label(self.sidebar, text="Search chats", bg=c["sidebar"], fg=c["muted"],
-                 font=("Segoe UI", 9, "bold"), anchor="w").pack(fill="x", padx=22, pady=(24, 10))
+        tk.Label(self.sidebar, text="RECENT", bg=c["sidebar"], fg=c["sidebar_muted"],
+                 font=(self.mono, 8), anchor="w").pack(fill="x", padx=24, pady=(20, 6))
         self.history_search = tk.StringVar(self.root)
-        search = ttk.Entry(self.sidebar, textvariable=self.history_search, font=("Segoe UI", 10))
+        search = ttk.Entry(self.sidebar, textvariable=self.history_search, font=(self.mono, 9))
         search.pack(fill="x", padx=18, pady=(0, 8), ipady=4)
         self.history_search.trace_add("write", self.search_history)
         self.sidebar_canvas = tk.Canvas(self.sidebar, bg=c["sidebar"], highlightthickness=0, width=1)
@@ -281,6 +292,14 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         self.sidebar_canvas.bind("<Configure>", lambda event: self.sidebar_canvas.itemconfigure(self.sidebar_window, width=event.width))
         self.sidebar_content.bind("<Configure>", lambda event: self.sidebar_canvas.configure(scrollregion=self.sidebar_canvas.bbox("all")))
         self.history_buttons = []
+
+    def refresh_theme_controls(self):
+        """Keep the header's day/night switch showing the mode it switches to."""
+        if hasattr(self, "theme_button") and hasattr(self, "appearance"):
+            dark = self.appearance.theme in DARK_THEMES
+            self.theme_button.config(text="\u2600" if dark else "\u263e")
+        if hasattr(self, "status_bar"):
+            self.status_bar.render(self.status_bar.snapshot())
 
     def toggle_model_controls(self):
         if self.model_controls_expanded:
@@ -311,13 +330,13 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         self.main_frame = tk.Frame(self.root, bg=c["background"])
         self.main_frame.pack(side="left", fill="both", expand=True)
         header = tk.Frame(self.main_frame, bg=c["background"])
-        header.pack(fill="x", padx=32, pady=(22, 20))
+        header.pack(fill="x", padx=28, pady=(14, 12))
         heading = tk.Frame(header, bg=c["background"])
         heading.pack(side="left", fill="x", expand=True)
-        self.heading_label = tk.Label(heading, text="New chat", bg=c["background"], fg=c["ink"], font=("Georgia", 19, "bold"), anchor="w", wraplength=610)
+        self.heading_label = tk.Label(heading, text="New chat", bg=c["background"], fg=c["ink"], font=("Segoe UI", 14, "bold"), anchor="w", wraplength=520)
         self.heading_label.pack(fill="x")
-        self.chat_subtitle = tk.Label(heading, text="Your ideas. Your models. Your workspace.", bg=c["background"], fg=c["muted"], font=("Segoe UI", 9), anchor="w")
-        self.chat_subtitle.pack(fill="x", pady=(4, 0))
+        self.chat_subtitle = tk.Label(heading, text="Your ideas. Your models. Your workspace.", bg=c["background"], fg=c["muted"], font=(self.mono, 9), anchor="w")
+        self.chat_subtitle.pack(fill="x", pady=(2, 0))
         self.chat_menu = tk.Menu(self.root, tearoff=False)
         self.chat_menu.add_command(label="Rename chat", command=self.rename_chat)
         self.chat_menu.add_command(label="Export chat...", command=self.export_chat)
@@ -326,7 +345,16 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         self.chat_menu.add_command(label="Delete chat", command=self.delete_chat)
         self.chat_actions = self.button(header, "Chat options", lambda: self.chat_menu.tk_popup(self.chat_actions.winfo_rootx(), self.chat_actions.winfo_rooty() + self.chat_actions.winfo_height()),
                                         c["background"], c["muted"], c["user"])
+        self.chat_actions.config(font=(self.mono, 9), padx=10, pady=5)
         self.chat_actions.pack(side="right")
+        self.theme_button = self.button(header, "\u2600", lambda: self.appearance.toggle(),
+                                        c["background"], c["muted"], c["user"])
+        self.theme_button.config(font=("Segoe UI Symbol", 11), padx=9, pady=3, highlightthickness=1, highlightbackground=c["border"])
+        self.theme_button.pack(side="right", padx=(0, 8))
+        self.model_chip = self.button(header, "\u25cf model", self.toggle_model_controls,
+                                      c["surface"], c["ink"], c["user"])
+        self.model_chip.config(font=(self.mono, 9), padx=10, pady=5, highlightthickness=1, highlightbackground=c["border"])
+        self.model_chip.pack(side="right", padx=(0, 8))
         tk.Frame(self.main_frame, bg=c["border"], height=1).pack(fill="x")
         self.content_area = tk.Frame(self.main_frame, bg=c["background"])
         self.content_area.pack(fill="both", expand=True)
@@ -339,13 +367,14 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
 
         composer_area = tk.Frame(self.chat_frame, bg=c["background"])
         composer_area.pack(side="bottom", fill="x", pady=(12, 22))
-        self.composer_frame = tk.Frame(composer_area, bg=c["surface"], highlightbackground=c["input_border"], highlightthickness=1)
+        self.composer_frame = tk.Frame(composer_area, bg=c["surface"], highlightbackground=c["input_border"],
+                                       highlightcolor=c["accent"], highlightthickness=1)
         self.composer_frame.pack(fill="x", padx=32)
         composer_area.bind("<Configure>", lambda event: self.composer_frame.pack_configure(
             padx=max(24, (event.width - 880) // 2)))
         self.composer_label = tk.Label(self.composer_frame, text="Message", bg=c["surface"], fg=c["muted"],
-                                       font=("Segoe UI", 9, "bold"), anchor="w")
-        self.composer_label.pack(fill="x", padx=20, pady=(12, 0))
+                                       font=(self.mono, 8), anchor="w")
+        self.composer_label.pack(fill="x", padx=20, pady=(10, 0))
         self.input_box = tk.Text(self.composer_frame, height=3, width=1, wrap="word", font=("Segoe UI", 12),
                                  bg=c["surface"], fg=c["ink"], insertbackground=c["accent"], selectbackground=c["user"],
                                  selectforeground=c["ink"], relief="flat", borderwidth=0, highlightthickness=0,
@@ -356,9 +385,10 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         self.input_box.bind("<FocusOut>", lambda event: self.composer_frame.config(highlightbackground=c["input_border"]))
         footer = tk.Frame(self.composer_frame, bg=c["surface"])
         footer.pack(fill="x", padx=14, pady=(0, 12))
-        self.composer_hint = tk.Label(footer, text="Choose a model to begin", bg=c["surface"], fg=c["muted"], font=("Segoe UI", 9), anchor="w", wraplength=330, justify="left")
+        self.composer_hint = tk.Label(footer, text="Choose a model to begin", bg=c["surface"], fg=c["muted"], font=(self.mono, 8), anchor="w", wraplength=330, justify="left")
         self.composer_hint.pack(side="left", fill="x", expand=True)
-        self.send_button = self.button(footer, "Send  \u2191", self.send_or_stop, c["accent"], "white", c["accent_hover"])
+        self.send_button = self.button(footer, "Send  \u2191", self.send_or_stop, c["accent"], c["on_accent"], c["accent_hover"])
+        self.send_button.config(font=(self.mono, 10, "bold"), padx=14, pady=6)
         self.send_button.pack(side="right")
         status = tk.Frame(self.chat_frame, bg=c["background"])
         status.pack(side="bottom", fill="x", padx=28)
@@ -384,11 +414,11 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         c = self.COLORS
         self.empty_state = tk.Frame(self.message_frame, bg=c["background"])
         self.empty_state.pack(fill="x", padx=40, pady=(60, 30))
-        tk.Label(self.empty_state, text="\u25c8  YOUR LOCAL WORKSPACE", font=("Segoe UI", 9, "bold"),
+        tk.Label(self.empty_state, text="\u25c7  ai-assist \u00b7 local workspace", font=(self.mono, 9),
                  bg=c["background"], fg=c["accent"]).pack(anchor="w", pady=(0, 18))
         title = (("What needs to change?" if self.project_path else "Start with your project.")
                  if self.current_mode == "dev" else "What are we working on?")
-        title_label = tk.Label(self.empty_state, text=title, font=("Georgia", 28), bg=c["background"],
+        title_label = tk.Label(self.empty_state, text=title, font=("Segoe UI", 24, "bold"), bg=c["background"],
                                fg=c["ink"], wraplength=620, anchor="w", justify="left")
         title_label.pack(fill="x")
         description = ("Read code, build features, fix bugs, and run tests. Open a project folder to begin; review edits and commands as you work."
@@ -906,8 +936,9 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         card.pack(fill="x", padx=24, pady=(16, 6))
         heading = tk.Frame(card, bg=bg)
         heading.pack(fill="x", padx=14, pady=(10, 3))
-        tk.Label(heading, text="YOU" if role == "user" else ("AI ASSIST" if role == "ai" else sender.upper()),
-                 bg=bg, fg=c["error"] if role == "error" else c["muted"], font=("Segoe UI", 8, "bold")).pack(side="left")
+        tk.Label(heading, text="> you" if role == "user" else ("\u25c7 ai-assist" if role == "ai" else sender.lower()),
+                 bg=bg, fg=c["error"] if role == "error" else (c["accent"] if role == "ai" else c["muted"]),
+                 font=(self.mono, 8, "bold")).pack(side="left")
         button = self.button(heading, "Copy", None, bg, c["muted"], c["user"])
         button.config(font=("Segoe UI", 8), padx=6, pady=2, command=lambda: self.copy_message(message, button))
         button.pack(side="right")
@@ -1419,6 +1450,9 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
                     self.dev_tabs.select(self.source_tab)
             elif request == self.request_serial and kind == "agent_event":
                 self.log_activity(data)
+                if data.get("type") == "tool_start" and isinstance(data.get("step"), int):
+                    self.agent_step = data["step"]
+                if data.get("type") == "status":
                 if data.get("type") in ("status", "hybrid_stage"):
                     self.set_status(data.get("text", "Agent working..."))
             elif request == self.request_serial and kind == "approval":
@@ -1438,6 +1472,9 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
             self.stream_card = None
         self.is_waiting = False
         self.agent_active = False
+        self.agent_step = 0
+        if hasattr(self, "status_bar"):
+            self.status_bar.refresh_now()
         self.activity.stop()
         self.activity.pack_forget()
         if stopped:
@@ -1657,4 +1694,6 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
             self.saver.stop()
         self.html_previews.close()
         self.capabilities_view.close()
+        if hasattr(self, "status_bar"):
+            self.status_bar.close()
         super().close()

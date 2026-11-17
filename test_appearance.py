@@ -88,10 +88,10 @@ class AppearanceTests(unittest.TestCase):
             self.assertEqual(muted.cget("fg"), self.app.COLORS["muted"])
             self.assertEqual(muted.cget("bg"), self.app.COLORS["background"])
 
-    def test_new_install_defaults_to_light_modern(self):
+    def test_new_install_defaults_to_night_modern(self):
         appearance = Appearance(self.app)
-        self.assertEqual((appearance.theme, appearance.style), ("Light", "Modern"))
-        self.assertEqual(self.app.COLORS["background"], "#f8fafc")
+        self.assertEqual((appearance.theme, appearance.style), ("Night", "Modern"))
+        self.assertEqual(self.app.COLORS["background"], "#0d0f12")
 
     def test_saved_warm_classic_preferences_are_preserved(self):
         Path(self.folder.name, "appearance.settings").write_text(
