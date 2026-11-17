@@ -68,6 +68,16 @@ class DeveloperPanelMixin:
             wraplength=320, justify="left", anchor="w",
         )
         self.project_label.pack(fill="x", padx=14, pady=(10, 12))
+        verification = tk.Frame(self.dev_panel, bg=c["sidebar"])
+        verification.pack(fill="x", padx=14, pady=(0, 12))
+        self.verification_label = tk.Label(verification, text="No command checks recorded for this task.",
+                                          bg=c["sidebar"], fg=c["muted"], font=("Segoe UI", 9),
+                                          wraplength=310, justify="left", anchor="w")
+        self.verification_label.pack(fill="x")
+        self.verify_button = self.button(verification, "Check result", self.prepare_verification,
+                                         c["sidebar"], c["accent"], c["sidebar_hover"])
+        self.verify_button.config(font=("Segoe UI", 9), padx=0, pady=5)
+        self.verify_button.pack(anchor="w", pady=(2, 0))
 
         # These remain real buttons so existing state checks and invocations
         # work; the project menu makes these secondary, optional actions.

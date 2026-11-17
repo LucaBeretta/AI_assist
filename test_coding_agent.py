@@ -236,6 +236,28 @@ class AgentTests(unittest.TestCase):
             self.assertEqual(invocation[:4], ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command"])
             self.assertIn("creationflags", popen.call_args.kwargs)
         self.assertIn("Command exited with code 0.\nchecked", self.tool_results(result)[0])
+        outcome = next(event for event in self.events if event["type"] == "command_succeeded")
+        self.assertEqual(outcome["command"], action["command"])
+        self.assertEqual(outcome["text"], self.tool_results(result)[0])
+
+    def test_failed_command_emits_observed_failure_without_a_success_claim(self):
+        process = FakeProcess(output=b"check failed\n")
+        process.returncode = 7
+        with patch("coding_agent.subprocess.Popen", return_value=process):
+            result, _ = self.run_responses([
+                tool_response("run_command", {"command": "run-check"}), final_response(),
+            ])
+        outcomes = [event for event in self.events if event["type"].startswith("command_")]
+        self.assertEqual(outcomes, [{"type": "command_failed", "command": "run-check",
+                                    "text": "Command exited with code 7.\ncheck failed\n"}])
+        self.assertEqual(outcomes[0]["text"], self.tool_results(result)[0])
+
+    def test_denied_command_emits_no_command_outcome(self):
+        with patch("coding_agent.subprocess.Popen") as popen:
+            self.run_responses([tool_response("run_command", {"command": "echo denied"}), final_response()],
+                               approval=lambda action: False)
+        popen.assert_not_called()
+        self.assertFalse(any(event["type"].startswith("command_") for event in self.events))
 
     def test_command_timeout_stops_own_process_tree(self):
         process = FakeProcess(running=True)
@@ -247,6 +269,9 @@ class AgentTests(unittest.TestCase):
             ])
         terminate.assert_called_once_with(process)
         self.assertIn("timed out after 1 seconds", self.tool_results(result)[0])
+        outcome = next(event for event in self.events if event["type"] == "command_timed_out")
+        self.assertEqual(outcome["command"], "long-command")
+        self.assertEqual(outcome["text"], self.tool_results(result)[0])
 
     def test_command_cancellation_stops_own_process_tree(self):
         cancel = threading.Event()
@@ -261,6 +286,7 @@ class AgentTests(unittest.TestCase):
             with self.assertRaises(AgentCancelled):
                 self.run_responses([tool_response("run_command", {"command": "long-command"})], cancel_event=cancel)
         terminate.assert_called_once_with(process)
+        self.assertFalse(any(event["type"].startswith("command_") for event in self.events))
 
     def test_cancel_during_approval_performs_no_action(self):
         cancel = threading.Event()

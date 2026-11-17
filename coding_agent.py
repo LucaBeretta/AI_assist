@@ -326,7 +326,7 @@ def _terminate_process_tree(process):
         process.kill()
 
 
-def _run_command(project, arguments, approve_action, cancel_event):
+def _run_command(project, arguments, approve_action, cancel_event, on_event=None):
     command = arguments.get("command")
     if not isinstance(command, str) or not command.strip() or len(command) > 12000 or "\x00" in command:
         raise ValueError("run_command requires a nonempty shell command of at most 12,000 characters.")
@@ -398,7 +398,12 @@ def _run_command(project, arguments, approve_action, cancel_event):
         if truncated[0]:
             result = _shorten(result + "\n", _MAX_OUTPUT_CHARS, "Command output shortened at 20,000 characters.")
     status = f"Command timed out after {timeout} seconds; its process tree was stopped." if timed_out else f"Command exited with code {process.returncode}."
-    return status + "\n" + result
+    result = status + "\n" + result
+    if on_event is not None:
+        outcome = ("command_timed_out" if timed_out else
+                   "command_succeeded" if process.returncode == 0 else "command_failed")
+        _emit(on_event, outcome, result, command=command)
+    return result
 
 
 def _execute_tool(project, name, arguments, approve_action, cancel_event, on_event):
@@ -414,7 +419,7 @@ def _execute_tool(project, name, arguments, approve_action, cancel_event, on_eve
     if name == "write_file":
         return _write_file(project, arguments, approve_action, cancel_event, on_event)
     if name == "run_command":
-        return _run_command(project, arguments, approve_action, cancel_event)
+        return _run_command(project, arguments, approve_action, cancel_event, on_event)
     raise ValueError(f"Unknown tool '{name}'. Use one of the provided tools.")
 
 

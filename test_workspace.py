@@ -178,6 +178,72 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         self.assertEqual(self.app.changes_preview.get("1.0", "end-1c"), diff)
         self.assertEqual((self.project / "main.py").read_text(encoding="utf-8"), self.original_code)
 
+    def test_feedback_preserves_draft_and_waits_for_explicit_send(self):
+        self.set_input("Explain this idea")
+        self.app.send_button.invoke()
+        self.wait_for(lambda: not self.app.is_waiting, "original answer")
+        original = deepcopy(self.app.conversation)
+        self.set_input("Keep this unsent draft.  ")
+        button = next(widget for widget in descendants(self.app.message_frame)
+                      if isinstance(widget, tk.Button) and widget.cget("text") == "Give feedback")
+        button.invoke()
+        window = self.app.feedback_window
+        window.feedback_text.insert("1.0", "Use a concrete example.")
+        window.criteria_text.insert("1.0", "Under 100 words and easy to understand.")
+        window.apply_button.invoke()
+        draft = self.app.input_box.get("1.0", "end-1c")
+        self.assertTrue(draft.startswith("Keep this unsent draft.  \n\n"))
+        self.assertIn(self.request.return_value, draft)
+        self.assertIn("Use a concrete example.", draft)
+        self.assertIn("Under 100 words", draft)
+        self.assertEqual(self.request.call_count, 1)
+        self.assertEqual(self.app.conversation, original)
+        self.assertIsNone(self.app.feedback_window)
+        self.assertEqual(self.load_saved(self.app.current_chat["id"])["draft"], draft)
+        self.app.send_button.invoke()
+        self.wait_for(lambda: not self.app.is_waiting, "revised answer")
+        self.assertEqual(self.request.call_count, 2)
+        self.assertEqual(self.app.conversation[-2]["content"], draft)
+        self.assertEqual(self.app.conversation[:2], original)
+
+    def test_feedback_keyword_opens_local_feedback_without_a_request(self):
+        self.set_input("Explain this idea")
+        self.app.send_button.invoke()
+        self.wait_for(lambda: not self.app.is_waiting, "original answer")
+        self.set_input("/feedback")
+        self.app.send_button.invoke()
+        self.assertIsNotNone(self.app.feedback_window)
+        self.assertEqual(self.request.call_count, 1)
+        self.assertEqual(len(self.app.conversation), 2)
+        self.app.feedback_window.apply_button.invoke()
+        self.assertIsNotNone(self.app.feedback_window, "Empty feedback must not create a follow-up")
+        self.app.new_chat()
+        self.assertIsNone(self.app.feedback_window)
+
+    def test_developer_verification_uses_actual_events_and_persists(self):
+        self.enter_project()
+        self.app.log_activity(dict(type="request_start", text="Task started"))
+        self.app.log_activity(dict(type="assistant", text="All tests passed."))
+        self.assertIn("No command checks", self.app.verification_label.cget("text"))
+        self.app.log_activity(dict(type="command_succeeded", text="Command exited with code 0.",
+                                   command="python -m unittest"))
+        self.app.log_activity(dict(type="changed", text="Updated main.py", path="main.py", diff="+change"))
+        self.assertIn("1 succeeded", self.app.verification_label.cget("text"))
+        self.assertIn("check again", self.app.verification_label.cget("text"))
+        self.app.persist_current()
+        identity = self.app.current_chat["id"]
+        self.load_saved(identity)
+        self.app.start_new_chat()
+        self.app.open_chat(identity)
+        self.wait_for(lambda: self.app.project_ready, "verification restored")
+        self.assertIn("check again", self.app.verification_label.cget("text"))
+        with patch("workspace_ui.run_agent") as run:
+            self.app.verify_button.invoke()
+            run.assert_not_called()
+        self.assertIn("appropriate", self.app.input_box.get("1.0", "end-1c"))
+        self.app.log_activity(dict(type="request_start", text="Next task started"))
+        self.assertIn("No command checks", self.app.verification_label.cget("text"))
+
     def close_workspace(self):
         for release in self.worker_releases:
             release.set()
@@ -762,7 +828,8 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         self.assertEqual(saved["messages"], [{"role": "user", "content": "Improve main.py"},
                                              {"role": "assistant", "content": "Updated main.py and checked the result."}])
         self.assertEqual(saved["activity"], self.app.dev_activity)
-        self.assertEqual(saved["activity"][0], {"type": "tool_call", "text": "Read main.py\nExact café output  ",
+        self.assertEqual(saved["activity"][0]["type"], "request_start")
+        self.assertEqual(saved["activity"][1], {"type": "tool_call", "text": "Read main.py\nExact café output  ",
                                                   "path": "main.py"})
         self.assertEqual(saved["activity"][-1]["type"], "tool_result")
         self.assertIn("+print('reviewed", self.app.changes_preview.get("1.0", "end-1c"))
