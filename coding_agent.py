@@ -103,6 +103,16 @@ _MALFORMED_CALL = (
 )
 
 
+def _retry_message(history):
+    """Ask for a readable retry and repeat the task, so the retry is not taken as the new task."""
+    task = next((message.get("content", "") for message in reversed(history)
+                 if message.get("role") == "user" and not message.get("content", "").startswith(_MALFORMED_CALL)), "")
+    if not isinstance(task, str) or not task.strip():
+        return _MALFORMED_CALL
+    return (f"{_MALFORMED_CALL}\n\nContinue the original task below exactly as specified "
+            f"(same names, values and files):\n\n{_shorten(task, 6000)}")
+
+
 def _typed_value(tool, key, text):
     """Convert an XML parameter to the JSON type the tool schema declares."""
     schema = next((item["function"]["parameters"]["properties"] for item in TOOLS
@@ -638,7 +648,7 @@ def _run_agent(host, model, project_root, messages, on_event, approve_action,
             calls, remaining, malformed = text_tool_calls(content)
             if malformed:
                 history.append({"role": "assistant", "content": content})
-                history.append({"role": "user", "content": _MALFORMED_CALL})
+                history.append({"role": "user", "content": _retry_message(history)})
                 _emit(on_event, "status", f"Step {step + 1}: the model wrote an unreadable tool call; asking it to retry.")
                 continue
             if calls:

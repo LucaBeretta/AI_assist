@@ -93,6 +93,7 @@ class AgentRecoveryTests(unittest.TestCase):
         retries = [message for message in result["messages"]
                    if message["role"] == "user" and "could not be read" in message["content"]]
         self.assertEqual(len(retries), 1)
+        self.assertIn("Check main.py", retries[0]["content"])
         self.assertTrue(any("retry" in event.get("text", "") for event in self.events if isinstance(event, dict)))
 
     def test_default_step_limit_is_raised_and_offered(self):
