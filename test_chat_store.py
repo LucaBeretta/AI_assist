@@ -93,6 +93,27 @@ class ChatStoreTests(unittest.TestCase):
         saved["activity"][0]["text"] = "Local mutation"
         self.assertEqual(self.store.load(chat["id"])["activity"], activity)
 
+    def test_applied_change_diffs_survive_restart_and_invalid_diffs_do_not_overwrite(self):
+        chat = self.store.create(mode="dev", project_path="C:/Projects/demo")
+        diff = ("--- a/src/greeting.py\n+++ b/src/greeting.py\n@@ -1,2 +1,3 @@\n"
+                "-name = 'world'\n+name = 'caf\u00e9'\n+message = f'Hello, {name}!'\n"
+                " print(message)\n\\ No newline at end of file\n")
+        chat["activity"] = [
+            {"type": "status", "text": "Inspecting project"},
+            {"type": "changed", "text": "Updated src/greeting.py", "path": "src/greeting.py", "diff": diff},
+        ]
+        self.store.save(chat)
+        restored = ChatStore(self.directory).load(chat["id"])
+        self.assertEqual(restored["activity"], chat["activity"])
+        path = self.directory / f"{chat['id']}.json"
+        original = path.read_bytes()
+        for invalid in (None, 42, True, [], {}):
+            changed = deepcopy(restored)
+            changed["activity"][1]["diff"] = invalid
+            with self.subTest(diff=invalid), self.assertRaises(ChatStoreError):
+                self.store.save(changed)
+            self.assertEqual(path.read_bytes(), original)
+
     def test_native_agent_history_preserves_tools_thinking_and_json_arguments(self):
         chat = self.store.create(mode="dev")
         history = [

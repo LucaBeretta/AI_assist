@@ -20,6 +20,7 @@ from message_widgets import render_message
 from response_metrics import metrics_summary, response_metrics
 from shared_memory import MAX_NOTES, SharedMemory, memory_note
 from appearance import Appearance
+from developer_panel import DeveloperPanelMixin
 from update_checker import UpdateChecker
 
 
@@ -82,7 +83,7 @@ def file_limit_warning(limit, context, ram_free=None):
     return "\n\n".join(lines)
 
 
-class WorkspaceMixin:
+class WorkspaceMixin(DeveloperPanelMixin):
     COLORS = {
         "background": "#f8fafc", "surface": "#ffffff", "sidebar": "#f1f5f9",
         "sidebar_hover": "#e2e8f0", "sidebar_muted": "#6b778c", "ink": "#172033",
@@ -97,6 +98,7 @@ class WorkspaceMixin:
         self.current_chat = None
         self.current_mode = "chat"
         self.current_section = "chat"
+        self.section_chat_ids = {}
         self.history_records = []
         self.history_limit = 30
         self.saved_snapshot = None
@@ -370,92 +372,33 @@ class WorkspaceMixin:
         self.chat_canvas.itemconfigure(self.chat_window, width=width)
         self.chat_canvas.coords(self.chat_window, max(0, (event.width - width) // 2), 0)
 
-    def build_developer_panel(self):
-        c = self.COLORS
-        self.dev_panel = tk.Frame(self.chat_section, bg=c["sidebar"], width=285)
-        self.dev_panel.pack_propagate(False)
-        tk.Label(self.dev_panel, text="Project workspace", bg=c["sidebar"], fg=c["ink"], font=("Segoe UI", 12, "bold"), anchor="w").pack(fill="x", padx=14, pady=(16, 8))
-        self.project_directory = tk.StringVar(self.root)
-        tk.Label(self.dev_panel, text="Folder for reading and writing files", bg=c["sidebar"], fg=c["muted"],
-                 font=("Segoe UI", 9)).pack(anchor="w", padx=14)
-        self.project_entry = ttk.Entry(self.dev_panel, textvariable=self.project_directory, font=("Segoe UI", 9))
-        self.project_entry.pack(fill="x", padx=12, pady=(5, 5))
-        self.project_entry.bind("<Return>", lambda event: self.use_project_directory())
-        self.use_project_button = self.button(self.dev_panel, "Use folder", self.use_project_directory, c["sidebar_hover"], c["ink"], "#d9d4c9")
-        self.use_project_button.pack(fill="x", padx=12, pady=(0, 5))
-        self.choose_project_button = self.button(self.dev_panel, "Browse folders…", self.choose_project, c["sidebar_hover"], c["ink"], "#d9d4c9")
-        self.choose_project_button.pack(fill="x", padx=12)
-        self.deploy_button = self.button(self.dev_panel, "Deploy to Vercel…", self.open_deploy,
-                                         c["accent"], "white", c["accent_hover"])
-        self.deploy_button.pack(fill="x", padx=12, pady=(6, 0))
-        self.project_label = tk.Label(self.dev_panel, text="Choose a project to use the coding agent.", bg=c["sidebar"], fg=c["muted"], font=("Segoe UI", 9), wraplength=250, justify="left", anchor="w")
-        self.project_label.pack(fill="x", padx=14, pady=10)
-        self.dev_tabs = ttk.Notebook(self.dev_panel)
-        self.dev_tabs.pack(fill="both", expand=True, padx=10, pady=(0, 10))
-        files = tk.Frame(self.dev_tabs, bg=c["sidebar"])
-        code = tk.Frame(self.dev_tabs, bg=c["sidebar"])
-        log = tk.Frame(self.dev_tabs, bg=c["sidebar"])
-        self.dev_tabs.add(files, text="Files")
-        self.dev_tabs.add(code, text="Code")
-        self.dev_tabs.add(log, text="Activity")
-        self.activity_tab = log
-        self.files_list = tk.Listbox(files, selectmode="extended", exportselection=False, font=("Consolas", 9),
-                                     bg=c["surface"], fg=c["ink"], selectbackground=c["sidebar_hover"], selectforeground=c["ink"],
-                                     borderwidth=0, highlightthickness=0)
-        self.files_list.pack(fill="both", expand=True, pady=8)
-        self.files_list.bind("<Double-Button-1>", self.preview_project_file)
-        self.attach_button = self.button(files, "Pin selected files", self.attach_selected_files, c["sidebar_hover"], c["ink"], "#d9d4c9")
-        self.attach_button.pack(fill="x", pady=(0, 6))
-        self.preview_file_button = self.button(files, "Preview HTML in browser", self.preview_html_file,
-                                               c["sidebar_hover"], c["ink"], "#d9d4c9")
-        self.preview_file_button.pack(fill="x", pady=(0, 6))
-        self.context_label = tk.Label(files, text="No pinned files. The agent can inspect project text files.", bg=c["sidebar"], fg=c["muted"], font=("Segoe UI", 8), wraplength=240, justify="left")
-        self.context_label.pack(fill="x", pady=(0, 8))
-        limit_row = tk.Frame(files, bg=c["sidebar"])
-        limit_row.pack(fill="x", pady=(8, 0), before=self.files_list)
-        tk.Label(limit_row, text="Largest file the agent reads", bg=c["sidebar"], fg=c["muted"], font=("Segoe UI", 8)).pack(anchor="w")
-        self.file_limit_choice = tk.StringVar(self.root, value=file_limit_label(self.agent_file_limit))
-        self.file_limit_picker = ttk.Combobox(limit_row, textvariable=self.file_limit_choice, state="readonly",
-                                              values=[file_limit_label(value) for value in FILE_LIMIT_CHOICES], font=("Segoe UI", 9))
-        self.file_limit_picker.pack(fill="x", pady=(2, 0))
-        self.file_limit_picker.bind("<<ComboboxSelected>>", self.choose_file_limit)
-        self.code_list = ttk.Combobox(code, state="readonly", font=("Segoe UI", 9))
-        self.code_list.pack(fill="x", pady=8)
-        self.code_list.bind("<<ComboboxSelected>>", self.preview_artifact)
-        self.code_preview = scrolledtext.ScrolledText(code, width=1, wrap="none", font=("Consolas", 9), bg=c["surface"], fg=c["ink"], borderwidth=0, state="disabled")
-        self.code_preview._aiassist_code = True
-        self.code_preview.pack(fill="both", expand=True)
-        self.save_code_button = self.button(code, "Save selected code...", self.save_selected_artifact, c["sidebar_hover"], c["ink"], "#d9d4c9")
-        self.save_code_button.pack(fill="x", pady=8)
-        self.preview_code_button = self.button(code, "Preview HTML in browser", self.preview_selected_html,
-                                               c["sidebar_hover"], c["ink"], "#d9d4c9")
-        self.preview_code_button.config(state="disabled")
-        self.preview_code_button.pack(fill="x", pady=(0, 8))
-        self.dev_log = scrolledtext.ScrolledText(log, width=1, wrap="word", font=("Consolas", 9), bg=c["surface"], fg=c["ink"], borderwidth=0, state="disabled")
-        self.dev_log._aiassist_code = True
-        self.dev_log.pack(fill="both", expand=True, pady=8)
-        self.stop_agent_button = self.button(log, "Stop agent", self.stop_agent, c["sidebar_hover"], c["error"], "#d9d4c9")
-        self.stop_agent_button.pack(fill="x", pady=(0, 8))
-
     def show_empty_state(self):
         c = self.COLORS
         self.empty_state = tk.Frame(self.message_frame, bg=c["background"])
         self.empty_state.pack(fill="x", padx=40, pady=(60, 30))
         tk.Label(self.empty_state, text="\u25c8  YOUR LOCAL WORKSPACE", font=("Segoe UI", 9, "bold"),
                  bg=c["background"], fg=c["accent"]).pack(anchor="w", pady=(0, 18))
-        title = "Let's build something." if self.current_mode == "dev" else "What are we working on?"
+        title = (("What needs to change?" if self.project_path else "Start with your project.")
+                 if self.current_mode == "dev" else "What are we working on?")
         title_label = tk.Label(self.empty_state, text=title, font=("Georgia", 28), bg=c["background"],
                                fg=c["ink"], wraplength=620, anchor="w", justify="left")
         title_label.pack(fill="x")
-        description = ("Choose a project and a tool-capable model. Review changes and commands as the agent works."
+        description = ("Read code, build features, fix bugs, and run tests. Open a project folder to begin; review edits and commands as you work."
                        if self.current_mode == "dev" else "A question, a rough idea, a fresh start. Bring it here.\nYour models run locally, on your computer.")
+        if self.current_mode == "dev" and self.project_path:
+            description = "Describe the change you need. Inspect source, review applied diffs, and check command results as you work."
         description_label = tk.Label(self.empty_state, text=description, font=("Segoe UI", 11),
                                      bg=c["background"], fg=c["muted"], wraplength=620, justify="left", anchor="w")
         description_label.pack(fill="x", pady=(12, 28))
+        if self.current_mode == "dev" and not self.project_path:
+            self.dev_intro_button = self.button(self.empty_state, "Open a project...", self.choose_project,
+                                                 c["accent"], "white", c["accent_hover"])
+            self.dev_intro_button.pack(anchor="w", pady=(0, 20))
         self.suggestion_buttons = []
         prompts = ([('Explore this project  \u2197', 'Inspect this project and explain its structure. Suggest the most useful next improvement.'),
                     ('Fix a problem  \u2197', 'Find a concrete bug in this project, explain it, and propose a focused fix with tests.'),
-                    ('Plan a feature  \u2197', 'Inspect this project and help me plan a new feature. Ask what I want to build.'),
+                    ('Build a feature  \u2197', 'Help me implement a feature in this project. First inspect its structure and ask what I want to build. Propose focused changes and verify them with appropriate tests.'),
+                    ('Add or run tests  \u2197', 'Inspect this project to identify its test framework and test commands. Run the relevant tests with my approval, explain any failures, and propose focused fixes or missing tests.'),
                     ('Review the code  \u2197', 'Review this project for concrete correctness issues. Explain your findings before proposing edits.')]
                    if self.current_mode == 'dev' else [('Explain an idea  \u2197', 'Explain a complex idea with a useful everyday example.'),
                                                      ('Help me write  \u2197', 'Help me turn a rough idea into clear, concise writing.'),
@@ -482,6 +425,16 @@ class WorkspaceMixin:
                                         uniform="suggestions" if columns == 2 else "")
 
         self.empty_state.bind("<Configure>", resize_empty)
+        if self.current_mode == "dev" and not self.project_path:
+            recent = [record for record in self.history_records if record["mode"] == "dev"][:2]
+            if recent:
+                tk.Label(self.empty_state, text="Resume previous work", font=("Segoe UI", 9, "bold"),
+                         bg=c["background"], fg=c["muted"]).pack(anchor="w", pady=(20, 6))
+                for record in recent:
+                    button = self.button(self.empty_state, record["title"],
+                                         lambda identity=record["id"]: self.open_chat(identity),
+                                         c["background"], c["ink"], c["user"], anchor="w", wraplength=380)
+                    button.pack(fill="x", pady=2)
 
     def busy(self):
         return (self.closing or self.is_waiting or self.is_loading_models or self.lifecycle_busy or self.project_loading
@@ -494,6 +447,11 @@ class WorkspaceMixin:
         busy = self.busy()
         self.engine_picker.config(state="disabled" if busy or self.closing else "readonly")
         self.file_limit_picker.config(state="disabled" if busy else "readonly")
+        self.project_tools_button.config(state="disabled" if busy else "normal")
+        self.project_tools_menu.entryconfigure("Refresh files", state="normal" if self.project_ready and not busy else "disabled")
+        intro = getattr(self, "dev_intro_button", None)
+        if intro is not None and intro.winfo_exists():
+            intro.config(state="disabled" if busy else "normal")
         deploying = self.deploy_dialog is not None and self.deploy_dialog.running
         self.deploy_button.config(state="disabled" if busy else "normal")
         self.preview_file_button.config(state="normal" if self.project_ready and not self.closing else "disabled")
@@ -535,7 +493,10 @@ class WorkspaceMixin:
             self.heading_label.config(text="Capabilities")
             self.chat_subtitle.config(text="What your model advertises, and what this workspace provides.")
         else:
-            self.heading_label.config(text=self.current_chat["title"] if self.current_chat else ("Developer" if self.current_mode == "dev" else "New chat"))
+            title = self.current_chat["title"] if self.current_chat else ("Developer" if self.current_mode == "dev" else "New chat")
+            if self.current_mode == "dev" and title == "New chat":
+                title = Path(self.project_path).name if self.project_path else "Developer"
+            self.heading_label.config(text=title)
             self.chat_subtitle.config(text=(self.model_name.get() or "Choose a model") + ("  /  Coding agent" if self.current_mode == "dev" else "  /  Local conversation"))
 
     def show_section(self, section):
@@ -555,13 +516,17 @@ class WorkspaceMixin:
         else:
             if section != self.current_mode:
                 self.persist_current()
-                record = next((record for record in self.history_records if record["mode"] == section), None)
+                if self.current_chat:
+                    self.section_chat_ids[self.current_mode] = self.current_chat["id"]
+                identity = self.section_chat_ids.get(section)
+                record = next((record for record in self.history_records if record["id"] == identity), None)
                 if record:
                     self.open_chat(record["id"])
                     return
                 self.current_chat = None
                 self.conversation = []
                 self.current_mode = section
+                self.clear_project_view()
                 self.suspend_save = True
                 self.new_chat()
                 self.suspend_save = False
@@ -596,6 +561,7 @@ class WorkspaceMixin:
                     model=self.model_name.get(), mode=self.current_mode,
                     project_path=self.project_path if self.current_mode == "dev" else "")
                 self.current_chat["backend"] = self.backend
+                self.section_chat_ids[self.current_mode] = self.current_chat["id"]
                 self.history_records.insert(0, self.current_chat)
                 self.queue_save(self.current_chat)
                 self.refresh_history(reload=False)
@@ -619,6 +585,7 @@ class WorkspaceMixin:
             return "break"
         self.persist_current()
         self.current_chat = None
+        self.section_chat_ids.pop(self.current_mode, None)
         self.dev_activity = []
         self.agent_history = []
         self.artifacts = []
@@ -627,6 +594,7 @@ class WorkspaceMixin:
         self.code_list.config(values=())
         self.replace_text(self.code_preview, "")
         self.replace_text(self.dev_log, "")
+        self.refresh_changes()
         self.update_heading()
         self.refresh_history()
         return "break"
@@ -799,9 +767,15 @@ class WorkspaceMixin:
         record.setdefault("backend", "Ollama")
         self.current_mode = record["mode"]
         self.current_section = record["mode"]
+        self.section_chat_ids[self.current_mode] = identity
+        self.clear_project_view()
+        if self.current_mode == "dev":
+            self.project_path = record["project_path"]
+            self.project_directory.set(self.project_path)
         self.conversation = [dict(message) for message in record["messages"]]
         self.dev_activity = list(record.get("activity", []))
         self.agent_history = list(record.get("agent_history", []))
+        self.refresh_changes()
         self.clear_messages()
         self.artifacts = []
         self.preview_code_button.config(state="disabled")
@@ -959,8 +933,8 @@ class WorkspaceMixin:
         if not self.project_ready:
             self.set_status("Choose a project folder first.")
             return
-        selected = self.files_list.curselection()
-        relative = self.project_files[selected[0]]["path"] if selected else "index.html"
+        selected = self.selected_project_paths()
+        relative = selected[0] if selected else "index.html"
         try:
             url = self.html_previews.preview_file(self.project_path, relative)
             self.set_status(f"HTML preview opened: {url}. Refresh the browser after edits.")
@@ -1001,6 +975,23 @@ class WorkspaceMixin:
         if directory:
             self.set_project_directory(directory)
 
+    def clear_project_view(self):
+        self.project_request += 1
+        self.project_loading = False
+        self.project_ready = False
+        self.project_dirty = False
+        self.project_path = ""
+        self.project_directory.set("")
+        self.project_files = []
+        self.project_selected_paths = []
+        self.project_context = ""
+        self.file_search.set("")
+        self.render_project_files()
+        self.project_label.config(text="No project open. Choose a folder to work on its code.")
+        self.context_label.config(text="No pinned files. The agent can inspect project text files.")
+        self.source_title.config(text="Select a file to read its source.")
+        self.replace_text(self.source_preview, "")
+
     def open_deploy(self):
         if self.deploy_dialog is not None and not self.deploy_dialog.closed:
             self.deploy_dialog.window.lift()
@@ -1019,6 +1010,8 @@ class WorkspaceMixin:
         self.set_project_directory(directory, create=True)
 
     def set_project_directory(self, directory, create=False):
+        if self.busy():
+            return
         try:
             selected = Path(directory).expanduser().resolve()
             if create:
@@ -1031,17 +1024,20 @@ class WorkspaceMixin:
         selected = str(selected)
         if self.project_path and self.project_path != selected:
             self.new_chat()
+        self.clear_project_view()
         self.project_path = selected
         self.project_directory.set(selected)
         self.project_selected_paths = []
         self.project_context = ""
+        if self.current_chat is None:
+            self.start_new_chat()
         self.scan_project()
 
     def scan_project(self):
         self.project_request += 1
         self.project_loading = True
         self.project_ready = False
-        self.project_label.config(text=self.project_path)
+        self.project_label.config(text=f"Project: {Path(self.project_path).name}\n{self.project_path}")
         self.update_controls()
         threading.Thread(target=self.project_worker, args=(self.project_request, self.project_path, list(self.project_selected_paths)), daemon=True).start()
 
@@ -1056,7 +1052,7 @@ class WorkspaceMixin:
     def attach_selected_files(self):
         if self.busy():
             return
-        paths = [self.project_files[index]["path"] for index in self.files_list.curselection()]
+        paths = self.selected_project_paths()
         if not paths:
             self.set_status("Select project files, then choose Pin selected files.")
             return
@@ -1064,10 +1060,10 @@ class WorkspaceMixin:
         self.scan_project()
 
     def preview_project_file(self, event=None):
-        selected = self.files_list.curselection()
+        selected = self.selected_project_paths()
         if not selected or not self.project_path:
             return
-        path = self.project_files[selected[0]]["path"]
+        path = selected[0]
         threading.Thread(target=self.preview_worker, args=(self.project_request, self.project_path, path), daemon=True).start()
 
     def preview_worker(self, request, root, path):
@@ -1082,6 +1078,10 @@ class WorkspaceMixin:
             record["path"] = event["path"]
         if isinstance(event.get("command"), str):
             record["command"] = event["command"]
+        if record["type"] == "changed" and isinstance(event.get("diff"), str):
+            record["diff"] = event["diff"][:40000]
+            if len(event["diff"]) > 40000:
+                record["diff"] += "\n[Diff truncated for saved history.]"
         self.dev_activity.append(record)
         if record["type"] == "changed":
             self.project_dirty = True
@@ -1093,6 +1093,8 @@ class WorkspaceMixin:
             self.dev_log.insert(END, ("\n\n" if len(self.dev_activity) > 1 else "") + record["type"].upper() + "\n" + record["text"])
             self.dev_log.config(state="disabled")
         self.dev_log.see(END)
+        if record["type"] == "changed":
+            self.refresh_changes()
 
     def send_prompt(self, event=None):
         if self.busy() or not self.model_name.get():
@@ -1343,7 +1345,7 @@ class WorkspaceMixin:
                     self.project_context = ""
                     self.project_files = []
                     self.project_selected_paths = []
-                    self.files_list.delete(0, END)
+                    self.render_project_files()
                     self.context_label.config(text="Could not read this project. Choose an accessible folder.")
                     self.set_status(error, error=True)
                 else:
@@ -1351,11 +1353,7 @@ class WorkspaceMixin:
                     self.project_files, context = data
                     self.project_context = context["text"]
                     self.project_selected_paths = context["included"]
-                    self.files_list.delete(0, END)
-                    for index, item in enumerate(self.project_files):
-                        self.files_list.insert(END, item["path"])
-                        if item["path"] in self.project_selected_paths:
-                            self.files_list.selection_set(index)
+                    self.render_project_files()
                     self.context_label.config(text=f"{len(self.project_selected_paths)} pinned files / {len(self.project_context):,} characters. {len(context['skipped'])} skipped.")
                     self.set_status(f"Project ready: {len(self.project_files)} eligible text files shown.")
                     self.persist_current()
@@ -1364,12 +1362,9 @@ class WorkspaceMixin:
                 if error:
                     self.set_status(error, error=True)
                 else:
-                    window = tk.Toplevel(self.root)
-                    window.title(data[0])
-                    window.geometry("800x600")
-                    text = scrolledtext.ScrolledText(window, wrap="none", font=("Consolas", 10))
-                    text.pack(fill="both", expand=True)
-                    self.replace_text(text, data[1])
+                    self.source_title.config(text=data[0])
+                    self.replace_text(self.source_preview, data[1])
+                    self.dev_tabs.select(self.source_tab)
             elif request == self.request_serial and kind == "agent_event":
                 self.log_activity(data)
                 if data.get("type") == "status":

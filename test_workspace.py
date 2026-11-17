@@ -113,11 +113,70 @@ class WorkspaceIntegrationTests(unittest.TestCase):
                       "two-column chat suggestions")
         self.app.show_section("dev")
         self.root.geometry("1060x700")
-        self.wait_for(lambda: self.app.suggestion_buttons[-1].grid_info().get("row") == 3,
+        self.wait_for(lambda: self.app.suggestion_buttons[-1].grid_info().get("row") == len(self.app.suggestion_buttons) - 1,
                       "one-column developer suggestions")
         self.assertTrue(all(button.winfo_x() + button.winfo_width() <= button.master.winfo_width()
                             for button in self.app.suggestion_buttons))
         self.assertFalse(self.callback_errors)
+
+    def test_developer_landing_does_not_automatically_resume_old_work(self):
+        old = self.app.chat_store.create(model="alpha:8b", mode="dev", project_path=str(self.project))
+        old["title"] = "create a three.js file"
+        self.app.chat_store.save(old)
+        self.app.refresh_history()
+        with patch("workspace_ui.list_project_files") as scan:
+            self.app.show_section("dev")
+            scan.assert_not_called()
+        self.assertIsNone(self.app.current_chat)
+        self.assertEqual(self.app.project_path, "")
+        self.assertEqual(self.app.heading_label.cget("text"), "Developer")
+        resume = next(widget for widget in descendants(self.app.empty_state)
+                      if isinstance(widget, tk.Button) and widget.cget("text") == old["title"])
+        resume.invoke()
+        self.wait_for(lambda: self.app.project_ready, "explicit developer resume")
+        self.assertEqual(self.app.current_chat["id"], old["id"])
+
+    def test_developer_session_is_kept_when_switching_sections(self):
+        self.enter_project()
+        identity = self.app.current_chat["id"]
+        self.app.show_section("chat")
+        self.app.show_section("dev")
+        self.wait_for(lambda: self.app.project_ready, "active developer session")
+        self.assertEqual(self.app.current_chat["id"], identity)
+        self.assertEqual(self.app.project_path, str(self.project.resolve()))
+
+    def test_filtered_files_preview_and_pin_the_selected_file(self):
+        self.enter_project()
+        self.app.file_search.set("MAIN")
+        self.assertEqual(self.app.files_list.get(0, "end"), ("main.py",))
+        self.app.files_list.selection_set(0)
+        self.app.preview_project_file()
+        self.wait_for(lambda: self.app.source_title.cget("text") == "main.py", "embedded source")
+        self.assertEqual(self.app.source_preview.get("1.0", "end-1c").replace("\r\n", "\n"), self.original_code)
+        self.assertEqual(self.app.dev_tabs.select(), str(self.app.source_tab))
+        self.app.attach_button.invoke()
+        self.wait_for(lambda: not self.app.project_loading, "filtered file pin")
+        self.assertEqual(self.app.project_selected_paths, ["main.py"])
+        self.app.file_search.set("README")
+        self.app.files_list.selection_set(0)
+        self.app.preview_project_file()
+        self.wait_for(lambda: self.app.source_title.cget("text") == "README.md", "second source")
+        self.assertEqual(self.app.source_preview.get("1.0", "end-1c").strip(), "Workspace fixture")
+
+    def test_applied_diffs_are_saved_and_restored_in_changes(self):
+        self.enter_project()
+        diff = "--- main.py\n+++ main.py\n@@ -1 +1 @@\n-old\n+new\n"
+        self.app.log_activity(dict(type="changed", text="Updated main.py", path="main.py", diff=diff))
+        self.assertEqual(self.app.changes_preview.get("1.0", "end-1c"), diff)
+        self.app.persist_current()
+        identity = self.app.current_chat["id"]
+        self.assertEqual(self.load_saved(identity)["activity"][-1]["diff"], diff)
+        self.app.start_new_chat()
+        self.assertEqual(self.app.applied_changes, [])
+        self.app.open_chat(identity)
+        self.wait_for(lambda: self.app.project_ready, "changes restored")
+        self.assertEqual(self.app.changes_preview.get("1.0", "end-1c"), diff)
+        self.assertEqual((self.project / "main.py").read_text(encoding="utf-8"), self.original_code)
 
     def close_workspace(self):
         for release in self.worker_releases:
@@ -499,6 +558,7 @@ class WorkspaceIntegrationTests(unittest.TestCase):
                 decisions.append(approved)
                 if approved and not options["cancel_event"].is_set():
                     Path(project_root, "main.py").write_text(replacement, encoding="utf-8")
+                    on_event({"type": "changed", "text": "Updated main.py", "path": "main.py", "diff": action["diff"]})
                     on_event({"type": "tool_result", "text": "Wrote main.py", "path": "main.py"})
                 if options["cancel_event"].is_set():
                     raise RuntimeError("Developer agent cancelled.")
@@ -705,6 +765,7 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         self.assertEqual(saved["activity"][0], {"type": "tool_call", "text": "Read main.py\nExact café output  ",
                                                   "path": "main.py"})
         self.assertEqual(saved["activity"][-1]["type"], "tool_result")
+        self.assertIn("+print('reviewed", self.app.changes_preview.get("1.0", "end-1c"))
         self.assertIn(identity, [record["id"] for record in self.app.history_records])
         self.assertEqual(self.app.approvals, [])
         self.app.new_chat_button.invoke()
@@ -725,6 +786,7 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         self.assertEqual(snapshots[0]["content"], self.original_code)
         self.assertEqual((self.project / "main.py").read_text(encoding="utf-8"), self.original_code)
         self.assertEqual(self.app.current_chat["messages"][-1]["content"], "No changes were applied.")
+        self.assertEqual(self.app.applied_changes, [])
 
     def test_resumed_agent_followup_preserves_native_tool_provenance(self):
         self.enter_project()
