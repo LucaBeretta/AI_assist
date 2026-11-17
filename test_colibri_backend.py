@@ -10,7 +10,7 @@ import threading
 import time
 import tkinter as tk
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from colibri_backend import ColibriClient, normalize_url
 from coding_agent import AgentCancelled, run_agent
@@ -130,6 +130,113 @@ class ColibriTests(unittest.TestCase):
                           lambda event: None, lambda action: self.fail("No approval after cancellation"),
                           cancel_event=cancel, chat_fn=self.client.agent_chat)
         self.assertEqual(self.requests, [])
+
+    def test_review_is_one_plain_request_without_tools(self):
+        self.json_reply({"choices": [{"finish_reason": "stop", "message": {
+            "role": "assistant", "content": "Explain the error-handling choice with one meaningful comment."}}]})
+        messages = [{"role": "user", "content": "Review this change."}]
+        result = self.client.review(messages, "glm", threading.Event(), max_tokens=512, timeout=2)
+        self.assertIn("meaningful comment", result)
+        self.assertEqual(len(self.requests), 1)
+        path, headers, payload = self.requests[0]
+        self.assertEqual(path, "/v1/chat/completions")
+        self.assertEqual(headers["Authorization"], "Bearer test-key")
+        self.assertEqual(payload, {"model": "glm", "messages": messages, "stream": False, "max_tokens": 512})
+        self.assertNotIn("tools", payload)
+
+    def test_review_rejects_truncation_tool_calls_and_malformed_responses(self):
+        samples = [
+            {"choices": [{"finish_reason": "length", "message": {"role": "assistant", "content": "Incomplete"}}]},
+            {"choices": [{"finish_reason": "stop", "message": {"role": "assistant", "content": "Run this",
+                "tool_calls": [{"function": {"name": "run_command", "arguments": "{}"}}]}}]},
+            {"choices": [{"finish_reason": "stop", "message": {"role": "assistant", "content": "Malformed",
+                "tool_calls": {}}}]},
+            {"choices": [{"finish_reason": "stop", "message": {"role": "assistant", "content": []}}]},
+            {"error": {"message": "secret-body-must-not-be-repeated"}},
+        ]
+        for sample in samples:
+            with self.subTest(sample=sample):
+                self.json_reply(sample)
+                with self.assertRaisesRegex(RuntimeError, "review failed") as raised:
+                    self.client.review([{"role": "user", "content": "Review"}], "glm", threading.Event(), timeout=2)
+                self.assertNotIn("secret-body", str(raised.exception))
+        self.assertEqual(len(self.requests), len(samples))
+
+    def test_invalid_or_cancelled_review_never_sends_a_request(self):
+        cancel = threading.Event()
+        cancel.set()
+        with self.assertRaises(AgentCancelled):
+            self.client.review([{"role": "user", "content": "Review"}], "glm", cancel)
+        for options in ({"max_tokens": 2048}, {"timeout": 121}, {"max_tokens": True}):
+            with self.assertRaises(ValueError):
+                self.client.review([{"role": "user", "content": "Review"}], "glm", threading.Event(), **options)
+        with self.assertRaises(ValueError):
+            self.client.review([{"role": "tool", "content": "Native result", "tool_call_id": "x"}],
+                               "glm", threading.Event())
+        self.assertEqual(self.requests, [])
+
+    def test_review_http_error_reports_status_without_server_body(self):
+        self.json_reply({"error": {"message": "private-server-detail"}}, status=403)
+        with self.assertRaisesRegex(RuntimeError, "HTTP 403") as raised:
+            self.client.review([{"role": "user", "content": "Review"}], "glm", threading.Event(), timeout=2)
+        self.assertNotIn("private-server-detail", str(raised.exception))
+
+    def test_review_cancellation_and_deadline_disconnect_single_http_request(self):
+        for stop in ("cancel", "deadline"):
+            with self.subTest(stop=stop):
+                cancel, reading, released = threading.Event(), threading.Event(), threading.Event()
+                connection = Mock()
+                connection.getresponse.return_value.status = 200
+                connection.sock.shutdown.side_effect = lambda *args: released.set()
+                def read(limit):
+                    reading.set()
+                    released.wait(2)
+                    raise OSError("socket disconnected")
+                connection.getresponse.return_value.read.side_effect = read
+                def cancel_when_reading():
+                    if reading.wait(1):
+                        cancel.set()
+                stopper = None
+                if stop == "cancel":
+                    stopper = threading.Thread(target=cancel_when_reading)
+                    stopper.start()
+                with patch("colibri_backend.http.client.HTTPConnection", return_value=connection):
+                    expected = AgentCancelled if stop == "cancel" else RuntimeError
+                    with self.assertRaises(expected):
+                        self.client.review([{"role": "user", "content": "Review"}], "glm", cancel,
+                                           timeout=1 if stop == "cancel" else .1)
+                if stopper is not None:
+                    stopper.join(timeout=1)
+                connection.request.assert_called_once()
+                connection.sock.shutdown.assert_called_once()
+                self.assertTrue(released.is_set())
+                self.assertTrue(connection.close.called)
+
+    def test_review_preserves_https_port_path_and_header_credentials(self):
+        connection = Mock()
+        connection.getresponse.return_value.status = 200
+        connection.getresponse.return_value.read.return_value = json.dumps({"choices": [
+            {"finish_reason": "stop", "message": {"role": "assistant", "content": "Review feedback"}}
+        ]}).encode()
+        client = ColibriClient("https://review.example:8443/v1", "session-private-key")
+        with patch("colibri_backend.http.client.HTTPSConnection", return_value=connection) as create:
+            result = client.review([{"role": "user", "content": "Review source"}], "review-model", threading.Event())
+        create.assert_called_once_with("review.example", 8443, timeout=120)
+        self.assertEqual(result, "Review feedback")
+        args, options = connection.request.call_args
+        self.assertEqual(args, ("POST", "/v1/chat/completions"))
+        self.assertEqual(options["headers"]["Authorization"], "Bearer session-private-key")
+        self.assertNotIn(b"session-private-key", options["body"])
+
+    def test_review_cancelled_while_connecting_does_not_send_headers_or_body(self):
+        cancel = threading.Event()
+        connection = Mock()
+        connection.connect.side_effect = cancel.set
+        with patch("colibri_backend.http.client.HTTPConnection", return_value=connection):
+            with self.assertRaises(AgentCancelled):
+                self.client.review([{"role": "user", "content": "Review"}], "glm", cancel)
+        connection.request.assert_not_called()
+        self.assertTrue(connection.close.called)
 
     def test_url_validation(self):
         self.assertEqual(normalize_url("http://localhost:8000/"), "http://localhost:8000/v1")

@@ -70,6 +70,15 @@ class DeveloperPanelMixin:
             wraplength=320, justify="left", anchor="w",
         )
         self.project_label.pack(fill="x", padx=14, pady=(10, 12))
+        cooperation = tk.Frame(self.dev_panel, bg=c["sidebar"])
+        cooperation.pack(fill="x", padx=14, pady=(0, 8))
+        self.hybrid_button = self.button(cooperation, "Two-engine review...", self.open_hybrid,
+                                         c["sidebar"], c["accent"], c["sidebar_hover"])
+        self.hybrid_button.config(font=("Segoe UI", 9), padx=0, pady=4)
+        self.hybrid_button.pack(anchor="w")
+        self.hybrid_label = tk.Label(cooperation, text="One engine per task", bg=c["sidebar"],
+                                     fg=c["muted"], font=("Segoe UI", 9), anchor="w", wraplength=310)
+        self.hybrid_label.pack(fill="x")
         verification = tk.Frame(self.dev_panel, bg=c["sidebar"])
         verification.pack(fill="x", padx=14, pady=(0, 12))
         self.verification_label = tk.Label(verification, text="No command checks recorded for this task.",

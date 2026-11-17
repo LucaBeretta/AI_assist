@@ -114,7 +114,26 @@ class FeedbackMixin:
         feedback.config(font=("Segoe UI", 9), padx=8, pady=5)
         feedback.pack(side="left")
         buttons.append(feedback)
+        if self.current_mode == "dev":
+            review = next((item["text"] for item in reversed(self.dev_activity)
+                           if item["type"] == "hybrid_review"), None)
+            if review and review in answer:
+                refine = self.button(actions, "Use review feedback", lambda text=review: self.stage_review_feedback(text),
+                                     background, c["accent"], c["user"])
+                refine.config(font=("Segoe UI", 9), padx=8, pady=5)
+                refine.pack(side="left", padx=(8, 0))
+                buttons.append(refine)
         self.feedback_buttons = buttons
+
+    def stage_review_feedback(self, review):
+        body = feedback_prompt(review,
+            "Address the concrete issues in this independent review. Inspect the current project before editing, "
+            "preserve working behavior, follow its conventions, and add comments or notes only where useful. "
+            "Propose focused changes and run appropriate approved checks. Explain any suggestion you cannot verify.",
+            "The requested behavior is preserved, code is maintainable, relevant checks pass, and unresolved issues are explicit.",
+            developer=True)
+        if self.stage_followup(body):
+            self.input_box.focus_set()
 
     def refresh_verification(self):
         if hasattr(self, "verification_label"):
