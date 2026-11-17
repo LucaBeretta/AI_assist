@@ -2,6 +2,7 @@
 
 from copy import deepcopy
 from pathlib import Path
+import json
 import queue
 import threading
 import time
@@ -13,7 +14,7 @@ from background_saves import BackgroundSaves
 from deploy_dialog import DeployDialog
 from html_preview import HtmlPreviews, is_html
 from chat_store import ChatStore
-from coding_agent import run_agent
+from coding_agent import FILE_LIMIT_CHOICES, estimate_tokens, run_agent
 from developer_tools import build_project_context, extract_code_blocks, fetch_model_capabilities, list_project_files, read_project_file
 from message_widgets import render_message
 from response_metrics import metrics_summary, response_metrics
@@ -39,6 +40,46 @@ def _history_matches(record, query):
     fields = (record["title"], record["model"], record.get("project_path", ""), record.get("draft", ""))
     return (any(query in field.casefold() for field in fields)
             or any(query in message["content"].casefold() for message in record["messages"]))
+
+
+def file_limit_label(value):
+    return f"{value // 1000:,} KB" if value < 1000000 else f"{value / 1000000:g} MB"
+
+
+def file_limit_value(label):
+    return next((value for value in FILE_LIMIT_CHOICES if file_limit_label(value) == label), FILE_LIMIT_CHOICES[0])
+
+
+def load_file_limit(path):
+    try:
+        value = json.loads(Path(path).read_text(encoding="utf-8")).get("file_limit")
+    except (OSError, ValueError, TypeError, AttributeError):
+        return FILE_LIMIT_CHOICES[0]
+    return value if value in FILE_LIMIT_CHOICES else FILE_LIMIT_CHOICES[0]
+
+
+def file_limit_warning(limit, context, ram_free=None):
+    """What a limit means for this model and computer, or "" when it is comfortable.
+
+    Rough guides only: about four characters per token, and about 0.15 MB of
+    memory per token of context for an 8-14B model."""
+    tokens = estimate_tokens(limit)
+    context = context or 4096
+    if tokens <= context // 2:
+        return ""
+    lines = [f"A {file_limit_label(limit)} file is about {tokens:,} tokens; the current context is {context:,} tokens. "
+             "Larger files will be read and edited in parts, which takes longer."]
+    needed_gb = tokens * 0.15 / 1024
+    if ram_free is not None:
+        free_gb = ram_free / 1024 ** 3
+        if needed_gb > free_gb * 0.8:
+            lines.append(f"Holding a whole file of this size would need a context of about {tokens:,} tokens, roughly "
+                         f"{needed_gb:.1f} GB of extra memory for an 8-14B model; this computer has about {free_gb:.1f} GB free. "
+                         "Keep the context smaller and let the agent read in parts.")
+        else:
+            lines.append(f"Raising the context to about {tokens:,} tokens would need roughly {needed_gb:.1f} GB of extra memory "
+                         f"for an 8-14B model; this computer has about {free_gb:.1f} GB free.")
+    return "\n\n".join(lines)
 
 
 class WorkspaceMixin:
@@ -85,6 +126,10 @@ class WorkspaceMixin:
         self.pending_deletions = {}
         self.closing = False
         self.stream_card = None
+        self.chat_cancel = threading.Event()
+        self.pending_chat_model = None
+        self.pending_engine = None
+        self.agent_file_limit = 64000
         self.last_metrics = {}
         self.shared_memory = None
         self.memory_window = None
@@ -97,6 +142,8 @@ class WorkspaceMixin:
             self.storage_error = str(error)
         self.saver = BackgroundSaves(self.chat_store) if self.chat_store else None
         self.initialize_backend()
+        self.agent_settings = self.chat_store.directory / "agent.settings" if self.chat_store else None
+        self.agent_file_limit = load_file_limit(self.agent_settings)
         if self.chat_store:
             try:
                 self.shared_memory = SharedMemory(self.chat_store.directory)
@@ -134,6 +181,13 @@ class WorkspaceMixin:
         footer = tk.Frame(self.sidebar, bg=c["sidebar"])
         footer.pack(side="bottom", fill="x", padx=16, pady=(10, 16))
         tk.Frame(footer, height=1, bg=c["border"]).pack(fill="x", pady=(0, 12))
+        tk.Label(footer, text="ENGINE", bg=c["sidebar"], fg=c["muted"],
+                 font=("Segoe UI", 8, "bold"), anchor="w").pack(fill="x", pady=(0, 6))
+        self.engine_choice = tk.StringVar(self.root, value=self.backend)
+        self.engine_picker = ttk.Combobox(footer, textvariable=self.engine_choice, values=("Ollama", "Colibri"),
+                                          style="Model.TCombobox", state="readonly", font=("Segoe UI", 9))
+        self.engine_picker.pack(fill="x", pady=(0, 8))
+        self.engine_picker.bind("<<ComboboxSelected>>", self.choose_engine)
         tk.Label(footer, text="YOUR MODEL", bg=c["sidebar"], fg=c["muted"],
                  font=("Segoe UI", 8, "bold"), anchor="w").pack(fill="x", pady=(0, 6))
         self.model_picker = ttk.Combobox(footer, textvariable=self.model_name, style="Model.TCombobox", state="disabled", font=("Segoe UI", 9))
@@ -228,6 +282,7 @@ class WorkspaceMixin:
         self.chat_menu = tk.Menu(self.root, tearoff=False)
         self.chat_menu.add_command(label="Rename chat", command=self.rename_chat)
         self.chat_menu.add_command(label="Export chat...", command=self.export_chat)
+        self.chat_menu.add_command(label="Back up all chats...", command=self.backup_chats)
         self.chat_menu.add_separator()
         self.chat_menu.add_command(label="Delete chat", command=self.delete_chat)
         self.chat_actions = self.button(header, "Chat options", lambda: self.chat_menu.tk_popup(self.chat_actions.winfo_rootx(), self.chat_actions.winfo_rooty() + self.chat_actions.winfo_height()),
@@ -258,7 +313,7 @@ class WorkspaceMixin:
         footer.pack(fill="x", padx=14, pady=(0, 12))
         self.composer_hint = tk.Label(footer, text="Choose a model to begin", bg=c["surface"], fg=c["muted"], font=("Segoe UI", 8), anchor="w", wraplength=330, justify="left")
         self.composer_hint.pack(side="left", fill="x", expand=True)
-        self.send_button = self.button(footer, "Send  \u2191", self.send_prompt, c["accent"], "white", c["accent_hover"])
+        self.send_button = self.button(footer, "Send  \u2191", self.send_or_stop, c["accent"], "white", c["accent_hover"])
         self.send_button.pack(side="right")
         status = tk.Frame(self.chat_frame, bg=c["background"])
         status.pack(side="bottom", fill="x", padx=28)
@@ -316,6 +371,14 @@ class WorkspaceMixin:
         self.preview_file_button.pack(fill="x", pady=(0, 6))
         self.context_label = tk.Label(files, text="No pinned files. The agent can inspect project text files.", bg=c["sidebar"], fg=c["muted"], font=("Segoe UI", 8), wraplength=240, justify="left")
         self.context_label.pack(fill="x", pady=(0, 8))
+        limit_row = tk.Frame(files, bg=c["sidebar"])
+        limit_row.pack(fill="x", pady=(8, 0), before=self.files_list)
+        tk.Label(limit_row, text="Largest file the agent reads", bg=c["sidebar"], fg=c["muted"], font=("Segoe UI", 8)).pack(anchor="w")
+        self.file_limit_choice = tk.StringVar(self.root, value=file_limit_label(self.agent_file_limit))
+        self.file_limit_picker = ttk.Combobox(limit_row, textvariable=self.file_limit_choice, state="readonly",
+                                              values=[file_limit_label(value) for value in FILE_LIMIT_CHOICES], font=("Segoe UI", 9))
+        self.file_limit_picker.pack(fill="x", pady=(2, 0))
+        self.file_limit_picker.bind("<<ComboboxSelected>>", self.choose_file_limit)
         self.code_list = ttk.Combobox(code, state="readonly", font=("Segoe UI", 9))
         self.code_list.pack(fill="x", pady=8)
         self.code_list.bind("<<ComboboxSelected>>", self.preview_artifact)
@@ -363,6 +426,8 @@ class WorkspaceMixin:
         if not hasattr(self, "nav_buttons"):
             return
         busy = self.busy()
+        self.engine_picker.config(state="disabled" if busy or self.closing else "readonly")
+        self.file_limit_picker.config(state="disabled" if busy else "readonly")
         deploying = self.deploy_dialog is not None and self.deploy_dialog.running
         self.deploy_button.config(state="disabled" if busy else "normal")
         self.preview_file_button.config(state="normal" if self.project_ready and not self.closing else "disabled")
@@ -379,11 +444,17 @@ class WorkspaceMixin:
         for button in (self.choose_project_button, self.use_project_button, self.project_entry, self.attach_button):
             button.config(state="disabled" if busy else "normal")
         self.stop_agent_button.config(state="normal" if self.agent_active else "disabled")
-        self.chat_actions.config(state="normal" if self.current_chat and not busy else "disabled")
+        self.chat_actions.config(state="normal" if (self.current_chat or self.history_records) and not busy else "disabled")
+        for label in ("Rename chat", "Export chat...", "Delete chat"):
+            self.chat_menu.entryconfigure(label, state="normal" if self.current_chat else "disabled")
         ready = bool(self.model_name.get()) and not busy and (self.current_mode != "dev" or self.project_ready)
         self.input_box.config(state="normal" if ready else "disabled")
-        self.send_button.config(state="normal" if ready else "disabled", text="Working..." if self.is_waiting else ("Run agent" if self.current_mode == "dev" else "Send  \u2191"),
-                                bg=self.COLORS["accent"] if ready else self.COLORS["border"])
+        if self.is_waiting and not self.closing:
+            # While an answer or the agent runs, the same button stops it.
+            self.send_button.config(state="normal", text="Stop  \u25a0", bg=self.COLORS["ink"])
+        else:
+            self.send_button.config(state="normal" if ready else "disabled", text="Run agent" if self.current_mode == "dev" else "Send  \u2191",
+                                    bg=self.COLORS["accent"] if ready else self.COLORS["border"])
         if self.project_loading:
             self.composer_hint.config(text="Preparing project context...")
         elif self.current_mode == "dev":
@@ -677,6 +748,12 @@ class WorkspaceMixin:
         self.input_box.insert("1.0", record["draft"])
         self.input_box.edit_reset()
         model = record["model"]
+        switching = record["backend"] != self.backend and record["backend"] in ("Ollama", "Colibri")
+        if switching:
+            # Reopen the chat on the engine it was written with; its model is
+            # selected once that engine answers.
+            self.switch_backend(record["backend"], refresh=False, fresh_chat=False)
+            self.pending_chat_model = model
         available = model in self.model_picker["values"] and record["backend"] == self.backend
         self.model_name.set(model if available else "")
         self.active_model = model if available else None
@@ -700,7 +777,10 @@ class WorkspaceMixin:
         self.refresh_history()
         self.update_heading()
         self.update_controls()
-        if not available:
+        if switching:
+            self.set_status(f"Switching to {self.backend} for this chat...")
+            self.manage_models("refresh")
+        elif not available:
             self.set_status(f"This chat uses {record['backend']} / {model}. Connect that backend and refresh its models to continue.")
 
     def rename_chat(self):
@@ -973,6 +1053,8 @@ class WorkspaceMixin:
         if self.current_mode == "dev" and not self.project_ready:
             self.set_status("Choose a project folder before starting the coding agent.")
             return "break"
+        if self.current_mode == "dev" and not self.confirm_colibri_agent():
+            return "break"
         self.conversation.append({"role": "user", "content": prompt})
         self.display_message("You", prompt, "user")
         self.input_box.delete("1.0", END)
@@ -1017,7 +1099,9 @@ class WorkspaceMixin:
             if shared_context:
                 messages.insert(0, {"role": "system", "content": shared_context})
             self.set_status(f"{model} is thinking...")
-            threading.Thread(target=self.fetch_response, args=(messages, prompt, model, context), daemon=True).start()
+            self.chat_cancel = threading.Event()
+            threading.Thread(target=self.fetch_response, args=(messages, prompt, model, context, self.chat_cancel),
+                             daemon=True).start()
         self.update_controls()
         return "break"
 
@@ -1106,7 +1190,8 @@ class WorkspaceMixin:
                     continue
             if "tools" not in metadata["capabilities"]:
                 raise RuntimeError("This model does not advertise tool calling. Select Qwen Coder or another tool-capable model in the sidebar.")
-            result = run_agent(host, model, root, messages, event, approval, cancel_event=cancel, context_length=context)
+            result = run_agent(host, model, root, messages, event, approval, cancel_event=cancel, context_length=context,
+                               file_limit=self.agent_file_limit)
             self.workspace_events.put(("agent_done", request, result, None))
         except Exception as error:
             self.workspace_events.put(("agent_done", request, None, str(error)))
@@ -1234,7 +1319,7 @@ class WorkspaceMixin:
                     self.agent_history = data.get("messages", [])
                 self.finish_response(response, error)
 
-    def finish_response(self, response, error):
+    def finish_response(self, response, error, stopped=False):
         if self.stream_card is not None:
             self.stream_card.destroy()
             self.stream_card = None
@@ -1242,7 +1327,14 @@ class WorkspaceMixin:
         self.agent_active = False
         self.activity.stop()
         self.activity.pack_forget()
-        if error:
+        if stopped:
+            if response and response.strip():
+                self.conversation.append({"role": "assistant", "content": response})
+                self.display_message("AI Assist", response, "ai")
+                self.set_status("Stopped. The partial answer was kept.")
+            else:
+                self.set_status("Stopped before the model answered.")
+        elif error:
             self.set_status(error, error=True)
             self.display_message("Request failed", error, "error")
         else:
@@ -1272,11 +1364,12 @@ class WorkspaceMixin:
         self.process_models()
         self.process_workspace_events()
         try:
-            prompt, response, error = self.response_queue.get_nowait()
+            item = self.response_queue.get_nowait()
         except queue.Empty:
             pass
         else:
-            self.finish_response(response, error)
+            prompt, response, error = item[:3]
+            self.finish_response(response, error, stopped=len(item) > 3 and bool(item[3]))
         if not self.closed:
             self.refresh_after_download()
             interval = _response_poll_interval(
@@ -1286,11 +1379,104 @@ class WorkspaceMixin:
 
     def process_lifecycle(self):
         starting = self.startup_pending
+        was_busy = self.lifecycle_busy
         super().process_lifecycle()
+        if was_busy and not self.lifecycle_busy and self.pending_engine is not None:
+            engine, self.pending_engine = self.pending_engine, None
+            if engine != self.backend and not self.busy():
+                self.switch_backend(engine)
+                return
+        if was_busy and not self.lifecycle_busy and self.pending_chat_model is not None:
+            model, self.pending_chat_model = self.pending_chat_model, None
+            if not self.model_name.get() and model in self.model_picker["values"]:
+                self.model_name.set(model)
+                self.active_model = model
+                self.update_heading()
+                self.update_controls()
+                self.set_status(f"Ready on {self.backend}.")
         if starting and not self.startup_pending:
             self.update_heading()
             if self.storage_error:
                 self.set_status(f"Chat storage needs attention: {self.storage_error}", error=True)
+
+    def send_or_stop(self):
+        if self.is_waiting:
+            self.stop_current()
+            return "break"
+        return self.send_prompt()
+
+    def stop_current(self):
+        if not self.is_waiting:
+            return
+        if self.agent_active:
+            self.stop_agent()
+        else:
+            self.chat_cancel.set()
+            self.set_status("Stopping the answer...")
+
+    def choose_engine(self, event=None):
+        engine = self.engine_choice.get()
+        if engine == self.backend:
+            self.pending_engine = None
+            return
+        only_checking = (self.lifecycle_busy and not self.is_waiting and not self.is_loading_models
+                         and not self.project_loading)
+        if only_checking:
+            # A background model check is running: switch as soon as it ends.
+            self.pending_engine = engine
+            self.set_status(f"Switching to {engine} after the current model check...")
+            return
+        if self.busy() or not self.switch_backend(engine):
+            self.engine_choice.set(self.backend)
+            self.set_status("Wait for the current operation before switching engines.")
+
+    def choose_file_limit(self, event=None):
+        limit = file_limit_value(self.file_limit_choice.get())
+        if limit == self.agent_file_limit:
+            return
+        model = self.model_name.get()
+        context = self.model_contexts.get(model) or 4096
+        ram_free = None
+        try:
+            from model_advisor import _fallback_ram
+            ram_free = _fallback_ram()[1]
+        except Exception:
+            ram_free = None
+        warning = file_limit_warning(limit, context, ram_free)
+        if warning and not messagebox.askokcancel("Larger files for the agent", warning + "\n\nUse this limit?", parent=self.root):
+            self.file_limit_choice.set(file_limit_label(self.agent_file_limit))
+            return
+        self.agent_file_limit = limit
+        if self.agent_settings:
+            try:
+                temporary = self.agent_settings.with_suffix(".tmp")
+                temporary.write_text(json.dumps({"file_limit": limit}), encoding="utf-8")
+                temporary.replace(self.agent_settings)
+            except OSError as error:
+                self.set_status(f"The limit applies now but could not be saved: {error}", error=True)
+                return
+        self.set_status(f"The agent can now read and edit files up to {file_limit_label(limit)}.")
+
+    def backup_chats(self):
+        if self.busy() or self.chat_store is None:
+            return
+        self.persist_current()
+        stamp = time.strftime("%Y-%m-%d")
+        destination = filedialog.asksaveasfilename(parent=self.root, title="Back up all chats", defaultextension=".zip",
+                                                   initialfile=f"AI Assist chats {stamp}.zip", filetypes=[("Zip archive", "*.zip")])
+        if not destination:
+            return
+        # Chats still being written in the background are backed up from memory.
+        unsaved = {identity: record for identity, (_, record) in self.pending_saves.items() if record is not None}
+        unsaved.update(self.failed_saves)
+        try:
+            count = self.chat_store.export_all(destination, unsaved=unsaved, deleted=set(self.pending_deletions))
+        except (OSError, ValueError) as error:
+            self.set_status(str(error), error=True)
+            return
+        skipped = len(self.chat_store.errors)
+        self.set_status(f"Backed up {count} chat{'s' if count != 1 else ''} to {Path(destination).name}."
+                        + (f" {skipped} damaged file{'s were' if skipped != 1 else ' was'} left out." if skipped else ""))
 
     def show_runtime_status(self, event=None):
         detail = metrics_summary(self.last_metrics)
@@ -1328,6 +1514,7 @@ class WorkspaceMixin:
         for record in list(self.failed_saves.values()):
             self.queue_save(record)
         self.closing = True
+        self.chat_cancel.set()
         if self.deploy_dialog is not None:
             self.deploy_dialog.close(force=True)
         self.agent_cancel.set()

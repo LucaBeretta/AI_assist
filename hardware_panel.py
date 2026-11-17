@@ -121,7 +121,11 @@ class HardwareRecommendationsPanel:
         lines = [f"{hardware.get('cpu') or 'CPU unknown'}  |  RAM {gib(hardware.get('ram_total_bytes'))} total, "
                  f"{gib(hardware.get('ram_available_bytes'))} free"]
         for gpu in hardware.get("gpus", []):
-            lines.append(f"{gpu['name']}  |  VRAM {gib(gpu.get('total_bytes'))} total, {gib(gpu.get('free_bytes'))} free")
+            if gpu.get("unified"):
+                lines.append(f"{gpu['name']}  |  usable by the GPU about {gib(gpu.get('total_bytes'))} of shared memory, "
+                             f"{gib(gpu.get('free_bytes'))} free now")
+            else:
+                lines.append(f"{gpu['name']}  |  VRAM {gib(gpu.get('total_bytes'))} total, {gib(gpu.get('free_bytes'))} free")
         if not hardware.get("gpus"):
             lines.append("No supported graphics card detected. Recommendations will use CPU / RAM estimates.")
         version = hardware.get("ollama_version")
@@ -207,7 +211,9 @@ class HardwareRecommendationsPanel:
                   "Click this card's Download button. When installation finishes, choose Use in chat on the same card.",
                   "Use in chat applies this model's 4096-token context for the current app session, including loading and chat requests.",
                   "If other models are using GPU memory, use Stop all models in the main sidebar before loading a larger choice.",
-                  "", "VERIFY GPU USE", "Run: ollama ps", "Run: nvidia-smi",
+                  "", "VERIFY GPU USE", "Run: ollama ps",
+                  ("On a Mac: Activity Monitor > Window > GPU History." if any(gpu.get("unified") for gpu in hardware.get("gpus", []))
+                   else "Run: nvidia-smi"),
                   "In ollama ps, 100% GPU describes model placement. A CPU/GPU split means some of the model is in system RAM and may run more slowly.",
                   "Memory estimates include headroom but cannot guarantee fit. Longer contexts need more memory."]
         if hardware.get("model_directory"):

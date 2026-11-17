@@ -28,6 +28,20 @@ from response_metrics import metrics_summary
 
 
 _MAX_FILE_BYTES = 64000
+# Sizes the user can allow the agent to read and edit (Developer > Files).
+FILE_LIMIT_CHOICES = (64000, 128000, 256000, 512000, 1000000)
+# Per-run settings for the worker thread running the agent: the chosen file
+# limit and the model's context, which decides when a file is read in parts.
+_run = threading.local()
+
+
+def _file_limit():
+    return getattr(_run, "file_limit", _MAX_FILE_BYTES)
+
+
+def estimate_tokens(size):
+    """About four characters per token: a rough guide, not a tokenizer."""
+    return max(1, int(size) // 4)
 _MAX_OUTPUT_CHARS = 20000
 _MAX_RESPONSE_BYTES = 1024 * 1024
 _MAX_TOOL_CALLS = 8
@@ -35,7 +49,10 @@ _SYSTEM = (
     "You are the local AI Assist coding agent. Use the provided native tools to inspect, "
     "edit, and verify the selected project. Never claim to have edited files or run a "
     "command unless a successful tool result confirms it. Read files before editing. "
-    "Write complete file contents, not patches. Every write and shell command is reviewed "
+    "To change an existing file use edit_file: copy old_text exactly from read_file output "
+    "(a few unique lines) and give its replacement. Use write_file only for new files or "
+    "complete rewrites. Large files are returned in parts: read the rest with start_line and "
+    "end_line. Every edit and shell command is reviewed "
     "by the user; respect denials and explain what remains. Request narrow read_file line "
     "ranges when output is shortened. Do not repeat a denied action. File tools exclude "
     "secrets and stay inside the project; shell commands run as the current user and are "
@@ -56,7 +73,11 @@ TOOLS = [
     _schema("read_file", "Read a UTF-8 project file. Prefer narrow 1-based inclusive line ranges.",
             {"path": {"type": "string"}, "start_line": {"type": "integer", "minimum": 1},
              "end_line": {"type": "integer", "minimum": 1}}, ("path",)),
-    _schema("write_file", "Request approval to create or replace a project text file using its complete contents.",
+    _schema("edit_file", "Request approval to replace one exact block of text in an existing project file. "
+            "old_text must match the file exactly and appear once (or set replace_all).",
+            {"path": {"type": "string"}, "old_text": {"type": "string"}, "new_text": {"type": "string"},
+             "replace_all": {"type": "boolean"}}, ("path", "old_text", "new_text")),
+    _schema("write_file", "Request approval to create a new project text file, or replace one completely, using its complete contents.",
             {"path": {"type": "string"}, "content": {"type": "string"}}, ("path", "content")),
     _schema("run_command", "Request approval for a shell command in the project. Runs with user permissions, not a sandbox.",
             {"command": {"type": "string"}, "description": {"type": "string"},
@@ -116,12 +137,14 @@ def _snapshot(target):
         return None
     if not stat.S_ISREG(metadata.st_mode):
         raise ValueError("Only regular text files can be edited.")
-    if metadata.st_size > _MAX_FILE_BYTES:
-        raise ValueError("This file exceeds the 64,000-byte editing limit.")
+    limit = _file_limit()
+    if metadata.st_size > limit:
+        raise ValueError(f"This file exceeds the {limit:,}-byte editing limit. A larger limit can be chosen in "
+                         "Developer > Files; splitting the file also helps.")
     with target.open("rb") as source:
-        data = source.read(_MAX_FILE_BYTES + 1)
-    if len(data) > _MAX_FILE_BYTES:
-        raise ValueError("This file exceeds the 64,000-byte editing limit.")
+        data = source.read(limit + 1)
+    if len(data) > limit:
+        raise ValueError(f"This file exceeds the {limit:,}-byte editing limit.")
     projects._decode_text(data)
     return data
 
@@ -139,7 +162,69 @@ def _approved(approve_action, action, allow_destination=False):
     return True
 
 
-def _write_file(project, arguments, approve_action, cancel_event, on_event, destination_selected=False):
+def _edit_file(project, arguments, approve_action, cancel_event, on_event):
+    """Replace an exact block; the result goes through write_file's diff, review and atomic write."""
+    target, path = _safe_target(project, arguments.get("path"))
+    old_text, new_text = arguments.get("old_text"), arguments.get("new_text")
+    replace_all = arguments.get("replace_all", False)
+    if not isinstance(old_text, str) or not old_text:
+        raise ValueError("edit_file requires old_text copied exactly from the file.")
+    if not isinstance(new_text, str):
+        raise ValueError("edit_file requires new_text (it may be empty to delete old_text).")
+    if not isinstance(replace_all, bool):
+        raise ValueError("replace_all must be true or false.")
+    old_bytes = _snapshot(target)
+    if old_bytes is None:
+        raise ValueError(f"{path} does not exist. Use write_file to create a new file.")
+    current = projects._decode_text(old_bytes)
+    count = current.count(old_text)
+    if count == 0 and "\r\n" in current and "\r\n" not in old_text:
+        # The model saw the file with plain newlines; keep the file's CRLF endings.
+        old_text, new_text = old_text.replace("\n", "\r\n"), new_text.replace("\n", "\r\n")
+        count = current.count(old_text)
+    if count == 0:
+        raise ValueError(f"old_text was not found in {path}. Read the file again and copy the exact lines, "
+                         "including indentation.")
+    if count > 1 and not replace_all:
+        raise ValueError(f"old_text appears {count} times in {path}. Include more surrounding lines so it is unique, "
+                         "or set replace_all to change every occurrence.")
+    updated = current.replace(old_text, new_text) if replace_all else current.replace(old_text, new_text, 1)
+    result = _write_file(project, {"path": path, "content": updated}, approve_action, cancel_event, on_event,
+                         expected_old=old_bytes)
+    return result if count == 1 else f"{result} Replaced {count} occurrences."
+
+
+def _read_file(project, arguments, on_event):
+    """Read a file, or a line range. A file too large for the model's context is
+    returned in parts, with the line numbers to ask for next."""
+    _safe_target(project, arguments.get("path"))
+    content = projects.read_project_file(project, arguments.get("path"), max_bytes=_file_limit())
+    start = arguments.get("start_line", 1)
+    end = arguments.get("end_line")
+    if isinstance(start, bool) or not isinstance(start, int) or start < 1:
+        raise ValueError("start_line must be a positive line number.")
+    if end is not None and (isinstance(end, bool) or not isinstance(end, int) or end < start):
+        raise ValueError("end_line must be a line number at or after start_line.")
+    lines = content.splitlines(keepends=True)
+    context = getattr(_run, "context_length", None) or 4096
+    budget = max(2000, context)  # characters for one read: about a quarter of the context
+    part_note = ""
+    if end is None and len("".join(lines[start - 1:])) > budget:
+        size, end = 0, start - 1
+        while end < len(lines) and (size + len(lines[end]) <= budget or end == start - 1):
+            size += len(lines[end])
+            end += 1
+        tokens = estimate_tokens(len(content))
+        part_note = (f"\n[Part of a large file: about {tokens:,} tokens, the model's context is {context:,}. "
+                     f"Continue with start_line={end + 1}; ask for about {max(1, end - start + 1)} lines at a time.]")
+        _emit(on_event, "status", f"{arguments['path']} is about {tokens:,} tokens, more than the model's "
+                                  f"{context:,}-token context: the agent reads it in parts.")
+    shown_end = min(end or len(lines), len(lines))
+    return (f"File: {arguments['path']} (lines {start}-{shown_end} of {len(lines)})\n"
+            + "".join(lines[start - 1:end]) + part_note)
+
+
+def _write_file(project, arguments, approve_action, cancel_event, on_event, destination_selected=False, expected_old=None):
     target, path = _safe_target(project, arguments.get("path"))
     content = arguments.get("content")
     if not isinstance(content, str):
@@ -148,10 +233,12 @@ def _write_file(project, arguments, approve_action, cancel_event, on_event, dest
         new_bytes = content.encode("utf-8")
     except UnicodeEncodeError as error:
         raise ValueError("File content must be valid UTF-8 text.") from error
-    if len(new_bytes) > _MAX_FILE_BYTES:
-        raise ValueError("New content exceeds the 64,000-byte editing limit.")
+    if len(new_bytes) > _file_limit():
+        raise ValueError(f"New content exceeds the {_file_limit():,}-byte editing limit.")
     projects._decode_text(new_bytes)
     old_bytes = _snapshot(target)
+    if expected_old is not None and old_bytes != expected_old:
+        raise ValueError("The file changed while the edit was prepared. Read it again and retry.")
     old_text = projects._decode_text(old_bytes) if old_bytes is not None else ""
     if old_bytes == new_bytes:
         return f"No change needed: {path} already contains this exact text."
@@ -321,16 +408,9 @@ def _execute_tool(project, name, arguments, approve_action, cancel_event, on_eve
             raise ValueError("File listing limit must be between 1 and 250.")
         return json.dumps(projects.list_project_files(project, limit), ensure_ascii=False)
     if name == "read_file":
-        _safe_target(project, arguments.get("path"))
-        content = projects.read_project_file(project, arguments.get("path"))
-        start = arguments.get("start_line", 1)
-        end = arguments.get("end_line")
-        if isinstance(start, bool) or not isinstance(start, int) or start < 1:
-            raise ValueError("start_line must be a positive line number.")
-        if end is not None and (isinstance(end, bool) or not isinstance(end, int) or end < start):
-            raise ValueError("end_line must be a line number at or after start_line.")
-        lines = content.splitlines(keepends=True)
-        return f"File: {arguments['path']} (lines {start}-{min(end or len(lines), len(lines))} of {len(lines)})\n" + "".join(lines[start - 1:end])
+        return _read_file(project, arguments, on_event)
+    if name == "edit_file":
+        return _edit_file(project, arguments, approve_action, cancel_event, on_event)
     if name == "write_file":
         return _write_file(project, arguments, approve_action, cancel_event, on_event)
     if name == "run_command":
@@ -432,7 +512,23 @@ def _chat(host, model, messages, context_length, cancel_event):
 
 
 def run_agent(host, model, project_root, messages, on_event, approve_action,
-              cancel_event=None, context_length=4096, max_steps=12, chat_fn=None):
+              cancel_event=None, context_length=4096, max_steps=12, chat_fn=None, file_limit=None):
+    """Run the agent with ``file_limit`` bytes as the largest file it may read or
+    edit (default 64,000; FILE_LIMIT_CHOICES lists what the app offers)."""
+    if file_limit is None:
+        file_limit = _MAX_FILE_BYTES
+    if isinstance(file_limit, bool) or not isinstance(file_limit, int) or not 1000 <= file_limit <= 4000000:
+        raise ValueError("The agent file size limit must be between 1,000 and 4,000,000 bytes.")
+    _run.file_limit, _run.context_length = file_limit, context_length
+    try:
+        return _run_agent(host, model, project_root, messages, on_event, approve_action,
+                          cancel_event, context_length, max_steps, chat_fn)
+    finally:
+        _run.file_limit, _run.context_length = _MAX_FILE_BYTES, None
+
+
+def _run_agent(host, model, project_root, messages, on_event, approve_action,
+               cancel_event=None, context_length=4096, max_steps=12, chat_fn=None):
     """Run tools on a worker thread, returning the updated native chat history.
 
     ``approve_action`` must return exactly True to allow a reviewed operation.

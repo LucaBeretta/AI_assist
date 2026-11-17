@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import tempfile
 import uuid
+import zipfile
 
 
 NEW_CHAT_TITLE = "New chat"
@@ -239,6 +240,52 @@ class ChatStore:
             "_manual_title": title != NEW_CHAT_TITLE,
         }
         return chat
+
+    def export_all(self, destination, unsaved=None, deleted=()):
+        """Write every readable chat to one .zip: the JSON files (copy them back into
+        the chats folder to restore) and a Markdown copy of each.
+
+        ``unsaved`` maps chat ids to records not yet on disk; ``deleted`` lists
+        ids being deleted. Damaged files are left out and listed in ``errors``.
+        Returns the number of chats written."""
+        destination = Path(destination).expanduser()
+        unsaved = dict(unsaved or {})
+        deleted = set(deleted)
+        chats = {chat["id"]: chat for chat in self.list_chats()}
+        for identity, record in unsaved.items():
+            chats[identity] = self._validate(record, expected_id=identity)
+        chats = [chat for identity, chat in chats.items() if identity not in deleted]
+        chats.sort(key=lambda chat: (chat["updated_at"], chat["id"]), reverse=True)
+        used_names = set()
+        temporary = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            with zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr("README.txt", (
+                    "AI Assist chat backup\n\n"
+                    "chats/ holds the saved chats. To restore, copy those .json files into the AI Assist\n"
+                    "chats folder (on Windows %LOCALAPPDATA%\\AI Assist\\chats, elsewhere ~/.aiassist/chats)\n"
+                    "while AI Assist is closed.\n\nreadable/ holds the same conversations as Markdown.\n"))
+                for chat in chats:
+                    if chat["id"] in unsaved:
+                        archive.writestr(f"chats/{chat['id']}.json", json.dumps(chat, ensure_ascii=False, indent=2))
+                    else:
+                        archive.write(self._path(chat["id"]), f"chats/{chat['id']}.json")
+                    base = re.sub(r"[^\w\- ]+", "", chat["title"]).strip()[:60] or "chat"
+                    name, counter = base, 2
+                    while name.casefold() in used_names:
+                        name, counter = f"{base} ({counter})", counter + 1
+                    used_names.add(name.casefold())
+                    lines = [f"# {chat['title']}", "",
+                             f"Model: {chat['model'] or 'none'} ({chat.get('backend', 'Ollama')})  |  Updated: {chat['updated_at']}", ""]
+                    for message in chat["messages"]:
+                        speaker = {"user": "You", "assistant": "AI Assist"}.get(message["role"], message["role"].title())
+                        lines += [f"## {speaker}", "", message["content"], ""]
+                    archive.writestr(f"readable/{name}.md", "\n".join(lines))
+            os.replace(temporary, destination)
+        except (OSError, zipfile.BadZipFile) as error:
+            temporary.unlink(missing_ok=True)
+            raise ChatStoreError(f"Could not write the backup: {error}") from error
+        return len(chats)
 
     def load(self, chat_id):
         """Read one chat, raising a diagnostic error for damaged files."""

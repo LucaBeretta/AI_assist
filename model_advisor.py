@@ -114,6 +114,40 @@ def _nvidia_hardware():
     return _parse_nvidia(text)
 
 
+def _parse_vm_stat(text):
+    """Reclaimable memory from macOS vm_stat: free, inactive, speculative and purgeable pages."""
+    page = re.search(r"page size of (\d+) bytes", text)
+    size = int(page.group(1)) if page else 16384
+    pages = 0
+    found = False
+    for label in ("Pages free", "Pages inactive", "Pages speculative", "Pages purgeable"):
+        match = re.search(rf"^{label}:\s+(\d+)", text, re.M)
+        if match:
+            pages += int(match.group(1))
+            found = True
+    return pages * size if found else None
+
+
+def apple_gpu_budget(ram_total):
+    """Memory Metal lets a GPU use on Apple silicon: about 2/3 of RAM up to 36 GB, 3/4 above."""
+    return int(ram_total * (0.75 if ram_total > 36 * GIB else 2 / 3))
+
+
+def _apple_hardware():
+    """Apple silicon: CPU and GPU share one pool of memory that Ollama uses through Metal."""
+    chip = _run(["sysctl", "-n", "machdep.cpu.brand_string"], timeout=5) or "Apple silicon"
+    total = int(_run(["sysctl", "-n", "hw.memsize"], timeout=5))
+    try:
+        available = _parse_vm_stat(_run(["vm_stat"], timeout=5))
+    except (OSError, RuntimeError, subprocess.TimeoutExpired):
+        available = None
+    budget = apple_gpu_budget(total)
+    gpu = {"name": f"{chip} GPU (unified memory)", "total_bytes": budget,
+           "free_bytes": min(budget, available) if available is not None else None,
+           "source": "Apple unified memory (Metal)", "supported": True, "unified": True}
+    return {"cpu": chip, "ram_total_bytes": total, "ram_available_bytes": available, "gpus": [gpu]}
+
+
 def _fallback_ram():
     if hasattr(os, "sysconf"):
         try:
@@ -123,9 +157,13 @@ def _fallback_ram():
             pass
     if platform.system() == "Darwin":
         try:
-            return int(_run(["sysctl", "-n", "hw.memsize"])), None
+            total = int(_run(["sysctl", "-n", "hw.memsize"]))
         except (ValueError, OSError, RuntimeError, subprocess.TimeoutExpired):
-            pass
+            return None, None
+        try:
+            return total, _parse_vm_stat(_run(["vm_stat"]))
+        except (OSError, RuntimeError, subprocess.TimeoutExpired):
+            return total, None
     return None, None
 
 
@@ -150,6 +188,18 @@ def detect_hardware(host):
         "ollama_running": False, "server_local": _server_local(host), "notes": notes,
     }
     windows = {}
+    apple = platform.system() == "Darwin" and platform.machine() == "arm64"
+    if apple:
+        try:
+            details = _apple_hardware()
+            for field in ("cpu", "ram_total_bytes", "ram_available_bytes"):
+                result[field] = details[field]
+            result["gpus"] = details["gpus"]
+            notes.append("Apple silicon: the GPU shares system memory. About 2/3 of RAM (3/4 above 36 GB) "
+                         "is usable by Metal, and other apps use the same memory.")
+        except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired):
+            apple = False
+            notes.append("Apple silicon memory inspection was unavailable; RAM-based estimates are used.")
     if platform.system() == "Windows":
         try:
             windows = _windows_hardware()
@@ -160,10 +210,11 @@ def detect_hardware(host):
             notes.append("Windows CPU/RAM inspection was unavailable; some details remain unknown.")
     if result["ram_total_bytes"] is None:
         result["ram_total_bytes"], result["ram_available_bytes"] = _fallback_ram()
-    try:
-        result["gpus"] = _nvidia_hardware()
-    except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired):
-        notes.append("NVIDIA dedicated video memory could not be read.")
+    if not apple:
+        try:
+            result["gpus"] = _nvidia_hardware()
+        except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired):
+            notes.append("NVIDIA dedicated video memory could not be read.")
     known_names = {gpu["name"].lower() for gpu in result["gpus"]}
     gpu_names = windows.get("gpu_names", [])
     if isinstance(gpu_names, str):

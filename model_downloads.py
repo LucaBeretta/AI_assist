@@ -3,9 +3,10 @@
 import queue
 import threading
 import tkinter as tk
-from tkinter import ttk
+from tkinter import messagebox, ttk
 import webbrowser
 
+from colibri_panel import ColibriRecommendationsPanel
 from hardware_panel import HardwareRecommendationsPanel
 
 from model_library import (
@@ -74,7 +75,9 @@ class ModelDownloadDialog:
         self.notebook = ttk.Notebook(self.window)
         self.advisor = HardwareRecommendationsPanel(self, self.notebook)
         self.popular_tab = tk.Frame(self.notebook, bg=c["surface"])
-        self.notebook.add(self.advisor.frame, text="  Recommended for this PC  ")
+        self.colibri = ColibriRecommendationsPanel(self, self.notebook)
+        self.notebook.add(self.advisor.frame, text="  Recommended for this PC (Ollama, GPU)  ")
+        self.notebook.add(self.colibri.frame, text="  colibri engine (RAM + SSD)  ")
         self.notebook.add(self.popular_tab, text="  Popular models  ")
         self.notebook.bind("<<NotebookTabChanged>>", self.change_tab)
         toolbar = tk.Frame(self.popular_tab, bg=c["surface"])
@@ -89,6 +92,7 @@ class ModelDownloadDialog:
         # Keep installation controls visible even when the list or description is long.
         bottom = tk.Frame(self.window, bg=c["surface"])
         bottom.pack(side="bottom", fill="x", padx=24, pady=(12, 20))
+        self.ollama_actions = bottom
         self.status = tk.Label(bottom, text="", bg=c["surface"], fg=c["muted"],
                                font=("Segoe UI", 9), anchor="w", justify="left", wraplength=750)
         self.status.pack(fill="x", pady=(0, 8))
@@ -148,9 +152,19 @@ class ModelDownloadDialog:
         self.notebook.pack(fill="both", expand=True, padx=10)
         self.update_controls()
 
+    def show_colibri(self):
+        self.notebook.select(self.colibri.frame)
+        self.change_tab()
+
     def change_tab(self, event=None):
         if self.notebook.select() == str(self.popular_tab):
             self.recommended_target = None
+        if hasattr(self, "colibri"):
+            # The Ollama download bar does not apply to colibri, which has its own controls.
+            if self.notebook.select() == str(self.colibri.frame):
+                self.ollama_actions.pack_forget()
+            elif not self.ollama_actions.winfo_ismapped():
+                self.ollama_actions.pack(side="bottom", fill="x", padx=24, pady=(12, 20), before=self.notebook)
         if hasattr(self, "download_button"):
             self.update_controls()
 
@@ -173,6 +187,8 @@ class ModelDownloadDialog:
         self.status.config(text=text, fg=self.app.COLORS["error"] if error else self.app.COLORS["muted"])
 
     def selected_variant(self):
+        if hasattr(self, "colibri") and self.notebook.select() == str(self.colibri.frame):
+            return None
         if self.notebook.select() == str(self.advisor.frame):
             return self.recommended_target
         index = self.variant_picker.current()
@@ -203,6 +219,8 @@ class ModelDownloadDialog:
         self.tree.config(selectmode="none" if self.downloading else "browse")
         if hasattr(self, "advisor"):
             self.advisor.update_controls()
+        if hasattr(self, "colibri"):
+            self.colibri.update_controls()
 
     def reload_catalogue(self):
         if self.downloading or self.loading_catalogue:
@@ -376,10 +394,15 @@ class ModelDownloadDialog:
             self.update_controls()
             self.poll_id = self.window.after(100, self.process_events)
 
-    def close(self):
+    def close(self, force=False):
         if self.closed:
             return
+        if not force and self.colibri.installing and not messagebox.askyesno(
+                "Stop colibri setup?", "colibri is still setting up a model. Close and stop it?\n"
+                "The next Install & use resumes the download.", parent=self.window):
+            return
         self.closed = True
+        self.colibri.close()
         self.advisor.close()
         self.cancel_event.set()
         self.window.after_cancel(self.poll_id)

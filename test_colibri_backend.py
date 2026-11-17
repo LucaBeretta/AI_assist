@@ -150,6 +150,8 @@ class BackendGuiTests(unittest.TestCase):
             mocks.enter_context(patch("AIassist.list_ollama_models", return_value=["glm"]))
             mocks.enter_context(patch("AIassist.running_models", return_value={"glm"}))
             mocks.enter_context(patch("colibri_backend.ColibriClient.models", return_value=["glm"]))
+            # No colibri folder: the server is used as it runs (no launcher control).
+            mocks.enter_context(patch("colibri_launcher.find_directory", return_value=None))
             mocks.enter_context(patch("capabilities_view.fetch_model_capabilities", return_value={"capabilities": []}))
 
             def reply(client, messages, model, on_chunk=None, on_metrics=None):
@@ -178,8 +180,10 @@ class BackendGuiTests(unittest.TestCase):
                 self.assertEqual(app.backend, "Colibri")
                 ensure.assert_not_called()
                 self.assertEqual(app.model_name.get(), "glm")
-                for widget in (app.run_all_button, app.stop_all_button, app.download_models_button, app.context_picker):
+                for widget in (app.run_all_button, app.stop_all_button, app.context_picker):
                     self.assertEqual(str(widget.cget("state")), "disabled")
+                # Find & download models stays available: its colibri tab explains how to install colibri.
+                self.assertEqual(str(app.download_models_button.cget("state")), "normal")
                 self.assertIn("Colibri", app.connection_label.cget("text"))
                 app.start_new_chat()
                 identity = app.current_chat["id"]
@@ -203,8 +207,11 @@ class BackendGuiTests(unittest.TestCase):
                 self.assertNotEqual(str(app.download_models_button.cget("state")), "disabled")
                 self.assertNotIn("do-not-save-this-key", Path(directory, "backend.settings").read_text())
                 app.open_chat(identity)
-                self.assertEqual(app.model_name.get(), "")
+                # The chat reopens on the engine it was written with, and its model returns.
+                self.assertEqual(app.backend, "Colibri")
+                self.assertEqual(app.engine_choice.get(), "Colibri")
                 self.assertEqual(app.current_chat["backend"], "Colibri")
+                wait(lambda: not app.busy() and app.model_name.get() == "glm")
                 self.assertFalse(errors, errors)
                 wait(lambda: not app.pending_saves)
             finally:

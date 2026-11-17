@@ -183,6 +183,44 @@ def request_ollama(messages, model=None, context_length=None, on_chunk=None, on_
         raise RuntimeError("Ollama's response did not contain a message.")
     return content.strip()
 
+class StreamStopped(Exception):
+    """Raised inside a stream callback to stop reading; the connection closes,
+    which tells Ollama or Colibri to stop generating."""
+
+
+def run_stoppable(request, parts, cancel_event):
+    """Run ``request()`` on its own thread. Returns (answer, error, stopped).
+
+    On Stop the caller gets the text received so far at once; the reader
+    thread ends at its next chunk, when the stream callback raises."""
+    if cancel_event is None:
+        try:
+            return request(), None, False
+        except (RuntimeError, ValueError) as error:
+            return None, str(error), False
+    finished = queue.Queue(maxsize=1)
+
+    def worker():
+        try:
+            finished.put((request(), None))
+        except StreamStopped:
+            finished.put((None, "stopped"))
+        except (RuntimeError, ValueError, OSError) as error:
+            finished.put((None, str(error)))
+
+    threading.Thread(target=worker, daemon=True).start()
+    while True:
+        if cancel_event.is_set():
+            return "".join(parts), None, True
+        try:
+            answer, error = finished.get(timeout=.1)
+        except queue.Empty:
+            continue
+        if error == "stopped" or cancel_event.is_set():
+            return "".join(parts), None, True
+        return answer, error, False
+
+
 class OllamaAssistantBase:
     COLORS = {
         "background": "#f5f6fa",
@@ -218,6 +256,7 @@ class OllamaAssistantBase:
         self.empty_state = None
         self.closed = False
         self.download_dialog = None
+        self.retired_dialogs = []
         self.download_refresh_pending = False
         self.recent_downloads = set()
         self.root.title("AI Assist | Your local workspace")
@@ -377,6 +416,11 @@ class OllamaAssistantBase:
         if self.download_dialog is not None and not self.download_dialog.closed:
             self.download_dialog.window.lift()
             return
+        if self.download_dialog is not None:
+            # Closed dialogs stay referenced until the app exits: a worker that
+            # outlives one must never drop the last reference to its Tk objects,
+            # because Tk can only free them on the main thread.
+            self.retired_dialogs.append(self.download_dialog)
         self.download_dialog = ModelDownloadDialog(self)
 
     def model_downloaded(self, name):
@@ -583,30 +627,41 @@ class OllamaAssistantBase:
         return self.send_prompt(event)
 
 
-    def fetch_response(self, messages, user_input, model, context_length=None):
+    def stream_callbacks(self, cancel_event=None):
+        """Chunk and metrics callbacks for one streamed answer, plus the list of
+        received parts (the partial answer if the user presses Stop)."""
         request_id = self.request_serial
-        pending = []
-        last_update = time.monotonic()
+        pending, parts = [], []
+        last_update = [time.monotonic()]
 
         def chunk(text):
-            nonlocal last_update
+            if cancel_event is not None and cancel_event.is_set():
+                raise StreamStopped()
+            parts.append(text)
             pending.append(text)
-            if time.monotonic() - last_update >= .05:
+            if time.monotonic() - last_update[0] >= .05:
                 self.workspace_events.put(("chat_chunk", request_id, "".join(pending), None))
                 pending.clear()
-                last_update = time.monotonic()
+                last_update[0] = time.monotonic()
 
-        try:
-            options = dict(on_chunk=chunk, on_metrics=lambda data: self.workspace_events.put(
-                ("chat_metrics", request_id, data, None)))
-            if context_length is not None:
-                options["context_length"] = context_length
-            response = request_ollama(messages, model, **options)
+        def flush():
             if pending:
                 self.workspace_events.put(("chat_chunk", request_id, "".join(pending), None))
-            self.response_queue.put((user_input, response, None))
-        except (RuntimeError, ValueError) as error:
-            self.response_queue.put((user_input, None, str(error)))
+                pending.clear()
+
+        def metrics(data):
+            self.workspace_events.put(("chat_metrics", request_id, data, None))
+
+        return chunk, metrics, flush, parts
+
+    def fetch_response(self, messages, user_input, model, context_length=None, cancel_event=None):
+        chunk, metrics, flush, parts = self.stream_callbacks(cancel_event)
+        options = dict(on_chunk=chunk, on_metrics=metrics)
+        if context_length is not None:
+            options["context_length"] = context_length
+        response, error, stopped = run_stoppable(lambda: request_ollama(messages, model, **options), parts, cancel_event)
+        flush()
+        self.response_queue.put((user_input, response, error, stopped))
 
 
     def close(self):
@@ -614,7 +669,7 @@ class OllamaAssistantBase:
         if hasattr(self, "update_checker"):
             self.update_checker.close()
         if self.download_dialog is not None:
-            self.download_dialog.close()
+            self.download_dialog.close(force=True)
         if hasattr(self, "poll_id"):
             self.root.after_cancel(self.poll_id)
         self.activity.stop()
