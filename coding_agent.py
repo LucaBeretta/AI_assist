@@ -52,7 +52,8 @@ _MAX_TOOL_CALLS = 8
 _SYSTEM = (
     "You are the local AI Assist coding agent. Use the provided native tools to inspect, "
     "edit, and verify the selected project. Never claim to have edited files or run a "
-    "command unless a successful tool result confirms it. Read files before editing. "
+    "command unless a successful tool result confirms it, and never write tool results "
+    "yourself: make one real tool call and wait for its result. Read files before editing. "
     "To change an existing file use edit_file: copy old_text exactly from read_file output "
     "(only the few lines that change plus enough context to be unique, never the whole file) "
     "and give its replacement. After a failed test, read the relevant lines again before editing. Use write_file only for new files or "
@@ -94,7 +95,7 @@ TOOLS = [
 _TEXT_CALL = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
 _XML_FUNCTION = re.compile(r"<function=([A-Za-z_][\w-]*)>(.*?)</function>", re.DOTALL)
 _XML_PARAMETER = re.compile(r"<parameter=([A-Za-z_]\w*)>\n?(.*?)\n?</parameter>", re.DOTALL)
-_CALL_MARKERS = ("<tool_call>", "<function=")
+_CALL_MARKERS = ("<tool_call>", "<function=", "</tool_call>", "</parameter>")
 _MALFORMED_CALL = (
     "Your last message contained a tool call written as text that could not be read "
     "(it was malformed or cut off). Nothing was executed. Call the tool again using native "
@@ -501,7 +502,9 @@ def _conversation_memory(history, limit):
 
 def _request_messages(history, context_length):
     """Bound requests; retain the latest user instruction and recent tool work."""
-    prediction = min(1024, max(256, context_length // 4))
+    # A write_file call carries a whole file: allow up to a quarter of the
+    # context (8k tokens at 32k) so tool calls are not cut off mid-argument.
+    prediction = min(8192, max(256, context_length // 4))
     budget = max(3000, (context_length - prediction) * 3 - len(json.dumps(TOOLS)) - len(_SYSTEM))
     if len(json.dumps(history, ensure_ascii=False)) <= budget:
         return [{"role": "system", "content": _SYSTEM}] + history, prediction

@@ -49,6 +49,17 @@ class TextToolCallParsingTests(unittest.TestCase):
         self.assertEqual(calls, [])
         self.assertIn("Fixing it:", remaining)
 
+    def test_leftover_closing_tags_are_malformed_not_a_final_answer(self):
+        calls, _, malformed = text_tool_calls("</parameter>\n</function>\n</tool_call>")
+        self.assertEqual(calls, [])
+        self.assertTrue(malformed)
+
+    def test_output_budget_fits_a_whole_file_at_32k(self):
+        _, prediction = coding_agent._request_messages([{"role": "user", "content": "go"}], 32768)
+        self.assertEqual(prediction, 8192)
+        _, small = coding_agent._request_messages([{"role": "user", "content": "go"}], 4096)
+        self.assertEqual(small, 1024)
+
     def test_plain_text_is_not_a_call(self):
         self.assertEqual(text_tool_calls("All tests pass."), ([], "All tests pass.", False))
 
