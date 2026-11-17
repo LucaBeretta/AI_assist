@@ -60,6 +60,17 @@ class TextToolCallParsingTests(unittest.TestCase):
         _, small = coding_agent._request_messages([{"role": "user", "content": "go"}], 4096)
         self.assertEqual(small, 1024)
 
+    def test_agent_context_uses_choice_then_loaded_model_then_16k(self):
+        from workspace_ui import agent_context_length
+        loaded = lambda: {"qwen3-coder:30b": {"context_length": 32768}}
+        self.assertEqual(agent_context_length(8192, "qwen3-coder:30b", loaded), 8192)
+        self.assertEqual(agent_context_length(None, "qwen3-coder:30b", loaded), 32768)
+        self.assertEqual(agent_context_length(None, "other", loaded), 16384)
+        self.assertEqual(agent_context_length(None, "qwen3-coder:30b", None), 16384)
+        def offline():
+            raise RuntimeError("Ollama is not running")
+        self.assertEqual(agent_context_length(None, "qwen3-coder:30b", offline), 16384)
+
     def test_plain_text_is_not_a_call(self):
         self.assertEqual(text_tool_calls("All tests pass."), ([], "All tests pass.", False))
 

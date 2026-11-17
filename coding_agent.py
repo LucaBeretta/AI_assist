@@ -52,11 +52,9 @@ _MAX_TOOL_CALLS = 8
 _SYSTEM = (
     "You are the local AI Assist coding agent. Use the provided native tools to inspect, "
     "edit, and verify the selected project. Never claim to have edited files or run a "
-    "command unless a successful tool result confirms it, and never write tool results "
-    "yourself: make one real tool call and wait for its result. Read files before editing. "
+    "command unless a successful tool result confirms it; never write tool results yourself. Read files before editing. "
     "To change an existing file use edit_file: copy old_text exactly from read_file output "
-    "(only the few lines that change plus enough context to be unique, never the whole file) "
-    "and give its replacement. After a failed test, read the relevant lines again before editing. Use write_file only for new files or "
+    "(a few unique lines, never the whole file) and give its replacement. Use write_file only for new files or "
     "complete rewrites. Large files are returned in parts: read the rest with start_line and "
     "end_line. Every edit and shell command is reviewed "
     "by the user; respect denials and explain what remains. Request narrow read_file line "
@@ -80,8 +78,7 @@ TOOLS = [
             {"path": {"type": "string"}, "start_line": {"type": "integer", "minimum": 1},
              "end_line": {"type": "integer", "minimum": 1}}, ("path",)),
     _schema("edit_file", "Request approval to replace one exact block of text in an existing project file. "
-            "old_text must match the file exactly and appear once (or set replace_all). "
-            "Keep old_text short: only the lines being changed plus a little unique context.",
+            "old_text must match the file exactly and appear once (or set replace_all).",
             {"path": {"type": "string"}, "old_text": {"type": "string"}, "new_text": {"type": "string"},
              "replace_all": {"type": "boolean"}}, ("path", "old_text", "new_text")),
     _schema("write_file", "Request approval to create a new project text file, or replace one completely, using its complete contents.",
