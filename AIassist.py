@@ -711,7 +711,8 @@ class AIAssistantGUI(BackendMixin, WorkspaceMixin, OllamaAssistantBase):
 
 
 if __name__ == "__main__":
-    from gui_runtime import GUIRuntimeError, create_root
+    from gui_runtime import GUIRuntimeError, create_root, redirect_missing_streams
+    redirect_missing_streams()
     try:
         root = create_root()
     except GUIRuntimeError as error:
