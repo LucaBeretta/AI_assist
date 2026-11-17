@@ -23,11 +23,13 @@ Start Ollama, then run the app from this folder:
 python AIassist.py
 ```
 
-On Windows, you can double-click **Start AI Assist.cmd** instead. It finds Python, starts the app from the correct folder, and keeps startup errors visible. If `.py` files are associated with Python, you can also double-click `AIassist.py` directly.
+On Windows, you can double-click **Start AI Assist.cmd** instead. It finds a Python whose Tkinter can open the window, starts the app from the correct folder, and keeps startup errors visible. If `.py` files are associated with Python, you can also double-click `AIassist.py` directly.
 
 On macOS, double-click **Start AI Assist.command**. It looks for a Python 3 that includes Tkinter (the python.org installer does; with Homebrew also run `brew install python-tk`). If macOS refuses to open it the first time, right-click it and choose **Open**, or run `chmod +x "Start AI Assist.command"`. On Apple silicon (M1 and later) the recommendations count the memory the GPU shares with the system (about 2/3 of RAM, 3/4 above 36 GB), so Macs get GPU-sized suggestions rather than CPU-only ones.
 
 macOS requires **Tk 8.6 or newer**. The launcher prefers Python installations from python.org and Homebrew, checks that a real Tk window can initialize, and prints the selected interpreter and Tcl/Tk versions. It skips incompatible installations instead of opening a broken window. Set `AI_ASSIST_PYTHON` to prefer a particular Python executable. Apple's older Tk 8.5 is unsupported; see [Python's macOS Tcl/Tk guidance](https://www.python.org/download/mac/tcltk/).
+
+**No suitable Python? Nothing to install by hand.** If neither launcher finds an installed Python that can open the window, it offers to download a private Python 3.13 with Tk (about 25 MB on macOS, 45 MB on Windows) from [python-build-standalone](https://github.com/astral-sh/python-build-standalone). It is used only after its SHA-256 checksum matches [python-runtime.txt](python-runtime.txt), it is stored only in this folder's `runtime` subfolder, and it needs no administrator password and changes no other Python. Later launches use it automatically; delete `runtime` to remove it. Ollama itself is still installed separately from [ollama.com/download](https://ollama.com/download).
 
 If the Mac interface appears blank or its fields are unreadable, install a current Python from python.org and launch with **Start AI Assist.command** again. To collect runtime details from the project folder, run `python3 gui_runtime.py --probe`; the launcher prints equivalent details for the interpreter it actually selects. The app aligns native macOS window appearance with its Light/Dark theme where supported, and uses labelled input areas with contrasting outlines on both Mac and Windows. Actual rendering on each macOS/Tk combination still needs a check on that Mac.
 

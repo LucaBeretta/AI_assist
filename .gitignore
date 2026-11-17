@@ -14,3 +14,6 @@ env/
 # Optional local chat-data overrides
 .aiassist/
 /chats/
+
+# Private Python downloaded by the launchers
+/runtime/
