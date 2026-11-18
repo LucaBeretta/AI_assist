@@ -76,10 +76,16 @@ try {
     Move-Item -LiteralPath (Join-Path $staging 'python') -Destination $target
     Remove-Staging
     $privatePython = Join-Path $target 'python.exe'
-    & $privatePython -m ensurepip --upgrade
-    if ($LASTEXITCODE -ne 0) { throw 'Could not prepare pip in the private Python.' }
-    & $privatePython -m pip install -r (Join-Path $root 'requirements.txt')
-    if ($LASTEXITCODE -ne 0) { throw 'Could not install the optional web UI dependencies. Tk remains available; retry with the private Python and requirements.txt.' }
+    # Optional web dependencies must not prevent the Tk launcher from starting.
+    try {
+        & $privatePython -m ensurepip --upgrade
+        if ($LASTEXITCODE -ne 0) { throw 'Could not prepare pip in the private Python.' }
+        & $privatePython -m pip install -r (Join-Path $root 'requirements.txt')
+        if ($LASTEXITCODE -ne 0) { throw 'Could not install pywebview.' }
+    } catch {
+        Write-Warning ('Optional web UI setup failed. Tk remains available. ' + $_.Exception.Message)
+        Write-Host ('Retry: & "' + $privatePython + '" -m pip install -r "' + (Join-Path $root 'requirements.txt') + '"')
+    }
     Write-Host 'Private Python installed.'
     Write-Host ''
     exit 0

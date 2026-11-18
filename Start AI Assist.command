@@ -72,8 +72,8 @@ install_private_python() {
     mv "$staging/python" "$RUNTIME_DIR/python" && rm -rf "$staging"
     if ! "$PRIVATE_PYTHON" -m ensurepip --upgrade || ! "$PRIVATE_PYTHON" -m pip install -r "$PWD/requirements.txt"; then
         echo "Could not install the optional web UI dependencies. Tk remains available."
-        echo "Retry with: $PRIVATE_PYTHON -m pip install -r $PWD/requirements.txt"
-        return 1
+        printf 'Retry with: "%s" -m pip install -r "%s/requirements.txt"\n' "$PRIVATE_PYTHON" "$PWD"
+        return 0
     fi
     echo "Private Python installed."
     echo
