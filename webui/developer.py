@@ -23,11 +23,16 @@ class DeveloperTasks:
         with self.lock:
             return any(task["record"]["model"] == name and not task["finished"].is_set() for task in self.tasks.values())
 
+    def uses_project(self, project):
+        with self.lock:
+            return any(task["record"]["project_path"] == str(project) and not task["finished"].is_set() for task in self.tasks.values())
+
     def start(self, chat_id, record, **options):
         with self.lock:
             if self.closed or self.busy(chat_id):
                 raise ValueError("This Developer chat is busy or closing.")
             identity = str(uuid.uuid4())
+            options["task_id"] = identity
             task = {"chat_id": chat_id, "record": deepcopy(record), "cancel": threading.Event(),
                     "finished": threading.Event(), "pending": {}}
             self.tasks[identity] = task
@@ -98,6 +103,7 @@ class DeveloperTasks:
         def emit(event):
             event = deepcopy(event)
             kind = event.pop("type")
+            event.pop("task_id", None)
             self.bridge.emit(kind, task_id=identity, chat_id=task["chat_id"], **event)
         try:
             result = coding_agent.run_agent(
@@ -115,6 +121,7 @@ class DeveloperTasks:
         with self.lock:
             task["finished"].set()
             task["pending"].clear()
+            self.tasks.pop(identity, None)
         self.bridge.emit(kind, task_id=identity, chat_id=task["chat_id"], **extra)
 
     def close(self):

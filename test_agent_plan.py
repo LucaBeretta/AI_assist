@@ -69,9 +69,10 @@ class PlanTests(unittest.TestCase):
         with patch("coding_agent.urllib.request.urlopen", side_effect=request):
             coding_agent.run_agent("http://localhost:11434", "m", self.root,
                 [{"role": "user", "content": "task"}], lambda event: None, lambda action: True,
-                plan_first=True, approve_plan=lambda plan: True)
+                plan_first=True, approve_plan=lambda plan: True, keep_alive="7m")
         self.assertEqual({tool["function"]["name"] for tool in captured[0]["tools"]}, {"read_file", "list_files"})
         self.assertIn("write_file", {tool["function"]["name"] for tool in captured[1]["tools"]})
+        self.assertEqual([request["keep_alive"] for request in captured], ["7m", "7m"])
 
 
 class DeveloperApiTests(unittest.TestCase):

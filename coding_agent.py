@@ -24,8 +24,10 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 
 import developer_tools as projects
+from task_checkpoints import CheckpointStore
 from response_metrics import metrics_summary
 
 
@@ -386,6 +388,11 @@ def _write_file(project, arguments, approve_action, cancel_event, on_event, dest
             raise ValueError("The file changed after its diff was prepared. Read it again and request a new approval.")
 
     recheck()
+    checkpoint = getattr(_run, "checkpoint", None)
+    if checkpoint is not None:
+        if checkpoint.capture(_run.task_id, _run.project, target, old_bytes):
+            _emit(on_event, "checkpoint", "Saved original before changing " + path, task_id=_run.task_id, path=path)
+        recheck()
     target.parent.mkdir(parents=True, exist_ok=True)
     recheck()
     temporary_path = None
@@ -593,7 +600,7 @@ def _request_messages(history, context_length):
 def _chat(host, model, messages, context_length, cancel_event):
     request_messages, prediction = _request_messages(messages, context_length)
     payload = {"model": model, "messages": request_messages, "tools": _READ_TOOLS if getattr(_run, "planning", False) else TOOLS, "stream": False,
-               "keep_alive": -1, "options": {"num_ctx": context_length, "num_predict": prediction}}
+               "keep_alive": getattr(_run, "keep_alive", -1), "options": {"num_ctx": context_length, "num_predict": prediction}}
     request = urllib.request.Request(host.rstrip("/") + "/api/chat", data=json.dumps(payload).encode("utf-8"),
                                      headers={"Content-Type": "application/json"}, method="POST")
     completed = queue.Queue(maxsize=1)
@@ -634,7 +641,7 @@ def _chat(host, model, messages, context_length, cancel_event):
 
 def run_agent(host, model, project_root, messages, on_event, approve_action,
               cancel_event=None, context_length=4096, max_steps=DEFAULT_MAX_STEPS, chat_fn=None, file_limit=None,
-              plan_first=False, approve_plan=None):
+              plan_first=False, approve_plan=None, task_id=None, checkpoint_store=None, keep_alive=-1):
     """Run the agent with ``file_limit`` bytes as the largest file it may read or
     edit (default 64,000; FILE_LIMIT_CHOICES lists what the app offers)."""
     if file_limit is None:
@@ -643,14 +650,26 @@ def run_agent(host, model, project_root, messages, on_event, approve_action,
         raise ValueError("The agent file size limit must be between 1,000 and 4,000,000 bytes.")
     if type(plan_first) is not bool or (plan_first and not callable(approve_plan)):
         raise ValueError("Plan-first mode requires a boolean flag and an approve_plan callback.")
+    project = projects._project_root(project_root)
+    task_id = task_id or str(uuid.uuid4())
+    if not isinstance(task_id, str) or str(uuid.UUID(task_id)) != task_id:
+        raise ValueError("Developer task IDs must be canonical UUIDs.")
     _run.file_limit, _run.context_length = file_limit, context_length
     _run.planning = plan_first
+    _run.keep_alive = keep_alive
+    _run.task_id, _run.project = task_id, project
+    _run.checkpoint = checkpoint_store if checkpoint_store is not None else CheckpointStore(project / ".aiassist-checkpoints")
     try:
-        return _run_agent(host, model, project_root, messages, on_event, approve_action,
-                          cancel_event, context_length, max_steps, chat_fn, plan_first, approve_plan)
+        result = _run_agent(host, model, project, messages, on_event, approve_action,
+                            cancel_event, context_length, max_steps, chat_fn, plan_first, approve_plan)
+        result["task_id"] = task_id
+        return result
     finally:
         _run.file_limit, _run.context_length = _MAX_FILE_BYTES, None
         _run.planning = False
+        _run.keep_alive = -1
+        _run.checkpoint = None
+        _run.task_id, _run.project = None, None
 
 
 def _run_agent(host, model, project_root, messages, on_event, approve_action,

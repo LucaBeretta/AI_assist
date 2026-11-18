@@ -19,6 +19,7 @@ from model_advisor import detect_hardware
 from webui.bridge import Bridge
 from webui.developer import DeveloperTasks
 import developer_tools
+from task_checkpoints import CheckpointStore
 from webui import settings
 
 
@@ -85,6 +86,7 @@ class Api:
         self._settings = settings.load(self._store.directory)
         self._unloading = set()
         self._developer = DeveloperTasks(bridge, self._save_agent_result)
+        self._checkpoints = CheckpointStore(self._store.directory / "checkpoints")
 
     def _load_chat(self, chat_id):
         if chat_id in self._incognito_ids:
@@ -260,9 +262,11 @@ class Api:
         with self._lock:
             record = self._version_record(chat_id)
             root = developer_tools._project_root(project or record["project_path"])
+            if self._developer.uses_project(root):
+                raise ValueError("Another Developer task is already changing this project.")
             if not record["model"]:
                 raise ValueError("Choose a Developer model first.")
-            history = deepcopy(record["agent_history"])
+            history = [] if record.get("_agent_history_stale") else deepcopy(record["agent_history"])
             if not history:
                 history = request_messages(record)
             history.append({"role": "user", "content": text})
@@ -272,7 +276,26 @@ class Api:
             record = self._save_chat(record)
             return self._developer.start(chat_id, record, host=self._engine.ollama_url(), model=record["model"],
                 project_root=str(root), messages=history, plan_first=plan_first, max_steps=max_steps,
-                context_length=context, file_limit=chat_attachments.file_limit(self._store.directory))
+                context_length=context, file_limit=chat_attachments.file_limit(self._store.directory),
+                checkpoint_store=self._checkpoints,
+                keep_alive=f"{self._settings['idle_unload_minutes']}m" if self._settings["idle_unload_minutes"] else -1)
+
+    @_json_method
+    def list_checkpoints(self, project):
+        return {"ok": True, "checkpoints": self._checkpoints.list(project)}
+
+    @_json_method
+    def restore_checkpoint(self, task_id):
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("The web UI is closing.")
+            manifest = self._checkpoints._load(task_id)
+            root = developer_tools._project_root(manifest["project"])
+            if self._developer.uses_project(root):
+                raise ValueError("Stop the active Developer task before restoring its project.")
+            restored = self._checkpoints.restore(task_id)
+        self._bridge.emit("checkpoint_restored", **restored)
+        return {"ok": True, **restored}
 
     def _save_agent_result(self, before, result):
         with self._lock:
@@ -283,6 +306,7 @@ class Api:
                 if current.get(key) != before.get(key):
                     raise RuntimeError("This chat changed while the Developer task was running.")
             current["agent_history"] = result["messages"]
+            current.pop("_agent_history_stale", None)
             current["messages"].append({"role": "assistant", "content": result["assistant_text"]})
             self._save_chat(current)
 
