@@ -1110,7 +1110,8 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
     def project_worker(self, request, root, selected):
         try:
             files = list_project_files(root)
-            context = build_project_context(root, selected, max_total_chars=8000)
+            context = build_project_context(root, selected, max_total_chars=8000,
+                                            max_file_bytes=self.agent_file_limit)
             self.workspace_events.put(("project", request, (files, context), None))
         except (OSError, ValueError, RuntimeError) as error:
             self.workspace_events.put(("project", request, None, str(error)))
@@ -1616,6 +1617,8 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
             self.file_limit_choice.set(file_limit_label(self.agent_file_limit))
             return
         self.agent_file_limit = limit
+        if self.project_path and self.project_selected_paths:
+            self.scan_project()
         if self.agent_settings:
             try:
                 temporary = self.agent_settings.with_suffix(".tmp")
