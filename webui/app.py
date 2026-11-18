@@ -58,6 +58,25 @@ class Api:
         self._unsaved = {}
         self._closed = False
         self._autosave_interval = 2
+        self._incognito = {}
+        self._incognito_ids = set()
+
+    def _load_chat(self, chat_id):
+        if chat_id in self._incognito_ids:
+            if chat_id not in self._incognito:
+                raise ValueError("This incognito chat has been closed.")
+            return deepcopy(self._incognito[chat_id])
+        return self._store.load(chat_id)
+
+    def _save_chat(self, record):
+        if record["id"] in self._incognito_ids:
+            if self._closed:
+                raise ValueError("This incognito chat has been closed.")
+            record = self._store._validate(record)
+            record["updated_at"] = _utc_now()
+            self._incognito[record["id"]] = deepcopy(record)
+            return record
+        return self._store.save(record)
 
     @_json_method
     def state(self):
@@ -79,9 +98,9 @@ class Api:
         with self._lock:
             if self._closed:
                 raise RuntimeError("The web UI is closing.")
-            record = self._store.load(chat_id)
+            record = self._load_chat(chat_id)
             record["draft"] = text
-            self._store.save(record)
+            self._save_chat(record)
         return {"ok": True}
 
     @_json_method
@@ -90,14 +109,14 @@ class Api:
             raise ValueError("Keep must be true or false.")
         with self._lock:
             self._require_idle(chat_id)
-            record = self._store.load(chat_id)
+            record = self._load_chat(chat_id)
             if not record["messages"] or not record["messages"][-1].get("partial"):
                 raise ValueError("This chat has no interrupted reply.")
             if keep:
                 record["messages"][-1].pop("partial")
             else:
                 record["messages"].pop()
-            return {"ok": True, "chat": self._store.save(record)}
+            return {"ok": True, "chat": self._save_chat(record)}
 
     def _require_idle(self, chat_id):
         if self._closed:
@@ -108,32 +127,43 @@ class Api:
     @_json_method
     def list_chats(self):
         with self._lock:
-            return {"ok": True, "chats": self._store.list_chats()}
+            chats = self._store.list_chats() + deepcopy(list(self._incognito.values()))
+            return {"ok": True, "chats": sorted(chats, key=lambda item: item["updated_at"], reverse=True)}
 
     @_json_method
     def open_chat(self, id):
         with self._lock:
-            return {"ok": True, "chat": self._store.load(id),
+            return {"ok": True, "chat": self._load_chat(id),
                     "unsaved_replies": deepcopy([item for item in self._unsaved.values() if item["chat_id"] == id])}
 
     @_json_method
-    def new_chat(self):
+    def new_chat(self, incognito=False):
+        if type(incognito) is not bool:
+            raise ValueError("Incognito must be true or false.")
         with self._lock:
             if self._closed:
                 raise RuntimeError("The web UI is closing.")
-            return {"ok": True, "chat": self._store.create()}
+            record = self._store.new_record()
+            if incognito:
+                record["incognito"] = True
+                self._incognito_ids.add(record["id"])
+            return {"ok": True, "chat": self._save_chat(record)}
 
     @_json_method
     def new_chat_same_environment(self, chat_id):
         with self._lock:
             if self._closed:
                 raise RuntimeError("The web UI is closing.")
-            source = self._store.load(chat_id)
+            source = self._load_chat(chat_id)
             record = self._store.new_record(model=source["model"])
             record["environment"] = deepcopy(source["environment"])
             record["backend"] = source.get("backend", record["environment"]["backend"])
             record["context_length"] = source["context_length"]
-            return {"ok": True, "chat": self._store.save(record)}
+            if source.get("incognito"):
+                record["incognito"] = True
+                record["environment"]["memory_ids"] = []
+                self._incognito_ids.add(record["id"])
+            return {"ok": True, "chat": self._save_chat(record)}
 
     def _usage(self, record, loaded_context=None):
         total = record["context_length"] if record["context_length"] is not None else loaded_context
@@ -151,7 +181,7 @@ class Api:
     @_json_method
     def context_usage(self, chat_id):
         with self._lock:
-            record = self._store.load(chat_id)
+            record = self._load_chat(chat_id)
         return self._usage(record)
 
     @_json_method
@@ -161,13 +191,13 @@ class Api:
                 raise RuntimeError("The web UI is closing.")
             if any(item["chat_id"] == chat_id for item in self._streams.values()):
                 raise ValueError("This chat already has an active stream.")
-            record = self._store.load(chat_id)
+            record = self._load_chat(chat_id)
         # Model metadata can require network I/O. Keep Stop and other chats free.
         total = self._usage(record)["total"]
         with self._lock:
             if self._closed or any(item["chat_id"] == chat_id for item in self._streams.values()):
                 raise ValueError("This chat is busy or the web UI is closing.")
-            if self._store.load(chat_id) != record:
+            if self._load_chat(chat_id) != record:
                 raise ValueError("This chat changed while its context was being checked; try again.")
             if record.get("backend", record["environment"]["backend"]) != "Ollama":
                 raise ValueError("This web UI currently supports compaction through Ollama only.")
@@ -205,7 +235,7 @@ class Api:
         with self._lock:
             if self._closed:
                 raise RuntimeError("The web UI is closing.")
-            record = self._store.load(chat_id)
+            record = self._load_chat(chat_id)
             if any(item["chat_id"] == chat_id for item in self._streams.values()):
                 raise ValueError("This chat already has an active stream.")
             if record["messages"] and record["messages"][-1].get("partial"):
@@ -215,7 +245,7 @@ class Api:
             record["environment"].update(backend="Ollama", model=model, context_length=context)
             record["messages"].append({"role": "user", "content": text})
             record["draft"] = ""
-            record = self._store.save(record)
+            record = self._save_chat(record)
             return self._launch(record, kind="chat", messages=request_messages(record), context=context)
 
     def _launch(self, record, **operation):
@@ -238,7 +268,7 @@ class Api:
         return {"ok": True, "stream_id": stream_id}
 
     def _stream_record(self, stream):
-        current = self._store.load(stream["chat_id"])
+        current = self._load_chat(stream["chat_id"])
         expected = stream["record"]
         messages = current["messages"]
         if stream["partial_message"] is not None:
@@ -263,7 +293,7 @@ class Api:
                 return
             current = self._stream_record(stream)
             current["messages"].append(message)
-            self._store.save(current)
+            self._save_chat(current)
             stream["partial_message"] = message
 
     def _autosave(self, stream_id, stream):
@@ -342,7 +372,7 @@ class Api:
                             raise ValueError("The model returned an empty or oversized summary; no compaction was saved.")
                         current["summary"] = {"text": answer.strip(), "upto": stream["upto"], "created_at": _utc_now()}
                         usage = self._usage(current, stream["context"])
-                        self._store.save(current)
+                        self._save_chat(current)
                         kind = "compact_done"
                     else:
                         usage = None
@@ -355,7 +385,7 @@ class Api:
                 current["last_response"] = {"status": kind, "metrics": stream["metrics"]}
                 if error and kind == "error":
                     current["last_response"]["error"] = error
-                self._store.save(current)
+                self._save_chat(current)
                 self._streams.pop(stream_id, None)
                 self._bridge.emit(kind, stream_id=stream_id, chat_id=stream["chat_id"],
                                   text=content or "", metrics=stream["metrics"], error=error if kind == "error" else None)
@@ -367,7 +397,7 @@ class Api:
             with self._lock:
                 recovered = {"stream_id": stream_id, "chat_id": stream["chat_id"], "text": partial,
                              "metrics": deepcopy(stream["metrics"]), "error": str(failure), "saved": False}
-                if not compact:
+                if not compact and not (self._closed and record.get("incognito")):
                     self._unsaved[stream_id] = recovered
                 recovered["operation"] = stream["kind"]
                 self._bridge.emit("error", **recovered)
@@ -398,6 +428,10 @@ class Api:
         deadline = time.monotonic() + timeout
         for stream in streams:
             stream["finished"].wait(max(0, deadline - time.monotonic()))
+        with self._lock:
+            self._incognito.clear()
+            self._unsaved = {key: value for key, value in self._unsaved.items()
+                             if value["chat_id"] not in self._incognito_ids}
 
 
 def main():

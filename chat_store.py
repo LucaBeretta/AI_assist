@@ -193,6 +193,8 @@ class ChatStore:
         if "_manual_title" in chat and type(chat["_manual_title"]) is not bool:
             raise ChatStoreError("Chat _manual_title must be true or false.")
         record = deepcopy(chat)
+        if "incognito" in record and type(record["incognito"]) is not bool:
+            raise ChatStoreError("Chat incognito must be true or false.")
         record.setdefault("project_files", [])
         record.setdefault("activity", [])
         record.setdefault("agent_history", [])
@@ -292,8 +294,10 @@ class ChatStore:
         deleted = set(deleted)
         chats = {chat["id"]: chat for chat in self.list_chats()}
         for identity, record in unsaved.items():
+            if record.get("incognito"):
+                continue
             chats[identity] = self._validate(record, expected_id=identity)
-        chats = [chat for identity, chat in chats.items() if identity not in deleted]
+        chats = [chat for identity, chat in chats.items() if identity not in deleted and not chat.get("incognito")]
         chats.sort(key=lambda chat: (chat["updated_at"], chat["id"]), reverse=True)
         used_names = set()
         temporary = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.tmp")
@@ -351,6 +355,8 @@ class ChatStore:
         An existing record is read first to protect damaged files and retain its
         original creation timestamp. Independent chats never rewrite each other.
         """
+        if isinstance(chat, dict) and chat.get("incognito"):
+            raise ChatStoreError("Incognito chats must never be saved to disk.")
         record = self._validate(chat)
         path = self._path(record["id"])
         if path.exists():
