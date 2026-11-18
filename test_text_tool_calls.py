@@ -1,6 +1,7 @@
 import inspect
 from pathlib import Path
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -19,6 +20,20 @@ def reply(content):
 
 
 class TextToolCallParsingTests(unittest.TestCase):
+    def test_ambiguous_xml_and_mixed_complete_and_cut_off_calls_are_rejected(self):
+        for body in (
+            '<function=write_file><parameter=path>a.py</parameter><parameter=path>b.py</parameter></function>',
+            '<function=write_file><parameter=path>a.py</parameter><parameter=content>unfinished</function>',
+            '<function=list_files></function><function=run_command></function>',
+        ):
+            with self.subTest(body=body):
+                calls, _, malformed = text_tool_calls('<tool_call>' + body + '</tool_call>')
+                self.assertTrue(malformed)
+                self.assertEqual(calls, [])
+        calls, _, malformed = text_tool_calls(XML_READ + '<tool_call><function=write_file>')
+        self.assertTrue(malformed)
+        self.assertEqual(calls, [])
+
     def test_request_describes_the_command_shell_on_each_platform(self):
         for os_name, platform, expected in (("nt", "win32", "PowerShell 5.1"),
                                             ("posix", "darwin", "OS: darwin"),
@@ -92,6 +107,45 @@ class TextToolCallParsingTests(unittest.TestCase):
 
 
 class AgentRecoveryTests(unittest.TestCase):
+    def test_stop_while_waiting_for_a_model_cannot_become_a_finished_reply(self):
+        cancel = threading.Event()
+        def cancelled_reply(*args):
+            cancel.set()
+            return reply("All done")
+        with self.assertRaises(coding_agent.AgentCancelled):
+            run_agent("http://localhost:11434", "model", self.root,
+                      [{"role": "user", "content": "go"}], self.events.append,
+                      lambda action: self.fail("Must not request approval"),
+                      cancel_event=cancel, chat_fn=cancelled_reply)
+        self.assertFalse(any(event.get("final") for event in self.events))
+
+    def test_length_limited_response_never_executes_even_a_parseable_call(self):
+        truncated = reply('<tool_call>{"name":"write_file","arguments":{"path":"new.py","content":"partial"}}</tool_call>')
+        truncated["done_reason"] = "length"
+        with patch("coding_agent._execute_tool") as execute:
+            self.run_replies([truncated, reply("Need a shorter call")])
+        execute.assert_not_called()
+        self.assertFalse((self.root / "new.py").exists())
+
+    def test_recovered_write_and_command_still_require_explicit_approval(self):
+        for name, arguments in (("write_file", '{"path":"new.py","content":"hello"}'),
+                                ("run_command", '{"command":"echo hello"}')):
+            response = reply('<tool_call>{"name":"' + name + '","arguments":' + arguments + '}</tool_call>')
+            for decision in (False, 1, {"approved": True}):
+                with self.subTest(name=name, decision=decision), patch("coding_agent.subprocess.Popen") as process:
+                    approvals = []
+                    def approve(action):
+                        approvals.append(action)
+                        return decision
+                    replies = iter([response, reply("Denied")])
+                    result = run_agent("http://localhost:11434", "model", self.root,
+                                       [{"role": "user", "content": "go"}], self.events.append, approve,
+                                       chat_fn=lambda *args: next(replies))
+                    self.assertEqual(len(approvals), 1)
+                    self.assertIn("declined", result["messages"][2]["content"])
+                    process.assert_not_called()
+                    self.assertFalse((self.root / "new.py").exists())
+
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -129,13 +183,27 @@ class AgentRecoveryTests(unittest.TestCase):
         outputs = iter([failing.format("1k"), failing.format("1M"), failing.format("1k"), failing.format("1k")])
         command = {"message": {"role": "assistant", "content": "", "tool_calls": [
             {"function": {"name": "run_command", "arguments": {"command": "python -m unittest"}}}]}}
+        final_batch = {"message": {"content": "", "tool_calls": command["message"]["tool_calls"] + [
+            {"function": {"name": "write_file", "arguments": {"path": "must-not-exist.py", "content": "bad"}}}]}}
         with patch("coding_agent._run_command", side_effect=lambda *args, **kwargs: next(outputs)):
-            result = self.run_replies([command, command, command, command, reply("Stopped: [:-2] is wrong.")])
+            result = self.run_replies([command, command, command, final_batch])
         nudges = [message["content"] for message in result["messages"] if message["role"] == "user"][1:]
         self.assertEqual(len(nudges), 2)
         self.assertIn("line by line", nudges[0])
         self.assertIn("FAIL: test_format", nudges[0])
         self.assertIn("Stop now and report", nudges[1])
+        self.assertTrue(all("Check main.py" in nudge for nudge in nudges))
+        self.assertIn("four repeated command failures", result["assistant_text"])
+        self.assertFalse((self.root / "must-not-exist.py").exists())
+        self.assertTrue(any("Not executed" in message.get("content", "") for message in result["messages"]))
+
+    def test_retry_after_a_stuck_nudge_keeps_the_actual_user_task(self):
+        history = [{"role": "user", "content": "Implement the exact API and run its tests"}]
+        history.append({"role": "user", "content": coding_agent._retry_message(
+            history, coding_agent._STUCK_NUDGES[2].format(error="FAIL: test_api"))})
+        retry = coding_agent._retry_message(history)
+        self.assertIn("Implement the exact API", retry)
+        self.assertNotIn("Stop guessing", retry)
 
     def test_failure_signature_ignores_success_and_other_tools(self):
         self.assertEqual(coding_agent._failure_signature("run_command", "Command exited with code 0.\nOK"), "")

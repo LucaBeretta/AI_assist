@@ -133,13 +133,14 @@ def _failure_signature(tool, result):
     return (tests or errors or lines[-1:] or [""])[-1][:200]
 
 
-def _retry_message(history):
+def _retry_message(history, instruction=_MALFORMED_CALL):
     """Ask for a readable retry and repeat the task, so the retry is not taken as the new task."""
+    generated = (_MALFORMED_CALL,) + tuple(text.split("{error}")[0] for text in _STUCK_NUDGES.values())
     task = next((message.get("content", "") for message in reversed(history)
-                 if message.get("role") == "user" and not message.get("content", "").startswith(_MALFORMED_CALL)), "")
+                 if message.get("role") == "user" and not message.get("content", "").startswith(generated)), "")
     if not isinstance(task, str) or not task.strip():
-        return _MALFORMED_CALL
-    return (f"{_MALFORMED_CALL}\n\nContinue the original task below exactly as specified "
+        return instruction
+    return (f"{instruction}\n\nContinue the original task below exactly as specified "
             f"(same names, values and files):\n\n{_shorten(task, 6000)}")
 
 
@@ -165,11 +166,20 @@ def text_tool_calls(content):
     """
     calls = []
     for body in _TEXT_CALL.findall(content):
-        function = _XML_FUNCTION.search(body)
+        function = _XML_FUNCTION.fullmatch(body.strip())
         if function:
             name = function.group(1)
-            arguments = {key: _typed_value(name, key, value)
-                         for key, value in _XML_PARAMETER.findall(function.group(2))}
+            parameters = function.group(2)
+            arguments = {}
+            end = 0
+            for parameter in _XML_PARAMETER.finditer(parameters):
+                key, value = parameter.groups()
+                if parameters[end:parameter.start()].strip() or key in arguments:
+                    return [], content, True
+                arguments[key] = _typed_value(name, key, value)
+                end = parameter.end()
+            if parameters[end:].strip():
+                return [], content, True
             calls.append({"function": {"name": name, "arguments": arguments}})
             continue
         try:
@@ -183,7 +193,7 @@ def text_tool_calls(content):
     malformed = not calls and any(marker in content for marker in _CALL_MARKERS)
     if calls and any(marker in remaining for marker in _CALL_MARKERS):
         malformed = True
-    return calls, remaining, malformed
+    return ([] if malformed else calls), remaining, malformed
 
 
 class AgentCancelled(RuntimeError):
@@ -663,11 +673,13 @@ def _run_agent(host, model, project_root, messages, on_event, approve_action,
         raise ValueError("Provide at least one conversation message.")
     history = copy.deepcopy(messages)
     failures = {}
+    repeated_failure = ""
     output_limit = min(12000, max(2000, context_length * 2))
     _emit(on_event, "status", "Developer agent is inspecting the project.")
     for step in range(max_steps):
         _check_cancelled(cancel_event)
         response = (chat_fn or _chat)(host, model, history, context_length, cancel_event)
+        _check_cancelled(cancel_event)
         summary = metrics_summary(response)
         if summary:
             _emit(on_event, "metrics", f"Step {step + 1}/{max_steps}: {summary}")
@@ -676,6 +688,11 @@ def _run_agent(host, model, project_root, messages, on_event, approve_action,
             raise RuntimeError("Ollama returned an unreadable agent message.")
         calls = copy.deepcopy(message.get("tool_calls") or [])
         content = message.get("content", "")
+        if response.get("done_reason") == "length":
+            history.append({"role": "assistant", "content": content})
+            history.append({"role": "user", "content": _retry_message(history)})
+            _emit(on_event, "status", f"Step {step + 1}: output was cut off; no tools executed, asking for a shorter retry.")
+            continue
         if not calls and content:
             calls, remaining, malformed = text_tool_calls(content)
             if malformed:
@@ -717,6 +734,7 @@ def _run_agent(host, model, project_root, messages, on_event, approve_action,
             if not assistant["content"].strip():
                 raise RuntimeError("The model returned no agent response. Choose a model with native tool calling.")
             return {"messages": history, "assistant_text": assistant["content"]}
+        nudges = []
         for index, call in enumerate(calls):
             _check_cancelled(cancel_event)
             function = call.get("function") if isinstance(call, dict) else None
@@ -725,6 +743,8 @@ def _run_agent(host, model, project_root, messages, on_event, approve_action,
                 name = "unknown"
             _emit(on_event, "tool_start", f"{name}\u2026", tool=name, step=step + 1)
             try:
+                if repeated_failure:
+                    raise ValueError("Not executed: repeated command failures stopped this task.")
                 if index in argument_errors:
                     raise ValueError(argument_errors[index])
                 arguments = function.get("arguments", {}) if isinstance(function, dict) else {}
@@ -741,10 +761,17 @@ def _run_agent(host, model, project_root, messages, on_event, approve_action,
                 failures[signature] = failures.get(signature, 0) + 1
                 nudge = _STUCK_NUDGES.get(failures[signature])
                 if nudge:
-                    history.append({"role": "user", "content": nudge.format(error=signature)})
+                    nudges.append({"role": "user", "content": _retry_message(history, nudge.format(error=signature))})
                     _emit(on_event, "status", f"Step {step + 1}: the same failure repeated; asking the model to "
                           + ("trace the code line by line." if failures[signature] == 2 else "stop and report."))
-    final =f"Developer agent stopped after {max_steps} steps. Review the activity and changes before continuing."
+                if failures[signature] >= 4:
+                    repeated_failure = signature
+        history.extend(nudges)
+        if repeated_failure:
+            break
+    final = f"Developer agent stopped after {max_steps} steps. Review the activity and changes before continuing."
+    if repeated_failure:
+        final = f"Developer agent stopped after four repeated command failures: {repeated_failure}. Review the activity and changes before continuing."
     history.append({"role": "assistant", "content": final})
     _emit(on_event, "status", final)
     return {"messages": history, "assistant_text": final}
