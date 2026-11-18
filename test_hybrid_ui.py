@@ -3,16 +3,35 @@
 import json
 from pathlib import Path
 import threading
+import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 from unittest.mock import Mock
 
 from coding_agent import AgentCancelled
-from hybrid_ui import memory_callbacks, unload_worker
+from hybrid_ui import HybridMixin, memory_callbacks, unload_worker
 import test_workspace as workspace_tests
 
 
 class MemoryHandoffTests(unittest.TestCase):
+    def test_quality_review_uses_the_app_file_limit_for_changed_source(self):
+        with tempfile.TemporaryDirectory() as folder:
+            Path(folder, "large.py").write_text("# Review this source\n" + "x" * 70000, encoding="utf-8")
+            messages = [{"role": "user", "content": "Review the changed file"}]
+
+            def worker(history, emit):
+                emit({"type": "changed", "path": "large.py", "text": "Updated large.py"})
+                return {"messages": history, "assistant_text": "Updated large.py"}
+
+            with patch("hybrid_ui.memory_callbacks", return_value=(
+                    {"url": "http://reviewer.example/v1"}, Mock(), Mock(), Mock())), \
+                    patch("hybrid_ui.ColibriClient.review", return_value="Reviewed") as review:
+                HybridMixin.run_with_quality_review(
+                    SimpleNamespace(agent_file_limit=128000), worker, messages, folder, lambda event: None,
+                    threading.Event(), "http://localhost:11434", "worker", {"key": "", "review_model": "reviewer"})
+            self.assertIn("# Review this source", review.call_args.args[0][-1]["content"])
+
     def snapshot(self, url="http://127.0.0.1:8000/v1"):
         return dict(url=url, directory="known-colibri", manage_memory=True, follow_report=True)
 

@@ -146,7 +146,8 @@ class HybridMixin:
                 review_messages, snapshot["review_model"], cancel, max_tokens=768, timeout=120)
 
         return run_hybrid(worker, review, messages, project, event, cancel,
-                          before_worker=before, before_review=prepare, after_review=cleanup)
+                          before_worker=before, before_review=prepare, after_review=cleanup,
+                          max_file_bytes=self.agent_file_limit)
 
     def update_hybrid_controls(self):
         if not hasattr(self, "hybrid_button"):
