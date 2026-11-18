@@ -10,6 +10,7 @@ import re
 import tempfile
 import uuid
 import zipfile
+import chat_attachments
 
 
 NEW_CHAT_TITLE = "New chat"
@@ -185,6 +186,10 @@ class ChatStore:
                 raise ChatStoreError("Each chat message needs a user, assistant, or system role and text content.")
             if "partial" in message and (type(message["partial"]) is not bool or message["role"] != "assistant"):
                 raise ChatStoreError("Only assistant messages can have a boolean partial flag.")
+            try:
+                chat_attachments.validate(message.get("attachments", []))
+            except ValueError as error:
+                raise ChatStoreError(str(error)) from error
         context_length = chat.get("context_length")
         if context_length is not None and (type(context_length) is not int or context_length < 1):
             raise ChatStoreError("Chat context_length must be a positive integer or null.")
@@ -193,6 +198,10 @@ class ChatStore:
         if "_manual_title" in chat and type(chat["_manual_title"]) is not bool:
             raise ChatStoreError("Chat _manual_title must be true or false.")
         record = deepcopy(chat)
+        try:
+            chat_attachments.validate(record.get("attachments", []))
+        except ValueError as error:
+            raise ChatStoreError(str(error)) from error
         branches = record.setdefault("branches", {})
         if not isinstance(branches, dict):
             raise ChatStoreError("Chat branches must be an object of message tails.")
@@ -205,6 +214,11 @@ class ChatStore:
                 if not isinstance(tail, list) or any(not isinstance(item, dict)
                         or item.get("role") not in _ROLES or not isinstance(item.get("content"), str) for item in tail):
                     raise ChatStoreError("Branch tails must contain valid chat messages.")
+                for message in tail:
+                    try:
+                        chat_attachments.validate(message.get("attachments", []))
+                    except ValueError as error:
+                        raise ChatStoreError(str(error)) from error
         prefixes = record.get("_branch_prefixes", {})
         active = record.get("_branch_active", {})
         if not isinstance(prefixes, dict) or not isinstance(active, dict):
@@ -349,8 +363,29 @@ class ChatStore:
                         speaker = {"user": "You", "assistant": "AI Assist"}.get(message["role"], message["role"].title())
                         lines += [f"## {speaker}", "", message["content"], ""]
                     archive.writestr(f"readable/{name}.md", "\n".join(lines))
+                    attachments = list(chat.get("attachments", []))
+                    messages = list(chat["messages"])
+                    for tails in chat.get("branches", {}).values():
+                        for tail in tails:
+                            messages.extend(tail)
+                    for message in messages:
+                        attachments.extend(message.get("attachments", []))
+                    seen = set()
+                    for item in attachments:
+                        if item["id"] in seen:
+                            continue
+                        seen.add(item["id"])
+                        source = chat_attachments.folder(self.directory, chat["id"]) / item["id"]
+                        if source.is_symlink() or getattr(source, "is_junction", lambda: False)():
+                            raise ChatStoreError("Attachment links cannot be exported.")
+                        if source.exists():
+                            with source.open("rb") as attachment_file:
+                                data = attachment_file.read(4000001)
+                            if len(data) != item["size"]:
+                                raise ChatStoreError("Attachment size changed before export.")
+                            archive.writestr(f"chats/{chat['id']}/attachments/{item['id']}", data)
             os.replace(temporary, destination)
-        except (OSError, zipfile.BadZipFile) as error:
+        except (OSError, ValueError, zipfile.BadZipFile) as error:
             temporary.unlink(missing_ok=True)
             raise ChatStoreError(f"Could not write the backup: {error}") from error
         return len(chats)
