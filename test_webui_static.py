@@ -57,6 +57,118 @@ vm.runInNewContext(fs.readFileSync(process.argv[1], 'utf8'), {document, window, 
 
 class StaticTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_saved_history_stays_accessible_when_model_server_is_offline(self):
+        self.run_scenario(r'''
+        saved.messages.push({role:'assistant',content:'saved answer'});
+        window.pywebview.api.state = async () => ({ok:false,error:'Ollama offline'});
+        await window.listeners.pywebviewready();
+        assert.equal(elements.get('chat-title').textContent,'Chat A');
+        assert.equal(elements.get('messages').children[0].children.at(-1).textContent,'saved answer');
+        assert.equal(elements.get('send').disabled,true);
+        assert.equal(elements.get('status').textContent,'Ollama offline');
+        ''')
+
+    def run_scenario(self, scenario):
+        script = Path(__file__).parent / "webui" / "static" / "app.js"
+        source = HARNESS.split("(async () => {", 1)[0] + "\n(async () => {\n" + scenario + r'''
+        })().catch(error => {console.error(error); process.exitCode = 1;});
+        '''
+        result = subprocess.run([shutil.which("node"), "-e", source, str(script)],
+                                capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_inactive_chat_events_never_replace_selected_chat_or_draft(self):
+        self.run_scenario(r'''
+        const other = {id:'chat-b',title:'Chat B',model:'fake:7b',messages:[{role:'assistant',content:'B reply'}]};
+        const records = new Map([['chat-a',saved],['chat-b',other]]);
+        window.pywebview.api.list_chats = async () => ({ok:true,chats:[saved,other]});
+        window.pywebview.api.open_chat = async id => ({ok:true,chat:structuredClone(records.get(id))});
+        const settle = () => new Promise(resolve => setImmediate(resolve));
+        const choose = title => elements.get('chats').children.find(item => item.children[0].textContent.startsWith(title)).children[0].listeners.click();
+        const visible = () => elements.get('messages').children.map(node => node.textContent || node.children.map(child => child.textContent).join(' ')).join('\n');
+        await window.listeners.pywebviewready();
+        await choose('Chat B');
+        elements.get('prompt').value = 'B draft';
+        elements.get('status').textContent = 'B status';
+        window.app.onEvent([{type:'token',chat_id:'chat-a',stream_id:'a1',text:'A partial'}]);
+        assert.match(visible(), /B reply/);
+        assert.doesNotMatch(visible(), /A partial/);
+        saved.messages.push({role:'assistant',content:'A complete'});
+        window.app.onEvent([{type:'done',chat_id:'chat-a',stream_id:'a1',text:'A complete'}]);
+        await settle();
+        assert.equal(elements.get('status').textContent,'B status');
+        assert.equal(elements.get('prompt').value,'B draft');
+        window.app.onEvent([{type:'token',chat_id:'chat-a',stream_id:'a1',text:'late token'}]);
+        await choose('Chat A');
+        assert.doesNotMatch(visible(), /late token/);
+        window.app.onEvent([{type:'error',chat_id:'chat-a',stream_id:'a2',text:'recover me',saved:false,error:'disk full'}]);
+        await settle();
+        assert.match(visible(), /Not saved/);
+        assert.match(visible(), /recover me/);
+        await choose('Chat B');
+        assert.equal(elements.get('prompt').value,'B draft');
+        await choose('Chat A');
+        assert.match(visible(), /recover me/);
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_reversed_chat_loads_and_old_same_chat_snapshots_are_ignored(self):
+        self.run_scenario(r'''
+        const other = {id:'chat-b',title:'Chat B',model:'other-model',messages:[]};
+        const records = new Map([['chat-a',saved],['chat-b',other]]);
+        const settle = () => new Promise(resolve => setImmediate(resolve));
+        const choose = title => elements.get('chats').children.find(item => item.children[0].textContent.startsWith(title)).children[0].listeners.click();
+        let hold = null, resolveOld;
+        window.pywebview.api.list_chats = async () => ({ok:true,chats:[saved,other]});
+        window.pywebview.api.open_chat = id => {
+          const snapshot = {ok:true,chat:structuredClone(records.get(id))};
+          if (id === hold) {hold=null; return new Promise(resolve => {resolveOld=()=>resolve(snapshot);});}
+          return Promise.resolve(snapshot);
+        };
+        await window.listeners.pywebviewready();
+        elements.get('prompt').value = 'A draft';
+        hold = 'chat-b';
+        const first = choose('Chat B');
+        assert.equal(elements.get('send').disabled,true);
+        assert.equal(elements.get('prompt').disabled,true);
+        await choose('Chat A');
+        resolveOld();
+        await first;
+        assert.equal(elements.get('chat-title').textContent,'Chat A');
+        assert.equal(elements.get('prompt').value,'A draft');
+        assert.equal(elements.get('model').value,'fake:7b');
+        window.app.onEvent([{type:'token',stream_id:'a1',chat_id:'chat-a',text:'partial'}]);
+        hold='chat-a';
+        const second = choose('Chat A');
+        saved.messages.push({role:'assistant',content:'newest reply'});
+        window.app.onEvent([{type:'done',stream_id:'a1',chat_id:'chat-a',text:'newest reply'}]);
+        await settle();
+        resolveOld();
+        await second;
+        assert.equal(elements.get('messages').children.at(-1).children.at(-1).textContent,'newest reply');
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_completion_before_send_receipt_does_not_revive_generation(self):
+        self.run_scenario(r'''
+        await window.listeners.pywebviewready();
+        elements.get('model').value='fake:7b';
+        window.pywebview.api.send = async (...args) => {
+          saved.messages.push({role:'user',content:args[1]}, {role:'assistant',content:'fast reply'});
+          window.app.onEvent([{type:'token',chat_id:'chat-a',stream_id:'fast',text:'fast reply'},
+                              {type:'done',chat_id:'chat-a',stream_id:'fast',text:'fast reply'}]);
+          return {ok:true,stream_id:'fast'};
+        };
+        elements.get('prompt').value='Hi';
+        await elements.get('composer').listeners.submit({preventDefault(){}});
+        assert.equal(elements.get('status').textContent,'done');
+        assert.equal(elements.get('stop').disabled,true);
+        assert.equal(elements.get('send').disabled,false);
+        assert.equal(elements.get('messages').children.length,2);
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
     def test_model_selection_streamed_text_and_stop(self):
         script = Path(__file__).parent / "webui" / "static" / "app.js"
         result = subprocess.run([shutil.which("node"), "-e", HARNESS, str(script)],
