@@ -5,18 +5,18 @@ from pathlib import Path
 import unittest
 from unittest.mock import patch, Mock
 
+import network_gate
 from update_checker import UpdateChecker, blob_hash, check_update, github_json
 import urllib.error
 
 
 class UpdateTests(unittest.TestCase):
-    def test_close_cancels_startup_timer(self):
+    def test_never_checks_at_startup(self):
         root = Mock()
-        root.after.return_value = "startup-timer"
-        checker = UpdateChecker(SimpleNamespace(root=root, closed=False, closing=False))
-        checker.close()
-        checker.close()
-        root.after_cancel.assert_called_once_with("startup-timer")
+        with patch("update_checker.check_update") as check:
+            UpdateChecker(SimpleNamespace(root=root, closed=False, closing=False))
+        root.after.assert_not_called()
+        check.assert_not_called()
 
     def test_interrupted_http_check_reports_failure_and_allows_retry(self):
         checker = UpdateChecker(SimpleNamespace(root=Mock(), closed=False, closing=False))
@@ -29,6 +29,18 @@ class UpdateTests(unittest.TestCase):
         self.assertFalse(checker.busy)
         self.assertIsNone(checker.result)
         self.assertIn("Could not check", checker.message)
+
+    def test_a_blocked_check_says_it_was_blocked(self):
+        checker = UpdateChecker(SimpleNamespace(root=Mock(), closed=False, closing=False))
+        def immediate_thread(*, target, daemon):
+            return SimpleNamespace(start=target)
+        blocked = network_gate.InternetBlocked("Internet access was not approved, so it was blocked.")
+        with patch("update_checker.threading.Thread", side_effect=immediate_thread), patch(
+                "update_checker.check_update", side_effect=blocked):
+            checker.check()
+            checker.poll()
+        self.assertIn("connection to GitHub was blocked", checker.message)
+        self.assertNotIn("Check your connection", checker.message)
 
     def check(self, directory, files, truncated=False):
         responses = [[{"sha": "a" * 40, "commit": {"tree": {"sha": "b" * 40}}}],

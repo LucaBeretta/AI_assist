@@ -12,6 +12,8 @@ import urllib.error
 import urllib.request
 import urllib.parse
 
+from gate_ui import ConnectionLog
+import network_gate
 from model_downloads import ModelDownloadDialog
 from workspace_ui import WorkspaceMixin
 from response_metrics import response_metrics
@@ -148,7 +150,8 @@ def request_ollama(messages, model=None, context_length=None, on_chunk=None, on_
     )
 
     try:
-        with urllib.request.urlopen(request, timeout=120) as response:
+        with network_gate.task(f"Send your message to {model}"), \
+                urllib.request.urlopen(request, timeout=120) as response:
             parts = []
             received = 0
             while True:
@@ -694,10 +697,17 @@ class OllamaAssistantBase:
         self.response_queue.put((user_input, response, error, stopped))
 
 
+    def open_connection_log(self, event=None):
+        if getattr(self, "connection_log", None) is None:
+            self.connection_log = ConnectionLog(self)
+        self.connection_log.open()
+
     def close(self):
         self.closed = True
-        if hasattr(self, "update_checker"):
-            self.update_checker.close()
+        if getattr(self, "gate_ui", None) is not None:
+            self.gate_ui.close()
+        if getattr(self, "connection_log", None) is not None:
+            self.connection_log.close()
         if self.download_dialog is not None:
             self.download_dialog.close(force=True)
         if hasattr(self, "poll_id"):
@@ -711,10 +721,13 @@ class AIAssistantGUI(BackendMixin, WorkspaceMixin, OllamaAssistantBase):
 
 
 if __name__ == "__main__":
+    network_gate.install()
+    from gate_ui import GateUI
     from gui_runtime import GUIRuntimeError, create_root
     try:
         root = create_root()
     except GUIRuntimeError as error:
         raise SystemExit(f"AI Assist could not start: {error}") from None
     app = AIAssistantGUI(root)
+    app.gate_ui = GateUI(app)
     root.mainloop()

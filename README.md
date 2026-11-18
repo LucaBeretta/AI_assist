@@ -39,6 +39,18 @@ The workspace starts in the **Night** console theme. The ☀ / ☾ button in the
 
 Chat replies appear while they are generated. The finished reply is formatted with copy and code-export actions. If a stream fails before completion, the app reports the failure rather than saving a partial answer as complete. While a reply or the developer agent runs, **Send** becomes **Stop**; stopping a reply keeps the part already written (Enter never stops it). The status line shows Ollama's reported loading and prompt-processing times and generation rate when available; click model status to view the last summary. Developer step timings appear in **Activity**.
 
+## Internet gate
+
+AI Assist works offline. Nothing it does reaches the internet until you approve it twice.
+
+- **What is checked.** At startup the app turns on a Python audit hook that stays on until it closes. Every DNS lookup, connection and datagram the app makes is classed as *this computer*, *local network* (private addresses such as 192.168.x.x, 10.x.x.x or fe80::) or *internet*. Host names other than `localhost` count as internet, because looking one up may ask a DNS server outside your network. Requests that make another program go online are checked too: Ollama model downloads and uploads, Ollama cloud models (including local aliases of one, which Ollama's `/api/show` reveals), colibri model installs, and internet links opened in the browser or another program.
+- **Two confirmations.** The approval window shows what would go online, where, why, what leaves the computer, and which app file asked. When the code gave no reason, *Why* reads *Not declared* in amber. **Continue to allow...** leads to a second step, where **Allow** unlocks after three seconds. Blocking is the default: closing the window, Escape and Enter all block. An approval covers only that task (or 60 seconds) on the thread that asked; there is no "always allow". After you block a request, the same request is blocked without asking for 30 seconds.
+- **Notifications and log.** A system notification announces each request waiting for review, each allowed connection, and each automatic block. **Settings > Connection log...**, or a click on the privacy indicator in the status bar, lists every request and its decision. The same entries are saved as JSON lines in `network.log` beside the saved chats (up to 1 MB, plus one older file). The status bar shows *local only · internet locked*, or *online now: host* for a minute after an approval.
+- **Fails closed.** Without the approval window (scripts, tests), internet access is blocked. If the gate cannot check something, such as an unknown socket type or an Ollama model it cannot confirm runs locally, the request is blocked. asyncio's Windows connection method bypasses audit hooks, so the app refuses to load it.
+- **Updates and previews.** AI Assist never checks GitHub by itself; **Check for updates...** asks first. HTML previews carry a Content Security Policy that lets the browser load only the preview's own files, so scripts, fonts and images from the internet do not load. A page can still send the browser to another address.
+
+**Limits.** The gate covers AI Assist's own process. Programs that run separately are outside it: commands the developer agent runs (their review window says so), the background activity of Ollama and colibri themselves (such as their update checks), and the browser once a page is open. Stopping those takes an operating-system firewall rule. Audit hooks also cannot stop deliberately malicious code running inside the process. The gate guards AI Assist's own features, and those features are the only code the app runs in-process.
+
 ## Chats and developer workspace
 
 - **New chat** immediately creates and selects a saved entry, clearing any search that would hide it. Messages and drafts save locally. Search, resume, rename, export, or delete chats from the sidebar and **Chat options**. **Chat options > Back up all chats...** writes one .zip with every chat as JSON (copy those files back into the chats folder to restore) and as readable Markdown, including chats still being saved.
@@ -105,7 +117,7 @@ Click **Preview** on a complete HTML code block in a chat, or choose it in **Dev
 
 For saved pages, select an `.html` or `.htm` file in **Developer → Files** and click **Preview HTML in browser**. With no file selected, the button opens `index.html`. Project previews serve relative CSS, JavaScript, images, and other assets from the selected folder. Refresh the browser after editing a saved file.
 
-Previews use a local HTTP server bound to `127.0.0.1` on an available port. The app does not publish or deploy anything. Close AI Assist to stop the preview servers and remove temporary HTML. Generated snippets should include their own styles and scripts; save linked assets into a project to preview them together. This is a static preview, so framework builds and backend servers must be run separately.
+Previews use a local HTTP server bound to `127.0.0.1` on an available port. The app does not publish or deploy anything. The browser may load only the preview's own files: pages that rely on a CDN (for example a script or font from the internet) appear without it, so save those assets into the project. Close AI Assist to stop the preview servers and remove temporary HTML. Generated snippets should include their own styles and scripts; save linked assets into a project to preview them together. This is a static preview, so framework builds and backend servers must be run separately.
 
 ## Deploy a web project to Vercel
 
@@ -150,7 +162,7 @@ Saved chats record their backend. Existing chats default to Ollama. Opening a ch
 
 ### App updates
 
-AI Assist checks the latest commit on `LucaBeretta/AI_assist` on GitHub once after startup. Open **Settings ? Check for updates...** to see details, retry a failed check, or **Download latest**. Checks run in the background and require internet access; Git is not required, so downloaded ZIP copies work too.
+AI Assist checks GitHub for updates only when you open **Settings > Check for updates...**, and the internet gate asks for your approval first. The check compares your copy with the latest commit on `LucaBeretta/AI_assist`; from the same window you can retry or **Download latest**. Checks run in the background; Git is not required, so downloaded ZIP copies work too.
 
 The checker compares shipped Python modules and Windows launchers with GitHub file hashes, allowing for Windows line endings. Missing or different files are reported as possible updates or local changes, since an edited/development copy can also differ. It checks the repository's default branch rather than only tagged releases. Network errors and GitHub request limits are reported without interrupting chats.
 

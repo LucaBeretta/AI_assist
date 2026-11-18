@@ -13,6 +13,10 @@ import webbrowser
 
 from developer_tools import _project_file, _project_root
 
+# The browser may load a preview's files from this computer only, never from the internet.
+PREVIEW_POLICY = ("default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; "
+                  "form-action 'self'; base-uri 'self'")
+
 
 def is_html(block):
     return (block.get("language", "").lower() in {"html", "htm", "html5"}
@@ -60,6 +64,7 @@ class _PreviewHandler(BaseHTTPRequestHandler):
                 self.send_header("Content-Length", str(metadata.st_size))
                 self.send_header("Cache-Control", "no-store")
                 self.send_header("X-Content-Type-Options", "nosniff")
+                self.send_header("Content-Security-Policy", PREVIEW_POLICY)
                 self.end_headers()
                 if not head:
                     shutil.copyfileobj(source, self.wfile)

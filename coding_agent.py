@@ -24,6 +24,7 @@ import urllib.parse
 import urllib.request
 
 import developer_tools as projects
+import network_gate
 from response_metrics import metrics_summary
 
 
@@ -484,7 +485,10 @@ def _chat(host, model, messages, context_length, cancel_event):
 
     def request_worker():
         try:
-            with urllib.request.urlopen(request, timeout=180) as response:
+            with network_gate.task(f"Run a developer agent step with {model}",
+                                   sends="Your request, the conversation, and the project files and command "
+                                         "output the agent has read."), \
+                    urllib.request.urlopen(request, timeout=180) as response:
                 data = response.read(_MAX_RESPONSE_BYTES + 1)
             if len(data) > _MAX_RESPONSE_BYTES:
                 raise RuntimeError("Ollama returned too much agent output.")

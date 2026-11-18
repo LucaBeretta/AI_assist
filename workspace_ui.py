@@ -325,6 +325,7 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         self.settings_menu.add_command(label="AI backend: " + self.backend + "...", command=self.open_backend)
         self.settings_menu.add_separator()
         self.settings_menu.add_command(label="Check for updates...", command=lambda: self.update_checker.open())
+        self.settings_menu.add_command(label="Connection log...", command=self.open_connection_log)
         self.menubar.add_cascade(label="Settings", menu=self.settings_menu)
         self.root.configure(menu=self.menubar)
         self.main_frame = tk.Frame(self.root, bg=c["background"])
@@ -1377,7 +1378,8 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         title = f"Change {action.get('path', '')}" if action["kind"] == "write_file" else "Run this command?"
         tk.Label(window, text=title, bg=c["background"], fg=c["ink"], font=("Segoe UI", 15, "bold"), wraplength=760, anchor="w").pack(fill="x", padx=22, pady=(20, 10))
         if action["kind"] == "run_command":
-            detail = f"Folder: {action.get('cwd', self.project_path)}\nRuns with your account. Review the command before running."
+            detail = (f"Folder: {action.get('cwd', self.project_path)}\nRuns with your account. Review the command before running.\n"
+                      "It runs as a separate program: the internet gate cannot see or block its connections.")
             text = action["command"]
         else:
             detail = f"Destination: {action.get('destination', str(Path(self.project_path) / action.get('path', '')))}\nReview the exact proposed changes before applying them."

@@ -9,6 +9,7 @@ import tkinter as tk
 from tkinter import filedialog, scrolledtext, ttk
 import webbrowser
 
+import network_gate
 from vercel_deploy import DeploymentCancelled, validate_project
 from vercel_api import deploy_project_api as deploy_project
 
@@ -107,8 +108,11 @@ class DeployDialog:
 
     def deploy_worker(self, folder, project, scope, domain, token):
         try:
-            result = deploy_project(folder, project, scope, domain,
-                lambda text: self.events.put(("log", text)), self.cancel, token=token)
+            with network_gate.task(f"Deploy {Path(folder).name} to Vercel as {project}",
+                                   sends="This project's files (secrets and ignored files excluded) and your "
+                                         "Vercel access token, to Vercel.", minutes=20):
+                result = deploy_project(folder, project, scope, domain,
+                    lambda text: self.events.put(("log", text)), self.cancel, token=token)
             self.events.put(("done", result))
         except DeploymentCancelled as error:
             self.events.put(("error", str(error)))

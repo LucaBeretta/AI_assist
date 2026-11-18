@@ -13,6 +13,8 @@ import tkinter as tk
 from tkinter import font as tkfont
 import urllib.parse
 
+import network_gate
+
 MONO_CANDIDATES = ("Cascadia Mono", "Cascadia Code", "Consolas", "SF Mono", "Menlo",
                    "JetBrains Mono", "DejaVu Sans Mono", "Liberation Mono", "Courier New")
 AGENT_MAX_STEPS = 12
@@ -109,8 +111,9 @@ class StatusBar:
         self.vram_label = label()
         self.speed_label = label()
         self.agent_label = label()
-        self.privacy_label = tk.Label(row, bg=c["status"], fg=c["success"], font=small)
+        self.privacy_label = tk.Label(row, bg=c["status"], fg=c["success"], font=small, cursor="hand2")
         self.privacy_label.pack(side="right")
+        self.privacy_label.bind("<Button-1>", self.open_connection_log)
         self.tick()
 
     # ------------------------------------------------------------ values
@@ -163,12 +166,17 @@ class StatusBar:
                 url = app.ollama_url() if hasattr(app, "ollama_url") else ""
             except (RuntimeError, ValueError):
                 url = ""
-        if is_cloud_model(model):
-            privacy, privacy_role = "cloud model: prompts leave this computer", "amber"
+        gate = network_gate.status()
+        if gate["installed"] and gate["online"]:
+            privacy, privacy_role = f"online now: {gate['online']}", "amber"
+        elif is_cloud_model(model):
+            privacy = "cloud model: each request needs approval" if gate["installed"] else "cloud model: prompts leave this computer"
+            privacy_role = "amber"
         elif url and not is_local(url):
             privacy, privacy_role = "remote server", "amber"
         else:
-            privacy, privacy_role = "local only", "success"
+            privacy = "local only · internet locked" if gate["installed"] else "local only"
+            privacy_role = "success"
         return {
             "engine": f"{engine.lower()} {state}", "engine_role": "success" if state == "ready" else "muted",
             "model": model_text, "context": context_text, "fraction": fraction,
@@ -246,6 +254,11 @@ class StatusBar:
 
     def refresh_now(self):
         self.next_poll = 0.0
+
+    def open_connection_log(self, event=None):
+        opener = getattr(self.app, "open_connection_log", None)
+        if opener is not None:
+            opener()
 
     def close(self):
         self.closed = True

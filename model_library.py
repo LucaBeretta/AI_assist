@@ -8,6 +8,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+import network_gate
+
 
 POPULAR_MODELS_URL = "https://ollama.com/library?sort=popular"
 _MAX_PAGE_BYTES = 4 * 1024 * 1024
@@ -88,13 +90,17 @@ class _PageParser(HTMLParser):
 def _read_page(url):
     request = urllib.request.Request(url, headers={"User-Agent": "AI-Assist-Desktop/1.0"})
     try:
-        with urllib.request.urlopen(request, timeout=25) as response:
+        with network_gate.task("Read Ollama's online model list",
+                               sends="A request for one page of ollama.com. No chats or files are sent."), \
+                urllib.request.urlopen(request, timeout=25) as response:
             data = response.read(_MAX_PAGE_BYTES + 1)
         if len(data) > _MAX_PAGE_BYTES:
             raise RuntimeError("Ollama's model page is too large to read.")
         page = _PageParser()
         page.feed(data.decode("utf-8"))
         return page.root
+    except network_gate.InternetBlocked as error:
+        raise RuntimeError(str(error)) from error
     except urllib.error.HTTPError as error:
         error.close()
         raise RuntimeError(f"Ollama's model library returned HTTP {error.code}.") from error
@@ -216,7 +222,10 @@ def pull_model(host, name, on_progress, cancel_event=None):
         headers={"Content-Type": "application/json"}, method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=45) as response:
+        with network_gate.task(f"Download {name} through Ollama",
+                               sends="Ollama asks its online registry for this model and downloads it. "
+                                     "No chats or files are sent.", minutes=24 * 60), \
+                urllib.request.urlopen(request, timeout=45) as response:
             while True:
                 _check_cancelled(cancel_event)
                 line = response.readline(_MAX_PROGRESS_BYTES + 1)
@@ -245,6 +254,8 @@ def pull_model(host, name, on_progress, cancel_event=None):
                     return
     except DownloadCancelled:
         raise
+    except network_gate.InternetBlocked as error:
+        raise RuntimeError(str(error)) from error
     except urllib.error.HTTPError as error:
         error.close()
         _check_cancelled(cancel_event)

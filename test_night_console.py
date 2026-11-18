@@ -147,6 +147,16 @@ class NightConsoleUITests(unittest.TestCase):
         with patch.dict(os.environ, {"OLLAMA_HOST": "http://192.168.1.20:11434"}):
             self.assertEqual(self.app.status_bar.snapshot()["privacy"], "remote server")
 
+    def test_privacy_shows_the_internet_gate_and_opens_the_connection_log(self):
+        with patch("status_bar.network_gate.status", return_value={"installed": True, "online": None}):
+            self.assertEqual(self.app.status_bar.snapshot()["privacy"], "local only · internet locked")
+        with patch("status_bar.network_gate.status", return_value={"installed": True, "online": "api.github.com"}):
+            values = self.app.status_bar.snapshot()
+        self.assertEqual((values["privacy"], values["privacy_role"]), ("online now: api.github.com", "amber"))
+        self.app.status_bar.open_connection_log()
+        self.assertTrue(self.app.connection_log.window.winfo_exists())
+        self.app.connection_log.close()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -18,6 +18,8 @@ import threading
 import time
 import urllib.parse
 
+import network_gate
+
 
 GITHUB_URL = "https://github.com/JustVugg/colibri"
 _MAX_JSON_OUTPUT = 8 * 1024 * 1024
@@ -328,6 +330,11 @@ def install_model(directory, model_id, on_progress, cancel_event, poll_seconds=2
     _check_ctx(ctx)
     extra = ["--ctx", str(ctx)] if ctx is not None else []
     command = coli_command(directory, "setup", "--model", model_id, "--yes", "--json", "--no-browser", *extra)
+    # colibri's setup runs as its own program, so the gate asks before starting it.
+    if not network_gate.allow_external("colibri model download", model_id,
+                                       "colibri downloads the model and its engine files from the internet.",
+                                       purpose=f"Install the colibri model {model_id}"):
+        raise ColibriError("colibri setup was not started: internet access for this download was not approved.")
     try:
         process = subprocess.Popen(command, cwd=str(Path(command[1]).parent), stdin=subprocess.DEVNULL,
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=_environment(),

@@ -12,6 +12,8 @@ import urllib.error
 import urllib.request
 import webbrowser
 
+import network_gate
+
 
 REPOSITORY = "https://github.com/LucaBeretta/AI_assist"
 API = "https://api.github.com/repos/LucaBeretta/AI_assist"
@@ -70,6 +72,8 @@ def check_update(directory):
 
 
 class UpdateChecker:
+    """Checks GitHub only when asked: AI Assist never goes online by itself."""
+
     def __init__(self, app):
         self.app = app
         self.results = queue.Queue()
@@ -77,15 +81,8 @@ class UpdateChecker:
         self.result = None
         self.window = None
         self.message = "Updates have not been checked yet."
-        self.startup_job = self.app.root.after(1500, self.check)
-
-    def close(self):
-        if self.startup_job is not None:
-            self.app.root.after_cancel(self.startup_job)
-            self.startup_job = None
 
     def check(self):
-        self.close()
         if self.busy or self.app.closed or self.app.closing:
             return
         self.busy = True
@@ -94,10 +91,14 @@ class UpdateChecker:
 
         def worker():
             try:
-                self.results.put((check_update(Path(__file__).resolve().parent), None))
+                with network_gate.task("Check GitHub for a newer version of AI Assist",
+                                       sends="Requests for the repository's latest commit and file list. "
+                                             "No chats, files or settings are sent."):
+                    result = check_update(Path(__file__).resolve().parent)
+                self.results.put((result, None))
             except (OSError, ValueError, RuntimeError, KeyError, IndexError, TypeError,
                     AttributeError, http.client.HTTPException) as error:
-                self.results.put((None, str(error)))
+                self.results.put((None, error))
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -108,8 +109,10 @@ class UpdateChecker:
             return
         self.busy = False
         self.result = result
-        if error:
-            self.message = "Could not check for updates. Check your connection and retry.\n\n" + error
+        if isinstance(error, network_gate.InternetBlocked):
+            self.message = "Updates were not checked: the connection to GitHub was blocked.\n\n" + str(error)
+        elif error:
+            self.message = "Could not check for updates. Check your connection and retry.\n\n" + str(error)
         elif result["differences"]:
             self.message = ("Your copy differs from the latest GitHub version. An update may be available; "
                             "local edits or a development copy can also cause this.\n\n"
