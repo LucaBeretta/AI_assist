@@ -38,11 +38,14 @@
         </div>
       </header>
 
-      <section class="conversation" aria-label="Conversation">
+      <section id="conversation" class="conversation" aria-label="Conversation">
         <div id="messages" class="thread"></div>
       </section>
 
       <div class="composer-wrap">
+        <button id="jump" class="jump" type="button" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6"></path></svg>Jump to latest
+        </button>
         <form id="composer" class="composer">
           <label class="sr-only" for="prompt">Message</label>
           <textarea id="prompt" rows="2" required placeholder="Reply to AI Assist…"></textarea>

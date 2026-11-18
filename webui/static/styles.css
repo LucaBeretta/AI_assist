@@ -173,6 +173,16 @@ code, kbd, pre, .mono { font-family: var(--mono); }
   border-radius: 2px; background: var(--accent); animation: blink 1s steps(2) infinite;
 }
 @keyframes blink { 50% { opacity: 0; } }
+.msg-actions { order: 3; display: flex; gap: 2px; opacity: 0; transition: opacity var(--fast) var(--ease); }
+.msg:hover .msg-actions, .msg-actions:focus-within { opacity: 1; }
+.msg-actions .icon-btn { width: auto; height: 28px; padding: 0 8px; font-size: 12px; }
+.jump {
+  position: absolute; top: -42px; left: 50%; transform: translateX(-50%); z-index: 5;
+  display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: 999px;
+  border: 1px solid var(--border-2); background: var(--panel); color: var(--body-2); font-size: 12.5px; box-shadow: var(--shadow);
+}
+.jump[hidden] { display: none; }
+.jump svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2.2; }
 .notice { margin: 0; padding: 8px 10px; border-radius: var(--r); background: var(--amber-bg); color: var(--amber); font-size: 13px; }
 
 /* Markdown (rendered by markdown.js) */
@@ -215,7 +225,7 @@ code, kbd, pre, .mono { font-family: var(--mono); }
 .summary-text { margin: 0; font: 13.5px/1.6 var(--sans); color: var(--body-2); white-space: pre-wrap; }
 
 /* ---------- composer ---------- */
-.composer-wrap { padding: 0 24px 16px; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.composer-wrap { position: relative; padding: 0 24px 16px; display: flex; flex-direction: column; align-items: center; gap: 8px; }
 .composer {
   position: relative; width: 100%; max-width: var(--reading); display: flex; flex-direction: column; gap: 6px;
   padding: 12px 12px 10px 16px; border: 1px solid var(--border-2); border-radius: var(--r-xl); background: var(--panel);

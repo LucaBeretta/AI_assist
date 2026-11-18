@@ -47,7 +47,8 @@ window.app = (() => {
       const text = document.createElement(message.role === "assistant" ? "div" : "pre");
       if (message.role === "assistant") text.append(window.renderMarkdown(message.content));
       else text.textContent = message.content;
-      section.append(label, text);
+      // Actions sit before the text in the DOM (CSS shows them after) so the text stays the last child.
+      section.append(label, messageActions(message), text);
       return section;
     };
     const messages = record?.messages || [];
@@ -79,9 +80,60 @@ window.app = (() => {
       text.append(window.renderMarkdown(stream.text));
       nodes.push(text);
     }
-    element("messages").replaceChildren(...nodes);
+    const container = element("messages");
+    const follow = nearBottom();
+    container.replaceChildren(...nodes);
+    // markdown.js renders code toolbars disabled; Copy works here, Save/Preview wait for their Api methods.
+    for (const button of container.querySelectorAll?.('.code-actions [data-action="copy"]') || []) button.disabled = false;
+    if (follow) scrollToEnd();
+    updateJump();
     controls();
   }
+
+  function messageActions(message) {
+    const bar = document.createElement("div");
+    bar.className = "msg-actions";
+    const copy = document.createElement("button");
+    copy.type = "button";
+    copy.className = "icon-btn";
+    copy.setAttribute("aria-label", "Copy message");
+    copy.setAttribute("title", "Copy");
+    copy.textContent = "Copy";
+    copy.addEventListener("click", () => copyText(message.content, copy));
+    bar.append(copy);
+    return bar;
+  }
+
+  async function copyText(text, button) {
+    try {
+      if (window.navigator?.clipboard?.writeText) await window.navigator.clipboard.writeText(text);
+      else throw new Error("no clipboard API");
+    } catch (error) {
+      // WebView file pages may refuse the async clipboard; fall back to a hidden selection.
+      const area = document.createElement("textarea");
+      area.value = text;
+      area.className = "sr-only";
+      document.body.append(area);
+      area.select();
+      document.execCommand("copy");
+      area.remove();
+    }
+    if (button) {
+      const label = button.textContent;
+      button.textContent = "Copied";
+      setTimeout(() => { button.textContent = label; }, 1200);
+    }
+  }
+
+  // Follow the stream only while the reader is at the bottom; otherwise offer "Jump to latest".
+  function scroller() { return element("conversation"); }
+  function nearBottom() {
+    const box = scroller();
+    if (!box || box.scrollHeight === undefined) return true;
+    return box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+  }
+  function scrollToEnd() { const box = scroller(); if (box && box.scrollHeight !== undefined) box.scrollTop = box.scrollHeight; }
+  function updateJump() { element("jump").hidden = nearBottom(); }
 
   function renderChats() {
     const nodes = [...chats.values()].map(record => {
@@ -209,6 +261,11 @@ window.app = (() => {
     finally { submitting = false; controls(); }
   }
 
+  function rate(metrics) {
+    const seconds = (metrics.eval_duration || 0) / 1e9;
+    return seconds > 0 ? ` · ${(metrics.eval_count / seconds).toFixed(1)} tok/s` : "";
+  }
+
   function onEvent(batch) {
     for (const event of Array.isArray(batch) ? batch : [batch]) {
       if (event.type === "ready") { refreshModels().catch(showError); continue; }
@@ -222,7 +279,7 @@ window.app = (() => {
         stream.active = false;
         stream.saved = event.saved;
         if (event.text !== undefined) stream.text = event.text;
-        if (selected === event.chat_id) status(event.type === "error" ? event.error : `${event.type}${event.metrics?.eval_count ? ` · ${event.metrics.eval_count} tokens` : ""}`);
+        if (selected === event.chat_id) status(event.type === "error" ? event.error : `${event.type}${event.metrics?.eval_count ? ` · ${event.metrics.eval_count} tokens${rate(event.metrics)}` : ""}`);
         // Reload the event's chat, not whichever chat happens to be visible.
         reloadChat(event.chat_id).then(() => {
           renderMessages();
@@ -272,6 +329,15 @@ window.app = (() => {
       }
     });
   }
+
+  element("jump").addEventListener("click", () => { scrollToEnd(); updateJump(); });
+  element("conversation").addEventListener("scroll", updateJump);
+  element("messages").addEventListener("click", event => {
+    const button = event.target?.closest?.('.code-actions [data-action="copy"]');
+    if (!button) return;
+    const code = button.parentElement?.nextElementSibling;
+    if (code) copyText(code.textContent, button);
+  });
 
   element("composer").addEventListener("submit", send);
   element("new-chat").addEventListener("click", () => newChat().catch(showError));
