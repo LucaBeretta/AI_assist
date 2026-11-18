@@ -93,6 +93,8 @@ TOOLS = [
             {"command": {"type": "string"}, "description": {"type": "string"},
              "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 120}}, ("command",)),
 ]
+_READ_TOOL_NAMES = frozenset({"list_files", "read_file"})
+_READ_TOOLS = [tool for tool in TOOLS if tool["function"]["name"] in _READ_TOOL_NAMES]
 
 
 _TEXT_CALL = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
@@ -590,7 +592,7 @@ def _request_messages(history, context_length):
 
 def _chat(host, model, messages, context_length, cancel_event):
     request_messages, prediction = _request_messages(messages, context_length)
-    payload = {"model": model, "messages": request_messages, "tools": TOOLS, "stream": False,
+    payload = {"model": model, "messages": request_messages, "tools": _READ_TOOLS if getattr(_run, "planning", False) else TOOLS, "stream": False,
                "keep_alive": -1, "options": {"num_ctx": context_length, "num_predict": prediction}}
     request = urllib.request.Request(host.rstrip("/") + "/api/chat", data=json.dumps(payload).encode("utf-8"),
                                      headers={"Content-Type": "application/json"}, method="POST")
@@ -631,23 +633,29 @@ def _chat(host, model, messages, context_length, cancel_event):
 
 
 def run_agent(host, model, project_root, messages, on_event, approve_action,
-              cancel_event=None, context_length=4096, max_steps=DEFAULT_MAX_STEPS, chat_fn=None, file_limit=None):
+              cancel_event=None, context_length=4096, max_steps=DEFAULT_MAX_STEPS, chat_fn=None, file_limit=None,
+              plan_first=False, approve_plan=None):
     """Run the agent with ``file_limit`` bytes as the largest file it may read or
     edit (default 64,000; FILE_LIMIT_CHOICES lists what the app offers)."""
     if file_limit is None:
         file_limit = _MAX_FILE_BYTES
     if isinstance(file_limit, bool) or not isinstance(file_limit, int) or not 1000 <= file_limit <= 4000000:
         raise ValueError("The agent file size limit must be between 1,000 and 4,000,000 bytes.")
+    if type(plan_first) is not bool or (plan_first and not callable(approve_plan)):
+        raise ValueError("Plan-first mode requires a boolean flag and an approve_plan callback.")
     _run.file_limit, _run.context_length = file_limit, context_length
+    _run.planning = plan_first
     try:
         return _run_agent(host, model, project_root, messages, on_event, approve_action,
-                          cancel_event, context_length, max_steps, chat_fn)
+                          cancel_event, context_length, max_steps, chat_fn, plan_first, approve_plan)
     finally:
         _run.file_limit, _run.context_length = _MAX_FILE_BYTES, None
+        _run.planning = False
 
 
 def _run_agent(host, model, project_root, messages, on_event, approve_action,
-               cancel_event=None, context_length=4096, max_steps=DEFAULT_MAX_STEPS, chat_fn=None):
+               cancel_event=None, context_length=4096, max_steps=DEFAULT_MAX_STEPS, chat_fn=None,
+               plan_first=False, approve_plan=None):
     """Run tools on a worker thread, returning the updated native chat history.
 
     ``approve_action`` must return exactly True to allow a reviewed operation.
@@ -672,6 +680,10 @@ def _run_agent(host, model, project_root, messages, on_event, approve_action,
     if not isinstance(messages, list) or not messages or any(not isinstance(message, dict) for message in messages):
         raise ValueError("Provide at least one conversation message.")
     history = copy.deepcopy(messages)
+    if plan_first:
+        history.append({"role": "user", "content": (
+            "Before acting, inspect with read tools only and propose a numbered plan. "
+            "Do not write files or run commands. Wait for approval before carrying out the plan.")})
     failures = {}
     repeated_failure = ""
     output_limit = min(12000, max(2000, context_length * 2))
@@ -728,6 +740,27 @@ def _run_agent(host, model, project_root, messages, on_event, approve_action,
         if calls:
             assistant["tool_calls"] = calls
         history.append(assistant)
+        if _run.planning and not calls:
+            plan = assistant["content"].strip()
+            if not re.search(r"^\s*\d+[.)]\s+\S", plan, re.MULTILINE):
+                history.append({"role": "user", "content": "Return a nonempty numbered plan for approval."})
+                continue
+            _emit(on_event, "plan", plan)
+            _check_cancelled(cancel_event)
+            decision = approve_plan(plan)
+            _check_cancelled(cancel_event)
+            if decision is False or decision is None:
+                raise AgentCancelled("The plan was cancelled; no actions were taken.")
+            if decision is True:
+                approved_plan = plan
+            elif isinstance(decision, str) and decision.strip() and len(decision) <= 50000:
+                approved_plan = decision.strip()
+            else:
+                raise ValueError("Plan approval must return True, edited nonempty text, or False to cancel.")
+            _run.planning = False
+            history.append({"role": "user", "content": "Approved plan:\n" + approved_plan + "\nCarry out this approved plan now."})
+            _emit(on_event, "plan_approved", approved_plan)
+            continue
         if assistant["content"]:
             _emit(on_event, "assistant", assistant["content"], final=not calls)
         if not calls:
@@ -747,6 +780,8 @@ def _run_agent(host, model, project_root, messages, on_event, approve_action,
                     raise ValueError("Not executed: repeated command failures stopped this task.")
                 if index in argument_errors:
                     raise ValueError(argument_errors[index])
+                if _run.planning and name not in _READ_TOOL_NAMES:
+                    raise ValueError("Planning is read-only. Writes and commands are blocked until the plan is approved.")
                 arguments = function.get("arguments", {}) if isinstance(function, dict) else {}
                 result = _execute_tool(project, name, arguments, approve_action, cancel_event, on_event)
             except AgentCancelled:

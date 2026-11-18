@@ -17,6 +17,8 @@ import chat_attachments
 from developer_tools import fetch_model_capabilities
 from model_advisor import detect_hardware
 from webui.bridge import Bridge
+from webui.developer import DeveloperTasks
+import developer_tools
 from webui import settings
 
 
@@ -82,6 +84,7 @@ class Api:
         self._hardware = hardware
         self._settings = settings.load(self._store.directory)
         self._unloading = set()
+        self._developer = DeveloperTasks(bridge, self._save_agent_result)
 
     def _load_chat(self, chat_id):
         if chat_id in self._incognito_ids:
@@ -141,7 +144,7 @@ class Api:
         with self._lock:
             if self._closed:
                 raise RuntimeError("The web UI is closing.")
-            if any(item["record"]["model"] == name for item in self._streams.values()):
+            if any(item["record"]["model"] == name for item in self._streams.values()) or self._developer.uses_model(name):
                 raise ValueError("This model has an active stream; stop it before unloading.")
             if name in self._unloading:
                 raise ValueError("This model is already being unloaded.")
@@ -240,8 +243,60 @@ class Api:
     def _require_idle(self, chat_id):
         if self._closed:
             raise RuntimeError("The web UI is closing.")
-        if any(item["chat_id"] == chat_id for item in self._streams.values()):
+        if self._busy(chat_id):
             raise ValueError("This chat already has an active stream.")
+
+    def _busy(self, chat_id):
+        return any(item["chat_id"] == chat_id for item in self._streams.values()) or self._developer.busy(chat_id)
+
+    @_json_method
+    def run_agent(self, chat_id, text, project=None, plan_first=False, max_steps=20, context=4096):
+        if not isinstance(text, str) or not text.strip() or len(text) > 1000000:
+            raise ValueError("Enter a Developer task between 1 and 1,000,000 characters.")
+        if type(plan_first) is not bool or type(max_steps) is not int or not 1 <= max_steps <= 30:
+            raise ValueError("Plan-first must be boolean and max_steps must be between 1 and 30.")
+        if type(context) is not int or not 2048 <= context <= 1048576:
+            raise ValueError("Choose a Developer context between 2048 and 1048576.")
+        with self._lock:
+            record = self._version_record(chat_id)
+            root = developer_tools._project_root(project or record["project_path"])
+            if not record["model"]:
+                raise ValueError("Choose a Developer model first.")
+            history = deepcopy(record["agent_history"])
+            if not history:
+                history = request_messages(record)
+            history.append({"role": "user", "content": text})
+            record["messages"].append({"role": "user", "content": text})
+            record["project_path"] = str(root)
+            record["mode"] = "dev"
+            record = self._save_chat(record)
+            return self._developer.start(chat_id, record, host=self._engine.ollama_url(), model=record["model"],
+                project_root=str(root), messages=history, plan_first=plan_first, max_steps=max_steps,
+                context_length=context, file_limit=chat_attachments.file_limit(self._store.directory))
+
+    def _save_agent_result(self, before, result):
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("The web UI closed before the Developer result could be saved.")
+            current = self._load_chat(before["id"])
+            for key in ("messages", "summary", "environment", "project_path", "agent_history"):
+                if current.get(key) != before.get(key):
+                    raise RuntimeError("This chat changed while the Developer task was running.")
+            current["agent_history"] = result["messages"]
+            current["messages"].append({"role": "assistant", "content": result["assistant_text"]})
+            self._save_chat(current)
+
+    @_json_method
+    def approve_plan(self, task_id, decision, text=None):
+        return self._developer.approve_plan(task_id, decision, text)
+
+    @_json_method
+    def approve_action(self, task_id, approval_id, approved):
+        return self._developer.approve_action(task_id, approval_id, approved)
+
+    @_json_method
+    def stop_task(self, task_id):
+        return self._developer.stop(task_id)
 
     @_json_method
     def list_chats(self):
@@ -356,13 +411,13 @@ class Api:
         with self._lock:
             if self._closed:
                 raise RuntimeError("The web UI is closing.")
-            if any(item["chat_id"] == chat_id for item in self._streams.values()):
+            if self._busy(chat_id):
                 raise ValueError("This chat already has an active stream.")
             record = self._load_chat(chat_id)
         # Model metadata can require network I/O. Keep Stop and other chats free.
         total = self._usage(record)["total"]
         with self._lock:
-            if self._closed or any(item["chat_id"] == chat_id for item in self._streams.values()):
+            if self._closed or self._busy(chat_id):
                 raise ValueError("This chat is busy or the web UI is closing.")
             if self._load_chat(chat_id) != record:
                 raise ValueError("This chat changed while its context was being checked; try again.")
@@ -407,7 +462,7 @@ class Api:
             if model in self._unloading:
                 raise ValueError("This model is being unloaded; try again when it finishes.")
             record = self._load_chat(chat_id)
-            if any(item["chat_id"] == chat_id for item in self._streams.values()):
+            if self._busy(chat_id):
                 raise ValueError("This chat already has an active stream.")
             if record["messages"] and record["messages"][-1].get("partial"):
                 raise ValueError("Keep or discard the interrupted reply before sending.")
@@ -489,6 +544,9 @@ class Api:
         with self._lock:
             stream = self._streams.get(stream_id)
             if stream is None:
+                result = self._developer.stop(stream_id)
+                if result["active"]:
+                    return result
                 return {"ok": True, "stream_id": stream_id, "active": False}
             # Serialize Stop against chunk acceptance and the completion decision.
             with stream["data_lock"]:
@@ -601,6 +659,7 @@ class Api:
         with self._lock:
             self._closed = True
             streams = list(self._streams.values())
+            tasks = self._developer.close()
             for stream in streams:
                 with stream["data_lock"]:
                     stream["cancel"].set()
@@ -612,6 +671,8 @@ class Api:
         deadline = time.monotonic() + timeout
         for stream in streams:
             stream["finished"].wait(max(0, deadline - time.monotonic()))
+        for finished in tasks:
+            finished.wait(max(0, deadline - time.monotonic()))
         with self._lock:
             self._incognito.clear()
             self._unsaved = {key: value for key, value in self._unsaved.items()

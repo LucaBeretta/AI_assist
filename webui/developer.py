@@ -1,0 +1,126 @@
+"""Developer workers with JSON approval rendezvous and no UI references."""
+
+from copy import deepcopy
+import threading
+import uuid
+
+import coding_agent
+
+
+class DeveloperTasks:
+    def __init__(self, bridge, save_result):
+        self.bridge = bridge
+        self.save_result = save_result
+        self.lock = threading.RLock()
+        self.tasks = {}
+        self.closed = False
+
+    def busy(self, chat_id):
+        with self.lock:
+            return any(task["chat_id"] == chat_id and not task["finished"].is_set() for task in self.tasks.values())
+
+    def uses_model(self, name):
+        with self.lock:
+            return any(task["record"]["model"] == name and not task["finished"].is_set() for task in self.tasks.values())
+
+    def start(self, chat_id, record, **options):
+        with self.lock:
+            if self.closed or self.busy(chat_id):
+                raise ValueError("This Developer chat is busy or closing.")
+            identity = str(uuid.uuid4())
+            task = {"chat_id": chat_id, "record": deepcopy(record), "cancel": threading.Event(),
+                    "finished": threading.Event(), "pending": {}}
+            self.tasks[identity] = task
+            thread = threading.Thread(target=self._run, args=(identity, task, options), daemon=True,
+                                      name="webui-developer-" + identity[:8])
+            try:
+                thread.start()
+            except Exception:
+                del self.tasks[identity]
+                raise
+        return {"ok": True, "task_id": identity}
+
+    def _wait(self, identity, task, kind, value):
+        approval_id = str(uuid.uuid4())
+        pending = {"kind": kind, "event": threading.Event()}
+        with self.lock:
+            task["pending"][approval_id] = pending
+        self.bridge.emit("plan_approval" if kind == "plan" else "approval", task_id=identity,
+                         chat_id=task["chat_id"], approval_id=approval_id, **value)
+        try:
+            while not pending["event"].wait(0.05):
+                if task["cancel"].is_set():
+                    raise coding_agent.AgentCancelled("Developer task cancelled while awaiting approval.")
+            if task["cancel"].is_set():
+                raise coding_agent.AgentCancelled("Developer task cancelled.")
+            return pending["decision"]
+        finally:
+            with self.lock:
+                task["pending"].pop(approval_id, None)
+
+    def approve_plan(self, identity, decision, text=None):
+        if decision not in ("approve", "edit", "cancel"):
+            raise ValueError("Plan decision must be approve, edit or cancel.")
+        if decision == "edit" and (not isinstance(text, str) or not text.strip() or len(text) > 50000):
+            raise ValueError("The edited plan must be nonempty text up to 50,000 characters.")
+        with self.lock:
+            task = self.tasks.get(identity)
+            if task is None or task["finished"].is_set():
+                raise ValueError("This task is no longer awaiting a plan.")
+            match = next((item for item in task["pending"].values() if item["kind"] == "plan" and not item["event"].is_set()), None)
+            if match is None:
+                raise ValueError("This task is not awaiting plan approval.")
+            match["decision"] = True if decision == "approve" else text if decision == "edit" else False
+            match["event"].set()
+        return {"ok": True}
+
+    def approve_action(self, identity, approval_id, approved):
+        if type(approved) is not bool:
+            raise ValueError("Action approval must be true or false.")
+        with self.lock:
+            task = self.tasks.get(identity)
+            pending = task["pending"].get(approval_id) if task else None
+            if pending is None or pending["kind"] != "action" or pending["event"].is_set():
+                raise ValueError("This action approval is no longer pending.")
+            pending["decision"] = approved
+            pending["event"].set()
+        return {"ok": True}
+
+    def stop(self, identity):
+        with self.lock:
+            task = self.tasks.get(identity)
+            active = task is not None and not task["finished"].is_set()
+            if active:
+                task["cancel"].set()
+        return {"ok": True, "task_id": identity, "active": active}
+
+    def _run(self, identity, task, options):
+        def emit(event):
+            event = deepcopy(event)
+            kind = event.pop("type")
+            self.bridge.emit(kind, task_id=identity, chat_id=task["chat_id"], **event)
+        try:
+            result = coding_agent.run_agent(
+                on_event=emit, cancel_event=task["cancel"],
+                approve_action=lambda action: self._wait(identity, task, "action", {"action": action}),
+                approve_plan=lambda text: self._wait(identity, task, "plan", {"text": text}), **options)
+            if task["cancel"].is_set():
+                raise coding_agent.AgentCancelled("Developer task cancelled.")
+            self.save_result(task["record"], result)
+            kind, extra = "agent_done", {"text": result["assistant_text"]}
+        except coding_agent.AgentCancelled as error:
+            kind, extra = "agent_stopped", {"text": str(error)}
+        except Exception as error:
+            kind, extra = "agent_error", {"error": str(error)}
+        with self.lock:
+            task["finished"].set()
+            task["pending"].clear()
+        self.bridge.emit(kind, task_id=identity, chat_id=task["chat_id"], **extra)
+
+    def close(self):
+        with self.lock:
+            self.closed = True
+            tasks = list(self.tasks.values())
+            for task in tasks:
+                task["cancel"].set()
+            return [task["finished"] for task in tasks]
