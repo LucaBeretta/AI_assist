@@ -325,7 +325,9 @@ def main():
         page = Path(__file__).resolve().parent / "static" / "index.html"
         bridge = Bridge(lambda script: window.evaluate_js(script), autostart=False)
         api = Api(bridge)
-        window = webview.create_window("AI Assist — Web", page.as_uri(), js_api=api, text_select=True)
+        # Night background avoids a white flash before the page paints.
+        window = webview.create_window("AI Assist", page.as_uri(), js_api=api, text_select=True,
+                                       width=1280, height=840, min_size=(720, 520), background_color="#0D0F12")
         def loaded():
             bridge.start()
         window.events.loaded += loaded

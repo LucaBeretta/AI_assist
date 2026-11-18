@@ -212,9 +212,17 @@ window.app = (() => {
     renderChats();
   }
 
+  // Newest chats go to the top of the sidebar.
+  function addChatFirst(record) {
+    const rest = [...chats].filter(([id]) => id !== record.id);
+    chats.clear();
+    chats.set(record.id, record);
+    for (const [id, value] of rest) chats.set(id, value);
+  }
+
   async function newChat() {
     const result = await call("new_chat");
-    chats.set(result.chat.id, result.chat);
+    addChatFirst(result.chat);
     renderChats();
     await openChat(result.chat.id);
   }
@@ -345,7 +353,7 @@ window.app = (() => {
     closeContextMenu();
     try {
       const result = await call("new_chat_same_environment", selected);
-      chats.set(result.chat.id, result.chat);
+      addChatFirst(result.chat);
       renderChats();
       await openChat(result.chat.id);
     } catch (error) { showError(error); }
