@@ -214,14 +214,16 @@ def read_project_file(root, relative_path, max_bytes=64000):
     return _decode_text(data)
 
 
-def build_project_context(root, paths, max_total_chars=24000):
+def build_project_context(root, paths, max_total_chars=24000, max_file_bytes=_MAX_FILE_BYTES):
     """Build labeled, whole-file context and report every skipped selection.
 
     The returned ``text`` (including labels) never exceeds ``max_total_chars``.
     ``included`` contains relative paths; ``skipped`` contains path/reason pairs.
     Files are included once, in the supplied selection order, up to 250 paths.
+    Each file must fit ``max_file_bytes``, independently of the total context budget.
     """
     _positive_integer(max_total_chars, "The project context limit")
+    _positive_integer(max_file_bytes, "The file size limit")
     project = _project_root(root)
     if isinstance(paths, (str, bytes)):
         raise ValueError("Choose a collection of relative project file paths.")
@@ -236,7 +238,7 @@ def build_project_context(root, paths, max_total_chars=24000):
             if label in seen:
                 continue
             seen.add(label)
-            contents = read_project_file(project, path, max_bytes=_MAX_FILE_BYTES)
+            contents = read_project_file(project, path, max_bytes=max_file_bytes)
             section = f"--- Project file: {label} ---\n{contents}"
             if not section.endswith("\n"):
                 section += "\n"

@@ -97,6 +97,33 @@ class DetectionTests(unittest.TestCase):
 
 
 class RecommendationTests(unittest.TestCase):
+    def test_laptop_moe_split_counts_all_weights_and_keeps_resource_guards(self):
+        hardware = rig()
+        hardware.update(ram_total_bytes=32 * advisor.GIB, ram_available_bytes=10 * advisor.GIB)
+        hardware["gpus"] = [{"total_bytes": 16 * advisor.GIB, "free_bytes": 4 * advisor.GIB,
+                              "supported": True}]
+        coder = variants("qwen3-coder")[0]
+        fit, reason = advisor._fit(hardware, coder)
+        self.assertEqual(fit, "GPU + CPU split")
+        self.assertIn("3.3B active", reason)
+        self.assertIn("all weights", reason)
+        cards = advisor.recommend_models(hardware, CATALOGUE)
+        self.assertIn(coder["name"], [card["name"] for card in cards])
+        self.assertIsNone(advisor._fit(hardware, variants("qwen3-coder")[1]))
+        self.assertIsNone(advisor._fit(hardware, {**coder, "name": "unknown:30b"}))
+        hardware["ram_available_bytes"] = advisor.GIB
+        self.assertIsNone(advisor._fit(hardware, coder))
+        hardware["ram_available_bytes"] = 10 * advisor.GIB
+        hardware["disk_free_bytes"] = advisor.GIB
+        self.assertIsNone(advisor._fit(hardware, coder))
+
+    def test_moe_does_not_count_unified_memory_twice(self):
+        hardware = rig()
+        hardware.update(ram_total_bytes=16 * advisor.GIB, ram_available_bytes=16 * advisor.GIB)
+        hardware["gpus"] = [{"total_bytes": 12 * advisor.GIB, "free_bytes": 12 * advisor.GIB,
+                              "supported": True, "unified": True}]
+        self.assertIsNone(advisor._fit(hardware, variants("qwen3-coder")[0]))
+
     def setUp(self):
         self.variants = patch("model_advisor.fetch_model_variants", side_effect=variants)
         self.variants.start()
@@ -123,7 +150,8 @@ class RecommendationTests(unittest.TestCase):
         hardware["gpus"] = [{"name": "GPU 1", "total_bytes": 8 * advisor.GIB,
                               "free_bytes": 8 * advisor.GIB, "supported": True}] * 2
         cards = advisor.recommend_models(hardware, CATALOGUE)
-        self.assertNotIn("qwen3-coder:30b", [card["name"] for card in cards])
+        coder = next(card for card in cards if card["name"] == "qwen3-coder:30b")
+        self.assertEqual(coder["fit"], "GPU + CPU split")
         self.assertNotIn("qwen3.5:27b", [card["name"] for card in cards])
         self.assertTrue(all(card["estimated_memory_bytes"] <= 7 * advisor.GIB
                             for card in cards if "GPU memory" in card["fit"] or card["fit"] == "Run one model at a time"))
@@ -134,7 +162,8 @@ class RecommendationTests(unittest.TestCase):
         cards = advisor.recommend_models(hardware, CATALOGUE)
         self.assertTrue(cards)
         self.assertTrue(all(card["fit"] == "CPU / RAM fallback" for card in cards))
-        self.assertTrue(all(advisor._parameters(card) <= 8 for card in cards))
+        self.assertTrue(all(advisor._ACTIVE_PARAMETERS.get(card["name"], advisor._parameters(card)) <= 8
+                            for card in cards))
         self.assertNotIn("Larger general model", [card["purpose"] for card in cards])
 
     def test_unknown_gpu_memory_never_claims_gpu_fit(self):

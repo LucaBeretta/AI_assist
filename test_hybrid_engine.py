@@ -11,6 +11,18 @@ from hybrid_engine import build_review_messages, run_hybrid
 
 
 class HybridEngineTests(unittest.TestCase):
+    def test_review_reads_large_changed_file_only_with_the_chosen_limit(self):
+        marker = "# Large file review evidence"
+        (self.root / "main.py").write_text(marker + "x" * 70000, encoding="utf-8")
+        self.run_pipeline()
+        self.assertNotIn(marker, self.review_messages[-1]["content"])
+        self.run_pipeline(max_file_bytes=128000)
+        self.assertIn(marker, self.review_messages[-1]["content"])
+        self.assertLessEqual(sum(len(item["content"]) for item in self.review_messages), 6000)
+        for invalid in (0, -1, True, "128000"):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                self.run_pipeline(max_file_bytes=invalid)
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)

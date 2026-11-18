@@ -202,10 +202,22 @@ class ProjectToolsTests(unittest.TestCase):
                 read_project_file(self.root, "a.py", invalid)
             with self.assertRaises(ValueError):
                 build_project_context(self.root, [], invalid)
+            with self.assertRaises(ValueError):
+                build_project_context(self.root, [], max_file_bytes=invalid)
         with self.assertRaisesRegex(ValueError, "project folder"):
             list_project_files(self.root / "missing")
         with self.assertRaisesRegex(ValueError, "collection"):
             build_project_context(self.root, "a.py")
+
+    def test_pinned_file_limit_and_total_context_budget_are_independent(self):
+        self.write("large.txt", "x" * 70000)
+        self.assertEqual(build_project_context(self.root, ["large.txt"], 200000)["included"], [])
+        context = build_project_context(self.root, ["large.txt"], 200000, max_file_bytes=128000)
+        self.assertEqual(context["included"], ["large.txt"])
+        self.assertIn("x" * 70000, context["text"])
+        context = build_project_context(self.root, ["large.txt"], 8000, max_file_bytes=128000)
+        self.assertEqual(context["included"], [])
+        self.assertIn("context limit", context["skipped"][0]["reason"])
 
 
 class CodeBlockTests(unittest.TestCase):

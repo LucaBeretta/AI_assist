@@ -712,10 +712,11 @@ class AIAssistantGUI(BackendMixin, WorkspaceMixin, OllamaAssistantBase):
 
 
 if __name__ == "__main__":
+    from gui_runtime import GUIRuntimeError, create_root, redirect_missing_streams
+    redirect_missing_streams()
     if "--web" in sys.argv[1:]:
         from webui.app import main
         raise SystemExit(main())
-    from gui_runtime import GUIRuntimeError, create_root
     try:
         root = create_root()
     except GUIRuntimeError as error:

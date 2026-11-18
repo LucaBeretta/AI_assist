@@ -4,18 +4,20 @@ from contextlib import ExitStack
 import gc
 import json
 import os
+import queue
 from pathlib import Path
 import tempfile
 import threading
 import time
 import tkinter as tk
 import unittest
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 import AIassist
 from coding_agent import FILE_LIMIT_CHOICES, run_agent
 from test_colibri_launcher import join_workers
-from workspace_ui import file_limit_label, file_limit_value, file_limit_warning, load_file_limit
+from workspace_ui import WorkspaceMixin, file_limit_label, file_limit_value, file_limit_warning, load_file_limit
 
 
 def call(name, **arguments):
@@ -28,6 +30,24 @@ def done(text="Done."):
 
 
 class FileLimitAgentTests(unittest.TestCase):
+    def test_changing_the_limit_refreshes_already_pinned_context(self):
+        app = SimpleNamespace(agent_file_limit=64000, agent_settings=None, project_path=str(self.root),
+                              project_selected_paths=["index.html"], model_contexts={"model": 131072},
+                              model_name=SimpleNamespace(get=lambda: "model"),
+                              file_limit_choice=SimpleNamespace(get=lambda: "128 KB"),
+                              scan_project=Mock(), set_status=Mock())
+        with patch("model_advisor._fallback_ram", return_value=(32 * 1024**3, 16 * 1024**3)):
+            WorkspaceMixin.choose_file_limit(app)
+        self.assertEqual(app.agent_file_limit, 128000)
+        app.scan_project.assert_called_once_with()
+
+    def test_project_worker_passes_the_selected_limit_to_pinned_context(self):
+        app = SimpleNamespace(agent_file_limit=128000, workspace_events=queue.Queue())
+        with patch("workspace_ui.build_project_context", return_value={"text": "", "included": [], "skipped": []}) as build:
+            WorkspaceMixin.project_worker(app, 7, self.root, ["index.html"])
+        build.assert_called_once_with(self.root, ["index.html"], max_total_chars=8000, max_file_bytes=128000)
+        self.assertIsNone(app.workspace_events.get_nowait()[-1])
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)

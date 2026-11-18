@@ -55,8 +55,9 @@ def _intent_excerpt(text, limit):
     return text[:head] + marker + text[-tail:]
 
 
-def build_review_messages(messages, result, events, root, context_chars=_CONTEXT_CHARS):
-    """Build plain prose only; native tool histories never enter the adviser request."""
+def build_review_messages(messages, result, events, root, context_chars=_CONTEXT_CHARS, max_file_bytes=64000):
+    """Build prose within context_chars, reading files up to max_file_bytes."""
+    projects._positive_integer(max_file_bytes, "The file size limit")
     if isinstance(context_chars, bool) or not isinstance(context_chars, int) or not 2000 <= context_chars <= 32000:
         raise ValueError("Review context must be between 2,000 and 32,000 characters.")
     intent = next((item.get("content", "") for item in reversed(messages)
@@ -104,7 +105,7 @@ def build_review_messages(messages, result, events, root, context_chars=_CONTEXT
             sections.append("Additional changed-file context was omitted to fit the review window.")
             break
         try:
-            contents = projects.read_project_file(root, path, max_bytes=64000)
+            contents = projects.read_project_file(root, path, max_bytes=max_file_bytes)
         except (ValueError, OSError, RuntimeError):
             sections.append("A changed file was omitted by the project's text-file access rules.")
             continue
@@ -119,7 +120,8 @@ def build_review_messages(messages, result, events, root, context_chars=_CONTEXT
 
 
 def run_hybrid(worker_fn, review_fn, messages, root, on_event, cancel_event,
-               before_worker=None, before_review=None, after_review=None, review_context_chars=6000):
+               before_worker=None, before_review=None, after_review=None, review_context_chars=6000,
+               max_file_bytes=64000):
     """Run each stage at most once and preserve completed work if review fails.
 
     ``worker_fn(messages, emit)`` performs the ordinary reviewed agent run.
@@ -128,6 +130,7 @@ def run_hybrid(worker_fn, review_fn, messages, root, on_event, cancel_event,
     """
     if not callable(worker_fn) or not callable(review_fn) or not callable(on_event):
         raise ValueError("Hybrid work requires worker, review, and event callbacks.")
+    projects._positive_integer(max_file_bytes, "The file size limit")
     observed = []
     started = time.monotonic()
 
@@ -171,7 +174,8 @@ def run_hybrid(worker_fn, review_fn, messages, root, on_event, cancel_event,
         _check_cancelled(cancel_event)
         review_start = time.monotonic()
         emit("hybrid_stage", f"Colibri review started; model handoff {review_start - handoff_start:.1f}s.")
-        context = build_review_messages(messages, result, observed, root, context_chars=review_context_chars)
+        context = build_review_messages(messages, result, observed, root, context_chars=review_context_chars,
+                                        max_file_bytes=max_file_bytes)
         review = review_fn(context)
         _check_cancelled(cancel_event)
         if not isinstance(review, str) or not review.strip():

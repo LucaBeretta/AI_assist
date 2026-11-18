@@ -330,7 +330,7 @@ class BackendMixin:
                 self.adopt_colibri_url(self.colibri_report)
             client = self.colibri_client()
             result = run_agent(client.url, model, root, messages, event, approval,
-                               cancel_event=cancel, context_length=context,
+                               cancel_event=cancel, context_length=context or 4096,
                                chat_fn=client.agent_chat, file_limit=self.agent_file_limit)
             self.workspace_events.put(("agent_done", request, result, None))
         except Exception as error:

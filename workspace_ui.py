@@ -46,6 +46,24 @@ def _history_matches(record, query):
             or any(query in message["content"].casefold() for message in record["messages"]))
 
 
+AGENT_DEFAULT_CONTEXT = 16384
+
+
+def agent_context_length(chosen, model, running_details=None):
+    """Context for a Developer task: the user's choice, else the context the model is
+    already loaded with in Ollama (/api/ps), else 16k. 4k was too small for the agent:
+    it cut tool calls (1k output) and shortened the task itself."""
+    if type(chosen) is int and chosen > 0:
+        return chosen
+    try:
+        loaded = (running_details() or {}).get(model, {}).get("context_length") if running_details else None
+    except Exception:
+        loaded = None
+    if type(loaded) is int and loaded >= 8192:
+        return loaded
+    return AGENT_DEFAULT_CONTEXT
+
+
 def file_limit_label(value):
     return f"{value // 1000:,} KB" if value < 1000000 else f"{value / 1000000:g} MB"
 
@@ -1092,7 +1110,8 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
     def project_worker(self, request, root, selected):
         try:
             files = list_project_files(root)
-            context = build_project_context(root, selected, max_total_chars=8000)
+            context = build_project_context(root, selected, max_total_chars=8000,
+                                            max_file_bytes=self.agent_file_limit)
             self.workspace_events.put(("project", request, (files, context), None))
         except (OSError, ValueError, RuntimeError) as error:
             self.workspace_events.put(("project", request, None, str(error)))
@@ -1235,7 +1254,7 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
             if shared_context:
                 messages.insert(1, {"role": "system", "content": shared_context})
             threading.Thread(target=self.agent_worker, args=(self.request_serial, self.ollama_host(), model, self.project_path,
-                                                             messages, context or 4096, self.agent_cancel), daemon=True).start()
+                                                             messages, context, self.agent_cancel), daemon=True).start()
         else:
             if shared_context:
                 messages.insert(0, {"role": "system", "content": shared_context})
@@ -1298,6 +1317,7 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         tk.Button(actions, text="Clear notes", command=lambda: editor.delete("1.0", END)).pack(side="left")
 
     def agent_worker(self, request, host, model, root, messages, context, cancel):
+        context = agent_context_length(context, model, getattr(self, "running_details", None))
         def event(item):
             self.workspace_events.put(("agent_event", request, item, None))
         def approval(action):
@@ -1597,6 +1617,8 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
             self.file_limit_choice.set(file_limit_label(self.agent_file_limit))
             return
         self.agent_file_limit = limit
+        if self.project_path and self.project_selected_paths:
+            self.scan_project()
         if self.agent_settings:
             try:
                 temporary = self.agent_settings.with_suffix(".tmp")

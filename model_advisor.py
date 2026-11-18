@@ -282,6 +282,12 @@ def _parameters(variant):
     return float(match.group(1)) / (1000 if match.group(2).lower() == "m" else 1)
 
 
+# Active counts from the publishers' model cards; never infer them from file size.
+# https://huggingface.co/Qwen/Qwen3-Coder-30B-A3B-Instruct
+# https://huggingface.co/openai/gpt-oss-20b
+_ACTIVE_PARAMETERS = {"qwen3-coder:30b": 3.3, "gpt-oss:20b": 3.6}
+
+
 def _best_gpu(hardware):
     candidates = [gpu for gpu in hardware.get("gpus", [])
                   if gpu.get("supported") is True and gpu.get("available_to_ollama") is not False
@@ -304,10 +310,18 @@ def _fit(hardware, variant):
     ram = hardware.get("ram_total_bytes")
     available = hardware.get("ram_available_bytes")
     budget = min(ram * .70, available * .85) if ram and available else (ram * .60 if ram else None)
-    parameters = _parameters(variant)
+    active = _ACTIVE_PARAMETERS.get(variant["name"])
+    parameters = active if active is not None else _parameters(variant)
     # A large host RAM total does not make a giant CPU-only model responsive.
     if parameters is not None and parameters > 8:
         return None
+    # Active parameters bound compute, not storage: budget every weight and
+    # runtime overhead across one dedicated GPU and conservative host RAM.
+    if active is not None and gpu and not gpu.get("unified") and budget is not None:
+        if needed <= max(0, gpu["total_bytes"] - GIB) + budget:
+            return ("GPU + CPU split", f"MoE with about {active:g}B active parameters; all weights still need memory. "
+                    "Estimated to fit GPU plus RAM after freeing other models/apps, at 4096 tokens. "
+                    "CPU offload may be slower; verify placement with ollama ps.")
     if budget is not None and needed <= budget:
         return ("CPU / RAM fallback", "Fits a conservative RAM budget; GPU placement is unverified and responses may be slower.")
     if budget is None and size <= 2 * GIB:
