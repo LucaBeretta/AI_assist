@@ -11,15 +11,20 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 class Element {
-  constructor() { this.value = ''; this.textContent = ''; this.children = []; this.listeners = {}; }
-  append(...children) { this.children.push(...children); }
-  replaceChildren(...children) { this.children = children; }
+  constructor(tag='div', type=1) { this.tagName=tag; this.nodeType=type; this.value = ''; this._text = ''; this.children = []; this.listeners = {}; this.attributes={}; }
+  get textContent() { return this._text + this.children.map(child => child.textContent).join(''); }
+  set textContent(text) { this._text=String(text); this.children=[]; }
+  append(...children) { for (const child of children) {if (child.nodeType === 11) {this.children.push(...child.children); child.children=[];} else this.children.push(child);} }
+  replaceChildren(...children) { this._text=''; this.children=[]; this.append(...children); }
+  setAttribute(name,value) { this.attributes[name]=value; }
   addEventListener(type, callback) { this.listeners[type] = callback; }
 }
 const elements = new Map();
 const document = {
   getElementById(id) { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); },
-  createElement() { return new Element(); }
+  createElement(tag) { return new Element(tag); },
+  createTextNode(text) {const node=new Element('#text',3); node.textContent=text; return node;},
+  createDocumentFragment() {return new Element('#fragment',11);}
 };
 const chat = {id:'chat-a', title:'Chat A', model:'fake:7b', messages:[]};
 const saved = { ...chat, messages:[] };
@@ -32,6 +37,7 @@ window.pywebview = {api: {
   send: async (...args) => { calls.push(args); saved.messages.push({role:'user',content:args[1]}); return {ok:true,stream_id:'stream-a'}; },
   stop: async id => {calls.push(['stop',id]); return {ok:true};}
 }};
+vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'markdown.js'), 'utf8'), {document, window});
 vm.runInNewContext(fs.readFileSync(process.argv[1], 'utf8'), {document, window, Map, Error, String, Number, Boolean, Array});
 (async () => {
   await window.listeners.pywebviewready();
@@ -56,6 +62,39 @@ vm.runInNewContext(fs.readFileSync(process.argv[1], 'utf8'), {document, window, 
 
 
 class StaticTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_compaction_controls_collapse_archive_and_create_empty_environment_chat(self):
+        self.run_scenario(r'''
+        saved.messages = Array.from({length:6}, (_,i)=>({role:i%2?'assistant':'user',content:'original-'+i}));
+        const records = new Map([['chat-a',saved]]);
+        window.pywebview.api.open_chat = async id => ({ok:true,chat:structuredClone(records.get(id))});
+        window.pywebview.api.context_usage = async () => ({ok:true,used:20,total:8192,level:'ok'});
+        window.pywebview.api.compact = async id => {
+          window.app.onEvent([{type:'compact_started',operation:'compact',stream_id:'c1',chat_id:id}]);
+          saved.summary={text:'kept decisions',upto:2,created_at:'2026-11-18T00:00:00Z'};
+          window.app.onEvent([{type:'compact_done',operation:'compact',stream_id:'c1',chat_id:id}]);
+          return {ok:true,stream_id:'c1'};
+        };
+        window.pywebview.api.new_chat_same_environment = async id => {
+          calls.push(['copy-env',id]);
+          const fresh={id:'chat-b',title:'New empty chat',model:'fake:7b',messages:[],summary:null};
+          records.set(fresh.id,fresh);
+          return {ok:true,chat:fresh};
+        };
+        await window.listeners.pywebviewready();
+        await elements.get('compact').listeners.click();
+        await new Promise(resolve=>setImmediate(resolve));
+        const archive=elements.get('messages').children[0];
+        assert.equal(archive.tagName,'details');
+        assert.match(archive.textContent,/original-0/);
+        assert.match(archive.textContent,/original-1/);
+        assert.equal(elements.get('stop').disabled,true);
+        await elements.get('same-environment').listeners.click();
+        assert.equal(elements.get('chat-title').textContent,'New empty chat');
+        assert.equal(elements.get('messages').children.length,0);
+        assert.deepEqual(calls.at(-1),['copy-env','chat-a']);
+        ''')
+
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
     def test_saved_history_stays_accessible_when_model_server_is_offline(self):
         self.run_scenario(r'''

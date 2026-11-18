@@ -30,28 +30,47 @@ window.app = (() => {
     element("send").disabled = !connected || !engineReady || !selected || openingChat || !element("model").value || submitting || Boolean(active);
     element("prompt").disabled = openingChat;
     element("stop").disabled = !active || Boolean(active.stopping);
+    element("compact").disabled = !selected || openingChat || submitting || Boolean(active);
+    element("same-environment").disabled = !selected || openingChat;
   }
 
   function renderMessages() {
     const record = chats.get(selected);
     element("chat-title").textContent = record?.title || "Conversation";
     const nodes = [];
-    for (const message of record?.messages || []) {
+    const messageNode = message => {
       const section = document.createElement("section");
       const label = document.createElement("strong");
       label.textContent = message.role;
-      const text = document.createElement("pre");
-      text.textContent = message.content;
+      const text = document.createElement(message.role === "assistant" ? "div" : "pre");
+      if (message.role === "assistant") text.append(window.renderMarkdown(message.content));
+      else text.textContent = message.content;
       section.append(label, text);
-      nodes.push(section);
+      return section;
+    };
+    const messages = record?.messages || [];
+    if (record?.summary) {
+      const archive = document.createElement("details");
+      const label = document.createElement("summary");
+      label.textContent = `Conversation compacted — show ${record.summary.upto} original messages`;
+      archive.append(label, ...messages.slice(0, record.summary.upto).map(messageNode));
+      const summary = document.createElement("pre");
+      summary.textContent = record.summary.text;
+      nodes.push(archive, summary);
     }
+    nodes.push(...messages.slice(record?.summary?.upto || 0).map(messageNode));
     const replies = new Map((record?.unsaved_replies || []).map(reply => [reply.stream_id, reply]));
     for (const stream of streams.values()) {
-      if (stream.chat_id === selected && (stream.active || stream.saved === false)) replies.set(stream.id, stream);
+      if (stream.chat_id === selected && stream.operation !== "compact" && (stream.active || stream.saved === false)) replies.set(stream.id, stream);
     }
     for (const stream of replies.values()) {
-      const text = document.createElement("pre");
-      text.textContent = (stream.saved === false ? "Not saved — copy this response before closing.\n" : "") + stream.text;
+      const text = document.createElement("div");
+      if (stream.saved === false) {
+        const warning = document.createElement("p");
+        warning.textContent = "Not saved — copy this response before closing.";
+        text.append(warning);
+      }
+      text.append(window.renderMarkdown(stream.text));
       nodes.push(text);
     }
     element("messages").replaceChildren(...nodes);
@@ -89,7 +108,7 @@ window.app = (() => {
       selected = null;
       throw error;
     } finally {
-      if (version === selectionVersion) { openingChat = false; renderMessages(); }
+      if (version === selectionVersion) { openingChat = false; renderMessages(); refreshUsage(id); }
     }
   }
 
@@ -99,6 +118,15 @@ window.app = (() => {
     const result = await call("open_chat", id);
     if (loadVersions.get(id) !== version) return;
     chats.set(id, {...result.chat, unsaved_replies: result.unsaved_replies || [], localDraft: chats.get(id)?.localDraft});
+  }
+
+  async function refreshUsage(id) {
+    try {
+      const result = await call("context_usage", id);
+      if (selected === id) element("context-usage").textContent = `Context: ${result.used} / ${result.total ?? "unknown"} (estimated, ${result.level})`;
+    } catch (error) {
+      if (selected === id) element("context-usage").textContent = "Context usage: unavailable";
+    }
   }
 
   async function refreshChats() {
@@ -161,10 +189,10 @@ window.app = (() => {
       if (event.type === "ready") { refreshModels().catch(showError); continue; }
       if (event.type === "status") { status(event.text); continue; }
       if (!event.stream_id) { if (event.type === "error") showError(new Error(event.error)); continue; }
-      const stream = streams.get(event.stream_id) || {id: event.stream_id, chat_id: event.chat_id, text: "", active: true};
+      const stream = streams.get(event.stream_id) || {id: event.stream_id, chat_id: event.chat_id, text: "", active: true, operation:event.operation || "chat"};
       streams.set(event.stream_id, stream);
       if (event.type === "token" && stream.active) stream.text += event.text;
-      if (["done", "stopped", "error"].includes(event.type)) {
+      if (["done", "stopped", "error", "compact_done"].includes(event.type)) {
         if (!stream.active) continue;
         stream.active = false;
         stream.saved = event.saved;
@@ -174,6 +202,7 @@ window.app = (() => {
         reloadChat(event.chat_id).then(() => {
           renderMessages();
           renderChats();
+          refreshUsage(event.chat_id);
         }).catch(error => { if (selected === event.chat_id) showError(error); });
       }
     }
@@ -183,6 +212,26 @@ window.app = (() => {
 
   element("composer").addEventListener("submit", send);
   element("new-chat").addEventListener("click", () => newChat().catch(showError));
+  element("same-environment").addEventListener("click", async () => {
+    try {
+      const result = await call("new_chat_same_environment", selected);
+      chats.set(result.chat.id, result.chat);
+      renderChats();
+      await openChat(result.chat.id);
+    } catch (error) { showError(error); }
+  });
+  element("compact").addEventListener("click", async () => {
+    const chatId = selected;
+    if (!chatId || openingChat || submitting || activeStream(chatId)) return;
+    submitting = true; controls();
+    try {
+      const result = await call("compact", chatId);
+      if (!streams.has(result.stream_id)) streams.set(result.stream_id, {id:result.stream_id,chat_id:chatId,text:"",active:true,operation:"compact"});
+      if (selected === chatId && streams.get(result.stream_id).active) status("Compacting…");
+      renderChats();
+    } catch (error) { showError(error); }
+    finally { submitting = false; controls(); }
+  });
   element("refresh").addEventListener("click", () => refreshModels().catch(showError));
   element("model").addEventListener("change", controls);
   element("stop").addEventListener("click", async () => {
