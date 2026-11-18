@@ -1,0 +1,2 @@
+# Optional web UI; the Tk launcher remains usable without this dependency.
+pywebview==6.2.1
