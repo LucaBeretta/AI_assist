@@ -36,6 +36,64 @@ class Events:
 
 
 class ApiTests(unittest.TestCase):
+    def test_failed_final_save_keeps_recoverable_text_and_never_emits_done(self):
+        release = threading.Event()
+        self.addCleanup(release.set)
+        def request(*args, on_chunk, **kwargs):
+            on_chunk("recover this reply")
+            release.wait(3)
+            return "recover this reply"
+        self.engine.request_ollama = request
+        chat = self.api.new_chat()["chat"]["id"]
+        stream = self.api.send(chat, "Hi", "fake:7b", None)["stream_id"]
+        self.events.wait("token", stream)
+        with patch.object(self.store, "save", side_effect=OSError("disk full")):
+            release.set()
+            failure = self.events.wait("error", stream)
+        self.assertFalse(failure["saved"])
+        self.assertEqual(failure["text"], "recover this reply")
+        self.assertEqual(self.api.open_chat(chat)["unsaved_replies"][0]["text"], "recover this reply")
+        self.assertEqual(len(self.store.load(chat)["messages"]), 1)
+        self.assertFalse(any(e["type"] == "done" for e in self.events.items))
+
+    def test_external_chat_edit_is_not_overwritten_by_a_late_reply(self):
+        release = threading.Event()
+        self.addCleanup(release.set)
+        def request(*args, on_chunk, **kwargs):
+            on_chunk("late reply")
+            release.wait(3)
+            return "late reply"
+        self.engine.request_ollama = request
+        chat = self.api.new_chat()["chat"]["id"]
+        stream = self.api.send(chat, "Hi", "fake:7b", None)["stream_id"]
+        self.events.wait("token", stream)
+        record = self.store.load(chat)
+        record["messages"].append({"role": "user", "content": "external edit"})
+        self.store.save(record)
+        release.set()
+        self.assertIn("changed", self.events.wait("error", stream)["error"])
+        self.assertEqual(self.store.load(chat)["messages"][-1]["content"], "external edit")
+        self.assertEqual(self.api.open_chat(chat)["unsaved_replies"][0]["text"], "late reply")
+
+    def test_close_rejects_new_requests_and_prevents_late_tokens(self):
+        release = threading.Event()
+        self.addCleanup(release.set)
+        def request(*args, on_chunk, **kwargs):
+            on_chunk("partial")
+            release.wait(3)
+            on_chunk("late")
+            return "unexpected"
+        self.engine.request_ollama = request
+        chat = self.api.new_chat()["chat"]["id"]
+        stream = self.api.send(chat, "Hi", "fake:7b", None)["stream_id"]
+        self.events.wait("token", stream)
+        self.api._close(timeout=0)
+        self.assertFalse(self.api.new_chat()["ok"])
+        self.assertFalse(self.api.send(chat, "again", "fake:7b", None)["ok"])
+        release.set()
+        self.events.wait("stopped", stream)
+        self.assertEqual([e["text"] for e in self.events.items if e["type"] == "token"], ["partial"])
+
     def test_api_signatures_remain_visible_to_pywebview(self):
         self.assertEqual(inspect.getfullargspec(Api.send).args,
                          ["self", "chat_id", "text", "model", "context"])

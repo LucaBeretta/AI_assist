@@ -8,6 +8,7 @@ import logging
 from pathlib import Path
 import sys
 import threading
+import time
 import uuid
 
 from chat_store import ChatStore
@@ -36,6 +37,7 @@ class Api:
         self._engine = engine if engine is not None else importlib.import_module("AIassist")
         self._lock = threading.RLock()
         self._streams = {}
+        self._unsaved = {}
         self._closed = False
 
     @_json_method
@@ -51,7 +53,8 @@ class Api:
     @_json_method
     def open_chat(self, id):
         with self._lock:
-            return {"ok": True, "chat": self._store.load(id)}
+            return {"ok": True, "chat": self._store.load(id),
+                    "unsaved_replies": deepcopy([item for item in self._unsaved.values() if item["chat_id"] == id])}
 
     @_json_method
     def new_chat(self):
@@ -162,7 +165,15 @@ class Api:
                 self._bridge.emit(kind, stream_id=stream_id, chat_id=stream["chat_id"],
                                   text=content or "", metrics=stream["metrics"], error=error if kind == "error" else None)
         except Exception as failure:
-            self._bridge.emit("error", stream_id=stream_id, chat_id=stream["chat_id"], error=str(failure))
+            with stream["data_lock"]:
+                partial = "".join(stream["parts"])
+            if kind == "done" and isinstance(answer, str):
+                partial = answer
+            with self._lock:
+                recovered = {"stream_id": stream_id, "chat_id": stream["chat_id"], "text": partial,
+                             "metrics": deepcopy(stream["metrics"]), "error": str(failure), "saved": False}
+                self._unsaved[stream_id] = recovered
+                self._bridge.emit("error", **recovered)
         finally:
             with self._lock:
                 self._streams.pop(stream_id, None)
@@ -175,14 +186,16 @@ class Api:
         except Exception as error:
             self._bridge.emit("error", error=str(error))
 
-    def _close(self):
+    def _close(self, timeout=2):
         with self._lock:
             self._closed = True
             streams = list(self._streams.values())
             for stream in streams:
-                stream["cancel"].set()
+                with stream["data_lock"]:
+                    stream["cancel"].set()
+        deadline = time.monotonic() + timeout
         for stream in streams:
-            stream["finished"].wait(2)
+            stream["finished"].wait(max(0, deadline - time.monotonic()))
 
 
 def main():
