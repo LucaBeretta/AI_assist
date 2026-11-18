@@ -5,6 +5,7 @@ A fake ``coli`` script stands in for colibri's launcher and a local HTTP server
 for its OpenAI-compatible gateway, so no model, download, or network is used."""
 
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 from pathlib import Path
@@ -32,8 +33,23 @@ FAKE_COLI = textwrap.dedent('''\
             json.dump(state, handle)
     state = load()
     args = sys.argv[1:]
-    with open(os.path.join(here, "calls.log"), "a", encoding="utf-8") as log:
-        log.write(" ".join(args) + "\\n")
+    # Windows append handles can overwrite concurrent writes from setup/status.
+    # An atomic directory lock keeps each complete record at a distinct offset.
+    lock = os.path.join(here, "calls.lock")
+    deadline = time.monotonic() + 10
+    while True:
+        try:
+            os.mkdir(lock)
+            break
+        except FileExistsError:
+            if time.monotonic() >= deadline:
+                raise RuntimeError("Timed out recording fake coli call")
+            time.sleep(0.005)
+    try:
+        with open(os.path.join(here, "calls.log"), "a", encoding="utf-8") as log:
+            log.write(" ".join(args) + "\\n")
+    finally:
+        os.rmdir(lock)
     print("colibri v2 (fake)")
     if args[:1] == ["status"]:
         report = {"configured": state["model"] is not None, "config_path": os.path.join(here, "setup.json"),
@@ -192,6 +208,12 @@ def completion(content="", tool_calls=None, reasoning=None):
 
 
 class LauncherTests(unittest.TestCase):
+    def test_concurrent_status_calls_keep_every_complete_log_record(self):
+        arguments = [["status", "--json", str(index)] for index in range(40)]
+        with ThreadPoolExecutor(max_workers=10) as pool:
+            list(pool.map(lambda args: colibri_client.run_coli_json(self.colibri, args), arguments))
+        self.assertCountEqual(self.calls(), [" ".join(args) for args in arguments])
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
