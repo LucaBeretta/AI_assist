@@ -193,6 +193,29 @@ class ChatStore:
         if "_manual_title" in chat and type(chat["_manual_title"]) is not bool:
             raise ChatStoreError("Chat _manual_title must be true or false.")
         record = deepcopy(chat)
+        branches = record.setdefault("branches", {})
+        if not isinstance(branches, dict):
+            raise ChatStoreError("Chat branches must be an object of message tails.")
+        for key, tails in branches.items():
+            if not isinstance(key, str) or not re.fullmatch(r"-1|0|[1-9][0-9]*", key):
+                raise ChatStoreError("Branch anchors must be message indices or -1.")
+            if not isinstance(tails, list) or not tails:
+                raise ChatStoreError("A branch must contain at least one alternative tail.")
+            for tail in tails:
+                if not isinstance(tail, list) or any(not isinstance(item, dict)
+                        or item.get("role") not in _ROLES or not isinstance(item.get("content"), str) for item in tail):
+                    raise ChatStoreError("Branch tails must contain valid chat messages.")
+        prefixes = record.get("_branch_prefixes", {})
+        active = record.get("_branch_active", {})
+        if not isinstance(prefixes, dict) or not isinstance(active, dict):
+            raise ChatStoreError("Branch metadata must be objects.")
+        for key, hashes in prefixes.items():
+            if key not in branches or not isinstance(hashes, list) or len(hashes) != len(branches[key]) or any(
+                    not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value) for value in hashes):
+                raise ChatStoreError("Branch prefix metadata must match its tails.")
+        for key, choice in active.items():
+            if key not in branches or type(choice) is not int or not 0 <= choice < len(branches[key]):
+                raise ChatStoreError("Invalid active branch choice.")
         if "incognito" in record and type(record["incognito"]) is not bool:
             raise ChatStoreError("Chat incognito must be true or false.")
         record.setdefault("project_files", [])

@@ -12,6 +12,7 @@ import time
 import uuid
 
 from chat_store import ChatStore, _utc_now
+import chat_versions
 from webui.bridge import Bridge
 
 
@@ -69,6 +70,7 @@ class Api:
         return self._store.load(chat_id)
 
     def _save_chat(self, record):
+        chat_versions.sync(record)
         if record["id"] in self._incognito_ids:
             if self._closed:
                 raise ValueError("This incognito chat has been closed.")
@@ -133,8 +135,52 @@ class Api:
     @_json_method
     def open_chat(self, id):
         with self._lock:
-            return {"ok": True, "chat": self._load_chat(id),
+            record = self._load_chat(id)
+            return {"ok": True, "chat": record, "versions": chat_versions.versions(record),
                     "unsaved_replies": deepcopy([item for item in self._unsaved.values() if item["chat_id"] == id])}
+
+    def _version_record(self, chat_id):
+        self._require_idle(chat_id)
+        record = self._load_chat(chat_id)
+        if record["messages"] and record["messages"][-1].get("partial"):
+            raise ValueError("Keep or discard the interrupted reply before changing versions.")
+        return record
+
+    @_json_method
+    def regenerate(self, chat_id):
+        with self._lock:
+            record = self._version_record(chat_id)
+            if len(record["messages"]) < 2 or record["messages"][-1]["role"] != "assistant" or record["messages"][-2]["role"] != "user":
+                raise ValueError("There is no last answer to regenerate.")
+            if not record["model"]:
+                raise ValueError("Choose a model before regenerating.")
+            chat_versions.fork(record, len(record["messages"]) - 2, [])
+            record = self._save_chat(record)
+            return self._launch(record, kind="chat", messages=request_messages(record), context=record["context_length"])
+
+    @_json_method
+    def edit_and_resend(self, chat_id, index, text):
+        if not isinstance(text, str) or not text.strip() or len(text) > 1000000:
+            raise ValueError("Enter a message between 1 and 1,000,000 characters.")
+        with self._lock:
+            record = self._version_record(chat_id)
+            if type(index) is not int or not 0 <= index < len(record["messages"]) or record["messages"][index]["role"] != "user":
+                raise ValueError("Choose a user message to edit.")
+            if not record["model"]:
+                raise ValueError("Choose a model before resending.")
+            chat_versions.fork(record, index - 1, [{"role": "user", "content": text}])
+            record = self._save_chat(record)
+            return self._launch(record, kind="chat", messages=request_messages(record), context=record["context_length"])
+
+    @_json_method
+    def switch_version(self, chat_id, index, n):
+        with self._lock:
+            record = self._version_record(chat_id)
+            if type(index) is not int or not -1 <= index < len(record["messages"]):
+                raise ValueError("Choose a valid branch anchor (-1 is before the first message).")
+            chat_versions.switch(record, index, n)
+            record = self._save_chat(record)
+            return {"ok": True, "chat": record, "messages": record["messages"], "versions": chat_versions.versions(record)}
 
     @_json_method
     def new_chat(self, incognito=False):
