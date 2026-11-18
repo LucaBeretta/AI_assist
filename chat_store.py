@@ -198,6 +198,8 @@ class ChatStore:
         if "_manual_title" in chat and type(chat["_manual_title"]) is not bool:
             raise ChatStoreError("Chat _manual_title must be true or false.")
         record = deepcopy(chat)
+        if record.get("project_id") is not None and (not isinstance(record["project_id"], str) or not _CHAT_ID.fullmatch(record["project_id"])):
+            raise ChatStoreError("Chat project_id must be a canonical UUID or null.")
         try:
             chat_attachments.validate(record.get("attachments", []))
         except ValueError as error:
@@ -212,7 +214,8 @@ class ChatStore:
                 raise ChatStoreError("A branch must contain at least one alternative tail.")
             for tail in tails:
                 if not isinstance(tail, list) or any(not isinstance(item, dict)
-                        or item.get("role") not in _ROLES or not isinstance(item.get("content"), str) for item in tail):
+                        or not isinstance(item.get("role"), str) or item["role"] not in _ROLES
+                        or not isinstance(item.get("content"), str) for item in tail):
                     raise ChatStoreError("Branch tails must contain valid chat messages.")
                 for message in tail:
                     try:
@@ -253,7 +256,7 @@ class ChatStore:
             _timestamp(summary["created_at"], "summary created_at")
         return record
 
-    def list_chats(self, query="", mode=None):
+    def list_chats(self, query="", mode=None, project_id=None):
         """Return matching records, most recently updated first.
 
         Search covers the title, model, project path, draft, and message text.
@@ -263,6 +266,8 @@ class ChatStore:
             raise ChatStoreError("The chat search query must be text.")
         if mode is not None and (not isinstance(mode, str) or mode not in _MODES):
             raise ChatStoreError("Chat mode must be 'chat' or 'dev'.")
+        if project_id is not None and (not isinstance(project_id, str) or not _CHAT_ID.fullmatch(project_id)):
+            raise ChatStoreError("Project filter must be a canonical UUID or null.")
         self.errors.clear()
         try:
             paths = sorted(path for path in self.directory.iterdir()
@@ -282,6 +287,8 @@ class ChatStore:
                     self._note_error(f"Skipped {path.name}: {error}")
                 continue
             if mode is not None and chat["mode"] != mode:
+                continue
+            if project_id is not None and chat.get("project_id") != project_id:
                 continue
             if query:
                 searchable = [chat["title"], chat["model"], chat["project_path"], chat["draft"]]
@@ -344,7 +351,16 @@ class ChatStore:
                     "AI Assist chat backup\n\n"
                     "chats/ holds the saved chats. To restore, copy those .json files into the AI Assist\n"
                     "chats folder (on Windows %LOCALAPPDATA%\\AI Assist\\chats, elsewhere ~/.aiassist/chats)\n"
-                    "while AI Assist is closed.\n\nreadable/ holds the same conversations as Markdown.\n"))
+                    "while AI Assist is closed. Restore projects/ into the projects subfolder of the chats folder,\n"
+                    "and each chat's attachments/ into its UUID subfolder.\n\nreadable/ holds the same conversations as Markdown.\n"))
+                project_directory = self.directory / "projects"
+                if project_directory.exists():
+                    from project_store import ProjectStore
+                    project_store = ProjectStore(project_directory)
+                    for project in project_store.list():
+                        archive.writestr(f"projects/{project['id']}.json", json.dumps(project, ensure_ascii=False, indent=2))
+                    for error in project_store.errors:
+                        self._note_error(error)
                 for chat in chats:
                     if chat["id"] in unsaved:
                         archive.writestr(f"chats/{chat['id']}.json", json.dumps(chat, ensure_ascii=False, indent=2))

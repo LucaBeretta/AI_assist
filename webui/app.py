@@ -20,6 +20,7 @@ from webui.bridge import Bridge
 from webui.developer import DeveloperTasks
 import developer_tools
 from task_checkpoints import CheckpointStore
+from project_store import ProjectStore, inherited_environment
 from webui import settings
 
 
@@ -87,6 +88,7 @@ class Api:
         self._unloading = set()
         self._developer = DeveloperTasks(bridge, self._save_agent_result)
         self._checkpoints = CheckpointStore(self._store.directory / "checkpoints")
+        self._projects = ProjectStore(self._store.directory / "projects")
 
     def _load_chat(self, chat_id):
         if chat_id in self._incognito_ids:
@@ -323,9 +325,10 @@ class Api:
         return self._developer.stop(task_id)
 
     @_json_method
-    def list_chats(self):
+    def list_chats(self, project_id=None):
         with self._lock:
-            chats = self._store.list_chats() + deepcopy(list(self._incognito.values()))
+            chats = self._store.list_chats(project_id=project_id) + deepcopy([
+                record for record in self._incognito.values() if project_id is None or record.get("project_id") == project_id])
             return {"ok": True, "chats": sorted(chats, key=lambda item: item["updated_at"], reverse=True)}
 
     @_json_method
@@ -383,15 +386,25 @@ class Api:
             return {"ok": True, "chat": record, "messages": record["messages"], "versions": chat_versions.versions(record)}
 
     @_json_method
-    def new_chat(self, incognito=False):
+    def new_chat(self, incognito=False, project_id=None):
         if type(incognito) is not bool:
             raise ValueError("Incognito must be true or false.")
         with self._lock:
             if self._closed:
                 raise RuntimeError("The web UI is closing.")
             record = self._store.new_record()
+            if project_id is not None:
+                project = self._projects.load(project_id)
+                record["project_id"] = project_id
+                record["environment"] = inherited_environment(project)
+                record["model"] = record["environment"]["model"]
+                record["backend"] = record["environment"]["backend"]
+                record["context_length"] = record["environment"]["context_length"]
+                record["project_path"] = project["folder"] or ""
+                record["project_files"] = deepcopy(record["environment"]["pinned_paths"])
             if incognito:
                 record["incognito"] = True
+                record["environment"]["memory_ids"] = []
                 self._incognito_ids.add(record["id"])
             return {"ok": True, "chat": self._save_chat(record)}
 
@@ -405,11 +418,51 @@ class Api:
             record["environment"] = deepcopy(source["environment"])
             record["backend"] = source.get("backend", record["environment"]["backend"])
             record["context_length"] = source["context_length"]
+            if source.get("project_id") is not None:
+                record["project_id"] = source["project_id"]
+                record["project_path"] = source["project_path"]
             if source.get("incognito"):
                 record["incognito"] = True
                 record["environment"]["memory_ids"] = []
                 self._incognito_ids.add(record["id"])
             return {"ok": True, "chat": self._save_chat(record)}
+
+    @_json_method
+    def list_projects(self):
+        with self._lock:
+            return {"ok": True, "projects": self._projects.list(), "errors": list(self._projects.errors)}
+
+    @_json_method
+    def open_project(self, project_id):
+        with self._lock:
+            return {"ok": True, "project": self._projects.load(project_id)}
+
+    @_json_method
+    def create_project(self, name, instructions="", folder=None, pinned_paths=None, default_environment=None):
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("The web UI is closing.")
+            project = self._projects.create(name, instructions, folder, pinned_paths, default_environment)
+        self._bridge.emit("project_changed", project_id=project["id"])
+        return {"ok": True, "project": project}
+
+    @_json_method
+    def update_project(self, project_id, changes):
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("The web UI is closing.")
+            project = self._projects.update(project_id, changes)
+        self._bridge.emit("project_changed", project_id=project_id)
+        return {"ok": True, "project": project}
+
+    @_json_method
+    def delete_project(self, project_id):
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("The web UI is closing.")
+            self._projects.delete(project_id)
+        self._bridge.emit("project_deleted", project_id=project_id)
+        return {"ok": True}
 
     def _usage(self, record, loaded_context=None):
         total = record["context_length"] if record["context_length"] is not None else loaded_context
