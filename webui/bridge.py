@@ -33,7 +33,15 @@ class Bridge:
         with self._lock:
             if self._closed.is_set():
                 return False
-            self._events.append(deepcopy({**data, "type": type}))
+            try:
+                event = deepcopy({**data, "type": type})
+                if not isinstance(type, str) or (type == "token" and not isinstance(event.get("text"), str)):
+                    raise ValueError("Events need a text type and tokens need text content.")
+                json.dumps(event, ensure_ascii=False, allow_nan=False)
+            except Exception:
+                log.exception("Discarded an invalid web UI event")
+                return False
+            self._events.append(event)
             return True
 
     def flush(self):
@@ -67,10 +75,12 @@ class Bridge:
         while not self._closed.wait(self._interval):
             self.flush()
 
-    def close(self):
+    def close(self, timeout=1):
         with self._lock:
             self._closed.set()
             self._events.clear()
             thread = self._thread
         if thread is not None and thread is not threading.current_thread():
-            thread.join()
+            thread.join(timeout)
+            if thread.is_alive():
+                log.warning("Web UI delivery is still finishing an in-flight evaluation")
