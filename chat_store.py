@@ -183,6 +183,8 @@ class ChatStore:
                     or message["role"] not in _ROLES
                     or not isinstance(message.get("content"), str)):
                 raise ChatStoreError("Each chat message needs a user, assistant, or system role and text content.")
+            if "partial" in message and (type(message["partial"]) is not bool or message["role"] != "assistant"):
+                raise ChatStoreError("Only assistant messages can have a boolean partial flag.")
         context_length = chat.get("context_length")
         if context_length is not None and (type(context_length) is not int or context_length < 1):
             raise ChatStoreError("Chat context_length must be a positive integer or null.")

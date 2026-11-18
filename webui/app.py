@@ -57,11 +57,53 @@ class Api:
         self._streams = {}
         self._unsaved = {}
         self._closed = False
+        self._autosave_interval = 2
 
     @_json_method
     def state(self):
+        with self._lock:
+            active = {item["chat_id"] for item in self._streams.values()}
+            interrupted = [{"chat_id": chat["id"], "title": chat["title"],
+                            "message_index": len(chat["messages"]) - 1}
+                           for chat in self._store.list_chats()
+                           if chat["id"] not in active and chat["messages"]
+                           and chat["messages"][-1].get("partial") is True]
         return {"ok": True, "engine": "Ollama", "host": self._engine.ollama_url(),
-                "models": self._engine.list_ollama_models(), "loaded": self._engine.running_details()}
+                "models": self._engine.list_ollama_models(), "loaded": self._engine.running_details(),
+                "interrupted": interrupted}
+
+    @_json_method
+    def save_draft(self, chat_id, text):
+        if not isinstance(text, str) or len(text) > 1000000:
+            raise ValueError("Draft must be text of at most 1,000,000 characters.")
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("The web UI is closing.")
+            record = self._store.load(chat_id)
+            record["draft"] = text
+            self._store.save(record)
+        return {"ok": True}
+
+    @_json_method
+    def resolve_interrupted(self, chat_id, keep=True):
+        if type(keep) is not bool:
+            raise ValueError("Keep must be true or false.")
+        with self._lock:
+            self._require_idle(chat_id)
+            record = self._store.load(chat_id)
+            if not record["messages"] or not record["messages"][-1].get("partial"):
+                raise ValueError("This chat has no interrupted reply.")
+            if keep:
+                record["messages"][-1].pop("partial")
+            else:
+                record["messages"].pop()
+            return {"ok": True, "chat": self._store.save(record)}
+
+    def _require_idle(self, chat_id):
+        if self._closed:
+            raise RuntimeError("The web UI is closing.")
+        if any(item["chat_id"] == chat_id for item in self._streams.values()):
+            raise ValueError("This chat already has an active stream.")
 
     @_json_method
     def list_chats(self):
@@ -131,6 +173,8 @@ class Api:
                 raise ValueError("This web UI currently supports compaction through Ollama only.")
             if not record["model"]:
                 raise ValueError("Choose a model before compacting this chat.")
+            if record["messages"] and record["messages"][-1].get("partial"):
+                raise ValueError("Keep or discard the interrupted reply before compacting.")
             upto = len(record["messages"]) - 4
             previous = record.get("summary")
             start = previous["upto"] if previous else 0
@@ -164,6 +208,8 @@ class Api:
             record = self._store.load(chat_id)
             if any(item["chat_id"] == chat_id for item in self._streams.values()):
                 raise ValueError("This chat already has an active stream.")
+            if record["messages"] and record["messages"][-1].get("partial"):
+                raise ValueError("Keep or discard the interrupted reply before sending.")
             record["model"], record["context_length"] = model, context
             record["backend"] = "Ollama"
             record["environment"].update(backend="Ollama", model=model, context_length=context)
@@ -175,17 +221,57 @@ class Api:
     def _launch(self, record, **operation):
         stream_id = str(uuid.uuid4())
         stream = {"chat_id": record["id"], "cancel": threading.Event(), "finished": threading.Event(),
-                  "parts": [], "metrics": {}, "data_lock": threading.Lock()}
+                  "parts": [], "metrics": {}, "data_lock": threading.Lock(), "record": record,
+                  "partial_message": None}
         stream.update(operation)
         self._streams[stream_id] = stream
         thread = threading.Thread(target=self._run_stream, args=(stream_id, stream, record),
                                   name="webui-chat-" + stream_id[:8], daemon=True)
         try:
             thread.start()
+            if stream["kind"] == "chat":
+                threading.Thread(target=self._autosave, args=(stream_id, stream), daemon=True,
+                                 name="webui-recovery-" + stream_id[:8]).start()
         except Exception:
             del self._streams[stream_id]
             raise
         return {"ok": True, "stream_id": stream_id}
+
+    def _stream_record(self, stream):
+        current = self._store.load(stream["chat_id"])
+        expected = stream["record"]
+        messages = current["messages"]
+        if stream["partial_message"] is not None:
+            if not messages or messages[-1] != stream["partial_message"]:
+                raise RuntimeError("This chat changed while the reply was running; the reply was not saved.")
+            current["messages"] = messages[:-1]
+        fields = ("messages", "summary", "environment", "model", "backend", "context_length")
+        if any(current.get(key) != expected.get(key) for key in fields):
+            raise RuntimeError("This chat changed while the reply was running; the reply was not saved.")
+        return current
+
+    def _persist_partial(self, stream_id, stream):
+        with self._lock:
+            if stream_id not in self._streams or stream["kind"] != "chat":
+                return
+            with stream["data_lock"]:
+                text = "".join(stream["parts"])
+            if not text:
+                return
+            message = {"role": "assistant", "content": text, "partial": True}
+            if message == stream["partial_message"]:
+                return
+            current = self._stream_record(stream)
+            current["messages"].append(message)
+            self._store.save(current)
+            stream["partial_message"] = message
+
+    def _autosave(self, stream_id, stream):
+        while not stream["finished"].wait(self._autosave_interval):
+            try:
+                self._persist_partial(stream_id, stream)
+            except Exception:
+                log.exception("Could not save interrupted reply for %s", stream["chat_id"])
 
     @_json_method
     def stop(self, stream_id):
@@ -249,10 +335,7 @@ class Api:
                     partial = "".join(stream["parts"])
                     kind = "stopped" if stopped else ("error" if error else "done")
                     content = partial if kind != "done" else answer
-                current = self._store.load(stream["chat_id"])
-                fields = ("messages", "summary", "environment", "model", "backend", "context_length")
-                if any(current.get(key) != record.get(key) for key in fields):
-                    raise RuntimeError("This chat changed while the reply was running; the reply was not saved.")
+                current = self._stream_record(stream)
                 if compact:
                     if kind == "done":
                         if not isinstance(answer, str) or not answer.strip() or len(answer) > stream["summary_chars"]:
@@ -307,6 +390,11 @@ class Api:
             for stream in streams:
                 with stream["data_lock"]:
                     stream["cancel"].set()
+            for stream_id, stream in list(self._streams.items()):
+                try:
+                    self._persist_partial(stream_id, stream)
+                except Exception:
+                    log.exception("Could not save reply while closing")
         deadline = time.monotonic() + timeout
         for stream in streams:
             stream["finished"].wait(max(0, deadline - time.monotonic()))
