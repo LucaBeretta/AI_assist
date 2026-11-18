@@ -40,7 +40,9 @@ window.app = (() => {
     const nodes = [];
     const messageNode = message => {
       const section = document.createElement("section");
+      section.className = "msg msg-" + message.role;
       const label = document.createElement("strong");
+      label.className = "msg-role";
       label.textContent = message.role;
       const text = document.createElement(message.role === "assistant" ? "div" : "pre");
       if (message.role === "assistant") text.append(window.renderMarkdown(message.content));
@@ -51,10 +53,12 @@ window.app = (() => {
     const messages = record?.messages || [];
     if (record?.summary) {
       const archive = document.createElement("details");
+      archive.className = "compacted";
       const label = document.createElement("summary");
       label.textContent = `Conversation compacted — show ${record.summary.upto} original messages`;
       archive.append(label, ...messages.slice(0, record.summary.upto).map(messageNode));
       const summary = document.createElement("pre");
+      summary.className = "summary-text";
       summary.textContent = record.summary.text;
       nodes.push(archive, summary);
     }
@@ -65,8 +69,10 @@ window.app = (() => {
     }
     for (const stream of replies.values()) {
       const text = document.createElement("div");
+      text.className = "msg msg-stream" + (stream.active ? " is-active" : "");
       if (stream.saved === false) {
         const warning = document.createElement("p");
+        warning.className = "notice";
         warning.textContent = "Not saved — copy this response before closing.";
         text.append(warning);
       }
@@ -82,7 +88,15 @@ window.app = (() => {
       const item = document.createElement("li");
       const button = document.createElement("button");
       button.type = "button";
-      button.textContent = record.title + (activeStream(record.id) ? " (working)" : "");
+      button.className = "chat-item";
+      button.setAttribute("aria-current", record.id === selected ? "true" : "false");
+      button.textContent = record.title;
+      if (activeStream(record.id)) {
+        const working = document.createElement("span");
+        working.className = "working";
+        working.textContent = "working";
+        button.append(working);
+      }
       button.addEventListener("click", () => openChat(record.id).catch(showError));
       item.append(button);
       return item;
@@ -108,7 +122,7 @@ window.app = (() => {
       selected = null;
       throw error;
     } finally {
-      if (version === selectionVersion) { openingChat = false; renderMessages(); refreshUsage(id); }
+      if (version === selectionVersion) { openingChat = false; renderMessages(); renderChats(); refreshUsage(id); }
     }
   }
 
@@ -123,10 +137,21 @@ window.app = (() => {
   async function refreshUsage(id) {
     try {
       const result = await call("context_usage", id);
-      if (selected === id) element("context-usage").textContent = `Context: ${result.used} / ${result.total ?? "unknown"} (estimated, ${result.level})`;
+      if (selected !== id) return;
+      const total = result.total || 0;
+      element("context-usage").textContent = `${tokens(result.used)} / ${total ? tokens(total) : "?"}`;
+      element("context-meter").value = total ? Math.min(1, result.used / total) : 0;
+      element("context-menu").className = "ctx level-" + (result.level || "ok");
     } catch (error) {
-      if (selected === id) element("context-usage").textContent = "Context usage: unavailable";
+      if (selected === id) element("context-usage").textContent = "–";
     }
+  }
+
+  function tokens(n) {
+    if (!Number.isFinite(n) || n < 1000) return String(n ?? "?");
+    if (n % 1024 === 0) return n / 1024 + "k";  // model contexts are powers of two: 16384 → 16k
+    const value = (Math.round(n / 100) / 10).toFixed(1);
+    return (value.endsWith(".0") ? value.slice(0, -2) : value) + "k";
   }
 
   async function refreshChats() {
@@ -210,9 +235,48 @@ window.app = (() => {
     renderChats();
   }
 
+  // Theme: Night by default, remembered per window (the settings file takes over once the Api exposes it).
+  const root = document.documentElement;
+  function setTheme(name) {
+    if (!root) return;
+    root.setAttribute("data-theme", name);
+    try { window.localStorage?.setItem("aiassist-theme", name); } catch (error) { /* storage unavailable */ }
+  }
+  function toggleTheme() { setTheme(root?.getAttribute?.("data-theme") === "day" ? "night" : "day"); }
+  try { const saved = window.localStorage?.getItem("aiassist-theme"); if (saved === "day" || saved === "night") setTheme(saved); }
+  catch (error) { /* storage unavailable */ }
+  element("theme").addEventListener("click", toggleTheme);
+
+  function closeContextMenu() { element("context-menu").open = false; }
+  function fitPrompt() {
+    const prompt = element("prompt");
+    if (!prompt.style) return;
+    prompt.style.height = "auto";
+    prompt.style.height = prompt.scrollHeight + "px";
+  }
+  element("prompt").addEventListener("input", fitPrompt);
+  element("prompt").addEventListener("keydown", event => {
+    if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+      event.preventDefault();
+      if (!element("send").disabled) send(event);
+    }
+  });
+  if (document.addEventListener) {
+    document.addEventListener("keydown", event => {
+      const ctrl = event.ctrlKey || event.metaKey;
+      if (ctrl && event.shiftKey && event.key.toLowerCase() === "l") { event.preventDefault(); toggleTheme(); }
+      else if (ctrl && !event.shiftKey && event.key.toLowerCase() === "n") { event.preventDefault(); newChat().catch(showError); }
+      else if (event.key === "Escape") {
+        if (element("context-menu").open) closeContextMenu();
+        else if (!element("stop").disabled) element("stop").click();
+      }
+    });
+  }
+
   element("composer").addEventListener("submit", send);
   element("new-chat").addEventListener("click", () => newChat().catch(showError));
   element("same-environment").addEventListener("click", async () => {
+    closeContextMenu();
     try {
       const result = await call("new_chat_same_environment", selected);
       chats.set(result.chat.id, result.chat);
@@ -223,6 +287,7 @@ window.app = (() => {
   element("compact").addEventListener("click", async () => {
     const chatId = selected;
     if (!chatId || openingChat || submitting || activeStream(chatId)) return;
+    closeContextMenu();
     submitting = true; controls();
     try {
       const result = await call("compact", chatId);
