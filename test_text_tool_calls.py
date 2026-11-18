@@ -19,6 +19,22 @@ def reply(content):
 
 
 class TextToolCallParsingTests(unittest.TestCase):
+    def test_request_describes_the_command_shell_on_each_platform(self):
+        for os_name, platform, expected in (("nt", "win32", "PowerShell 5.1"),
+                                            ("posix", "darwin", "OS: darwin"),
+                                            ("posix", "linux", "OS: linux")):
+            with self.subTest(platform=platform), patch("coding_agent.os.name", os_name), \
+                    patch("coding_agent.sys.platform", platform):
+                messages, _ = coding_agent._request_messages([{"role": "user", "content": "Run tests"}], 4096)
+                prompt = messages[0]["content"]
+                self.assertIn(expected, prompt)
+                self.assertIn("script files", prompt)
+                if os_name == "nt":
+                    self.assertIn("no &&", prompt)
+                    self.assertIn("backslash quote", prompt)
+                else:
+                    self.assertIn("/bin/sh", prompt)
+
     def test_qwen_xml_call_is_recovered_with_schema_types(self):
         calls, remaining, malformed = text_tool_calls(XML_READ)
         self.assertFalse(malformed)
