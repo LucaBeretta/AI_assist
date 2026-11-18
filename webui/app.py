@@ -13,7 +13,9 @@ import uuid
 
 from chat_store import ChatStore, _utc_now
 import chat_versions
+from model_advisor import detect_hardware
 from webui.bridge import Bridge
+from webui import settings
 
 
 log = logging.getLogger(__name__)
@@ -50,7 +52,7 @@ def _json_method(method):
 
 
 class Api:
-    def __init__(self, bridge, store=None, engine=None):
+    def __init__(self, bridge, store=None, engine=None, hardware=None):
         self._bridge = bridge
         self._store = store if store is not None else ChatStore()
         self._engine = engine if engine is not None else importlib.import_module("AIassist")
@@ -61,6 +63,9 @@ class Api:
         self._autosave_interval = 2
         self._incognito = {}
         self._incognito_ids = set()
+        self._hardware = hardware
+        self._settings = settings.load(self._store.directory)
+        self._unloading = set()
 
     def _load_chat(self, chat_id):
         if chat_id in self._incognito_ids:
@@ -89,9 +94,57 @@ class Api:
                            for chat in self._store.list_chats()
                            if chat["id"] not in active and chat["messages"]
                            and chat["messages"][-1].get("partial") is True]
+        models = self._engine.list_ollama_models()
+        loaded = self._engine.running_details()
+        self._warn_vram(loaded)
         return {"ok": True, "engine": "Ollama", "host": self._engine.ollama_url(),
-                "models": self._engine.list_ollama_models(), "loaded": self._engine.running_details(),
+                "models": models, "loaded": loaded, "settings": deepcopy(self._settings),
                 "interrupted": interrupted}
+
+    def _warn_vram(self, loaded):
+        if len(loaded) < 2:
+            return
+        try:
+            hardware = self._hardware if self._hardware is not None else detect_hardware(self._engine.ollama_url())
+            if not hardware.get("server_local", True):
+                return
+            capacities = [gpu.get("total_bytes") for gpu in hardware.get("gpus", [])
+                          if gpu.get("supported") is not False]
+            capacities = [value for value in capacities if type(value) is int and value > 0]
+            sizes = [details.get("size") for details in loaded.values()]
+            if capacities and all(type(size) is int and size >= 0 for size in sizes) and sum(sizes) > sum(capacities):
+                self._bridge.emit("vram_warning", models=sorted(loaded), required_bytes=sum(sizes),
+                                  gpu_memory_bytes=sum(capacities))
+        except Exception:
+            log.exception("Could not check loaded model memory")
+
+    @_json_method
+    def unload_model(self, name):
+        if not isinstance(name, str) or not name.strip() or len(name) > 300:
+            raise ValueError("Choose a model to unload.")
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("The web UI is closing.")
+            if any(item["record"]["model"] == name for item in self._streams.values()):
+                raise ValueError("This model has an active stream; stop it before unloading.")
+            if name in self._unloading:
+                raise ValueError("This model is already being unloaded.")
+            self._unloading.add(name)
+        try:
+            self._engine.set_model_running(name, start=False)
+        finally:
+            with self._lock:
+                self._unloading.discard(name)
+        self._bridge.emit("model_unloaded", model=name)
+        return {"ok": True, "model": name}
+
+    @_json_method
+    def set_idle_unload_minutes(self, minutes):
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("The web UI is closing.")
+            self._settings = settings.save(self._store.directory, {**self._settings, "idle_unload_minutes": minutes})
+            return {"ok": True, "settings": deepcopy(self._settings)}
 
     @_json_method
     def save_draft(self, chat_id, text):
@@ -142,6 +195,8 @@ class Api:
     def _version_record(self, chat_id):
         self._require_idle(chat_id)
         record = self._load_chat(chat_id)
+        if record["model"] in self._unloading:
+            raise ValueError("This model is being unloaded; try again when it finishes.")
         if record["messages"] and record["messages"][-1].get("partial"):
             raise ValueError("Keep or discard the interrupted reply before changing versions.")
         return record
@@ -249,6 +304,8 @@ class Api:
                 raise ValueError("This web UI currently supports compaction through Ollama only.")
             if not record["model"]:
                 raise ValueError("Choose a model before compacting this chat.")
+            if record["model"] in self._unloading:
+                raise ValueError("This model is being unloaded; try again when it finishes.")
             if record["messages"] and record["messages"][-1].get("partial"):
                 raise ValueError("Keep or discard the interrupted reply before compacting.")
             upto = len(record["messages"]) - 4
@@ -281,6 +338,8 @@ class Api:
         with self._lock:
             if self._closed:
                 raise RuntimeError("The web UI is closing.")
+            if model in self._unloading:
+                raise ValueError("This model is being unloaded; try again when it finishes.")
             record = self._load_chat(chat_id)
             if any(item["chat_id"] == chat_id for item in self._streams.values()):
                 raise ValueError("This chat already has an active stream.")
@@ -300,6 +359,7 @@ class Api:
                   "parts": [], "metrics": {}, "data_lock": threading.Lock(), "record": record,
                   "partial_message": None}
         stream.update(operation)
+        stream["keep_alive"] = self._settings["idle_unload_minutes"]
         self._streams[stream_id] = stream
         thread = threading.Thread(target=self._run_stream, args=(stream_id, stream, record),
                                   name="webui-chat-" + stream_id[:8], daemon=True)
@@ -387,9 +447,10 @@ class Api:
             try:
                 if stream["cancel"].is_set():
                     raise engine.StreamStopped()
+                options = {"keep_alive": f"{stream['keep_alive']}m"} if stream["keep_alive"] else {}
                 return engine.request_ollama(deepcopy(stream["messages"]), model=record["model"],
                                              context_length=stream["context"],
-                                             on_chunk=chunk, on_metrics=metrics)
+                                             on_chunk=chunk, on_metrics=metrics, **options)
             except engine.StreamStopped:
                 raise
             except Exception as failure:

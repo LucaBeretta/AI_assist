@@ -134,11 +134,11 @@ def set_model_running(model, start=True, context_length=None):
     ollama_api("/api/generate", payload, timeout=300)
 
 
-def request_ollama(messages, model=None, context_length=None, on_chunk=None, on_metrics=None):
+def request_ollama(messages, model=None, context_length=None, on_chunk=None, on_metrics=None, keep_alive=-1):
     """Send the conversation to the local Ollama chat API."""
     host = ollama_url()
     model = model or os.environ.get("OLLAMA_MODEL", "qwen3:30b")
-    payload = {"model": model, "messages": messages, "stream": True, "keep_alive": -1}
+    payload = {"model": model, "messages": messages, "stream": True, "keep_alive": keep_alive}
     if context_length is not None:
         payload["options"] = {"num_ctx": context_length}
     request = urllib.request.Request(
