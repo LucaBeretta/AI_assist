@@ -50,7 +50,8 @@ def decode(name, encoded, limit):
             raise ValueError("The image content does not match its filename format.")
         result.update(kind="image", data_base64=base64.b64encode(data).decode("ascii"))
     elif suffix == ".pdf":
-        raise ValueError("PDF attachments are unavailable: this project has no PDF reader dependency.")
+        from pdf_text import extract_pdf
+        result["text"] = developer_tools._decode_text(extract_pdf(data, limit).encode("utf-8"))
     elif suffix in developer_tools._BINARY_SUFFIXES:
         raise ValueError("This binary attachment format is not supported.")
     else:

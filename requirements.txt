@@ -1,2 +1,4 @@
 # Optional web UI; the Tk launcher remains usable without this dependency.
 pywebview==6.2.1
+# Local text extraction for PDF attachments; no OCR or network services.
+pypdf==7.1.1
