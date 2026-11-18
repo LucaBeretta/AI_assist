@@ -24,6 +24,29 @@ class ChatStoreError(ValueError):
     """A saved chat is invalid, unreadable, or could not be safely written."""
 
 
+def default_environment(chat):
+    """Derive optional environment fields for records written by older versions."""
+    return {"backend": chat.get("backend", "Ollama"), "model": chat["model"],
+            "context_length": chat.get("context_length"), "instructions": "",
+            "pinned_paths": deepcopy(chat.get("project_files", [])), "memory_ids": []}
+
+
+def _environment(value):
+    fields = {"backend", "model", "context_length", "instructions", "pinned_paths", "memory_ids"}
+    if not isinstance(value, dict) or set(value) != fields:
+        raise ChatStoreError("Chat environment must contain backend, model, context_length, instructions, pinned_paths and memory_ids.")
+    if any(not isinstance(value[key], str) for key in ("backend", "model", "instructions")):
+        raise ChatStoreError("Environment backend, model and instructions must be text.")
+    if value["backend"] not in {"Ollama", "Colibri"}:
+        raise ChatStoreError("Environment backend must be Ollama or Colibri.")
+    context = value["context_length"]
+    if context is not None and (type(context) is not int or context <= 0):
+        raise ChatStoreError("Environment context_length must be a positive integer or null.")
+    for key in ("pinned_paths", "memory_ids"):
+        if not isinstance(value[key], list) or any(not isinstance(item, str) for item in value[key]):
+            raise ChatStoreError(f"Environment {key} must be a list of text values.")
+
+
 def _utc_now():
     return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
@@ -175,6 +198,18 @@ class ChatStore:
             if message["role"] == "assistant":
                 message.setdefault("content", "")
         record.setdefault("context_length", None)
+        record.setdefault("environment", default_environment(record))
+        _environment(record["environment"])
+        record.setdefault("summary", None)
+        summary = record["summary"]
+        if summary is not None:
+            if not isinstance(summary, dict) or set(summary) != {"text", "upto", "created_at"}:
+                raise ChatStoreError("Chat summary must contain text, upto and created_at.")
+            if not isinstance(summary["text"], str) or not summary["text"].strip():
+                raise ChatStoreError("Summary text must be nonempty text.")
+            if type(summary["upto"]) is not int or not 0 <= summary["upto"] <= len(record["messages"]):
+                raise ChatStoreError("Summary upto must be a valid message count.")
+            _timestamp(summary["created_at"], "summary created_at")
         return record
 
     def list_chats(self, query="", mode=None):
@@ -239,6 +274,8 @@ class ChatStore:
             "updated_at": now,
             "_manual_title": title != NEW_CHAT_TITLE,
         }
+        chat["environment"] = default_environment(chat)
+        chat["summary"] = None
         return chat
 
     def export_all(self, destination, unsaved=None, deleted=()):
@@ -277,6 +314,8 @@ class ChatStore:
                     used_names.add(name.casefold())
                     lines = [f"# {chat['title']}", "",
                              f"Model: {chat['model'] or 'none'} ({chat.get('backend', 'Ollama')})  |  Updated: {chat['updated_at']}", ""]
+                    if chat.get("summary"):
+                        lines += ["## Conversation summary", "", chat["summary"]["text"], ""]
                     for message in chat["messages"]:
                         speaker = {"user": "You", "assistant": "AI Assist"}.get(message["role"], message["role"].title())
                         lines += [f"## {speaker}", "", message["content"], ""]
