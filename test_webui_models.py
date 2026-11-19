@@ -23,6 +23,17 @@ class ModelApiTests(unittest.TestCase):
         self.assertEqual(result["recommendations"], [{"name": "recommended"}])
         recommend.assert_called_once_with(hardware, [{"name": "family"}])
 
+    def test_blocked_catalog_still_returns_hardware(self):
+        import network_gate
+        hardware = {"server_local": True, "gpus": []}
+        self.api._hardware = hardware
+        blocked = network_gate.InternetBlocked("Internet access was not approved.")
+        with patch("model_library.fetch_popular_models", side_effect=blocked):
+            result = self.api.recommend_models()
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["hardware"], hardware)
+        self.assertIn("not approved", result["catalog_error"])
+
     def test_pull_progress_success_stop_and_failure(self):
         def pull(host, name, emit, cancel):
             emit({"status": "downloading", "completed": 4, "total": 10})

@@ -92,7 +92,7 @@ window.modelsui = (() => {
     const list = element("models-recommended");
     if (!advice) { list.replaceChildren(node("p", "dev-hint", t("Checking which models fit this computer…"))); return; }
     const cards = advice.recommendations || [];
-    if (!cards.length) { list.replaceChildren(node("p", "dev-hint", t("No recommendations: the model catalog could not be read (offline?) or nothing fits."))); return; }
+    if (!cards.length) { list.replaceChildren(node("p", "dev-hint", advice.catalog_error ? advice.catalog_error : t("No recommendations: the model catalog could not be read (offline?) or nothing fits."))); return; }
     list.replaceChildren(...cards.map(card => {
       const item = node("article", "model-card");
       const head = node("div", "model-card-head");

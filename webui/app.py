@@ -335,8 +335,15 @@ class Api(SharingApi, PrivacyApi, ParityApi):
     @_json_method
     def recommend_models(self):
         hardware = self._hardware if self._hardware is not None else detect_hardware(self._engine.ollama_url())
-        catalog = model_library.fetch_popular_models() if hardware.get("server_local", True) else []
-        return {"ok": True, "hardware": hardware, "recommendations": model_advisor.recommend_models(hardware, catalog)}
+        catalog, catalog_error = [], None
+        if hardware.get("server_local", True):
+            try:
+                catalog = model_library.fetch_popular_models()
+            except (OSError, ValueError) as error:
+                # Blocked by the internet gate or offline: this computer's hardware is still worth showing.
+                catalog_error = str(error)
+        return {"ok": True, "hardware": hardware, "recommendations": model_advisor.recommend_models(hardware, catalog),
+                "catalog_error": catalog_error}
 
     @staticmethod
     def _model_name(name):
