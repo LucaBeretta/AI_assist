@@ -12,6 +12,7 @@ from tkinter import END, filedialog, messagebox, scrolledtext, simpledialog, ttk
 from app_core import approvals, backups, documents
 from app_core.checkpoints import CheckpointError, CheckpointStore
 from backup_ui import BackupWindow
+from welcome_ui import WelcomeGuide, ready
 from app_core import conversation as conversation_rules
 from app_core import settings as app_settings
 from app_core.settings import load_file_limit  # noqa: F401  (long-standing name)
@@ -158,6 +159,8 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         self.backup_window = None
         self.answer_footer = ""
         self.documents_indexing = False
+        self.welcome = None
+        self.last_lifecycle = None
         self.initialize_backend()
         self.initialize_hybrid()
         self.agent_settings = self.chat_store.directory / "agent.settings" if self.chat_store else None
@@ -340,6 +343,9 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         self.settings_menu.add_command(label="Hourly status...", command=lambda: self.hourly_status.open())
         self.settings_menu.add_command(label="Connection log...", command=self.open_connection_log)
         self.settings_menu.add_command(label="Firewall lock...", command=self.open_firewall_lock)
+        self.settings_menu.add_separator()
+        self.settings_menu.add_command(label="Get started...", command=self.open_welcome)
+        self.settings_menu.add_command(label="Use the browser version...", command=self.switch_to_browser)
         self.menubar.add_cascade(label="Settings", menu=self.settings_menu)
         self.root.configure(menu=self.menubar)
         self.main_frame = tk.Frame(self.root, bg=c["background"])
@@ -1642,6 +1648,39 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
             self.update_heading()
             if self.storage_error:
                 self.set_status(f"Chat storage needs attention: {self.storage_error}", error=True)
+            self.maybe_show_welcome()
+        elif was_busy and not self.lifecycle_busy and self.welcome is not None:
+            self.welcome.render()
+
+    def switch_to_browser(self):
+        """Close this window and open the browser version, signed in (AIassist.py starts it after closing)."""
+        if self.busy():
+            self.set_status("Wait for the current work to finish, or stop it, before switching.")
+            return
+        if not messagebox.askokcancel(
+                "Use the browser version?",
+                "This window closes and AI Assist opens in your web browser, on this computer only, with the same "
+                "chats. Only one of the two can use your chats at a time.\n\nIn the browser version you can chat, "
+                "use documents and read developer projects. The developer agent and model downloads stay in this "
+                "window for now.\n\nA small window stays open while it runs: close it to stop the browser version.",
+                parent=self.root):
+            return
+        self.switch_to_web = True
+        self.close()
+
+    def maybe_show_welcome(self):
+        """Open Get started after the first model check when something is missing (once per start)."""
+        if (self.closing or self.backend != "Ollama" or ready(self.last_lifecycle, self.backend)
+                or not WelcomeGuide.wanted(self)):
+            return
+        self.open_welcome()
+
+    def open_welcome(self):
+        if self.welcome is not None and self.welcome.window.winfo_exists():
+            self.welcome.window.lift()
+            self.welcome.render()
+            return
+        self.welcome = WelcomeGuide(self)
 
     def send_or_stop(self):
         if self.is_waiting:
@@ -1909,8 +1948,9 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
             if job:
                 self.root.after_cancel(job)
         self.draft_job = self.search_job = self.backup_job = None
-        if self.backup_window is not None and self.backup_window.window.winfo_exists():
-            self.backup_window.window.destroy()
+        for window in (self.backup_window, self.welcome):
+            if window is not None and window.window.winfo_exists():
+                window.window.destroy()
         self.finish_close()
 
     def finish_close(self):
