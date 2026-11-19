@@ -123,9 +123,9 @@ class AvailabilityTransitions:
 
     def update(self, peer_id, available):
         online, streak = self._states.get(peer_id, (False, 0))
-        streak = (max(0, streak) + 1 if available and online
-                  else min(0, streak) - 1 if not available and not online
-                  else 1 if available else -1)
+        # Count consecutive successes/failures independent of current status.
+        streak = (streak + 1 if streak > 0 else 1) if available else (
+            streak - 1 if streak < 0 else -1)
         if available and not online and streak >= self.successes:
             self._states[peer_id] = (True, 0)
             return "online"
