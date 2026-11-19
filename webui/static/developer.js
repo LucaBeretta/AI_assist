@@ -185,7 +185,7 @@ window.devui = (() => {
         if (event.tool === "run_command") commandResult(event.text);
         break;
       case "changed": ensureActivity().edits++; activityLine("changed", event.text); summarize(); break;
-      case "checkpoint": activityLine("info", event.text); break;
+      case "checkpoint": activityLine("info", event.text); loadCheckpoints(); break;
       case "plan_approval": planCard(event); status("Waiting for your plan approval"); break;
       case "approval": actionCard(event); status("Waiting for your review"); break;
       case "plan_approved": activityLine("done", "Plan approved"); break;

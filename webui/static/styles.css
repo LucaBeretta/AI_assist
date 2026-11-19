@@ -152,6 +152,7 @@ code, kbd, pre, .mono { font-family: var(--mono); }
 .btn:hover:not(:disabled) { background: var(--raised-2); }
 .btn.ghost { border-color: transparent; background: transparent; color: var(--body-2); }
 .btn.primary { border-color: transparent; background: var(--accent); color: var(--on-accent); font-weight: 500; }
+.btn.primary:hover:not(:disabled) { background: var(--link); color: var(--on-accent); }
 
 /* ---------- header ---------- */
 .header { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 52px; padding: 0 20px; }
