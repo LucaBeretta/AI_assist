@@ -12,6 +12,7 @@
   <script defer src="developer.js"></script>
   <script defer src="models.js"></script>
   <script defer src="welcome.js"></script>
+  <script defer src="premium.js"></script>
 </head>
 <body>
 <div class="app">
@@ -350,6 +351,17 @@
   </form>
 </dialog>
 <div id="popup-menu" class="popup-menu" role="menu" hidden></div>
+<dialog id="shortcuts-dialog" class="dialog" aria-labelledby="shortcuts-title">
+  <div class="dialog-head"><h2 id="shortcuts-title">Keyboard shortcuts</h2><button id="shortcuts-close" class="icon-btn" type="button" aria-label="Close">×</button></div>
+  <dl class="shortcuts-list">
+    <dt><kbd>Ctrl N</kbd></dt><dd>New chat</dd><dt><kbd>Ctrl Shift N</kbd></dt><dd>Incognito chat</dd>
+    <dt><kbd>Ctrl K</kbd></dt><dd>Search chats and commands</dd><dt><kbd>Ctrl ,</kbd></dt><dd>Settings</dd>
+    <dt><kbd>Ctrl Shift L</kbd></dt><dd>Switch theme</dd><dt><kbd>Esc</kbd></dt><dd>Stop generating</dd>
+    <dt><kbd>↑</kbd></dt><dd>Edit the last message when the composer is empty</dd>
+    <dt><kbd>Shift Enter</kbd></dt><dd>New line</dd><dt><kbd>Ctrl + / − / 0</kbd></dt><dd>Zoom in / out / reset</dd>
+    <dt><kbd>Ctrl /</kbd></dt><dd>Keyboard shortcuts</dd>
+  </dl>
+</dialog>
 
 <dialog id="rename-dialog" class="dialog" aria-labelledby="rename-title">
   <form id="rename-form">

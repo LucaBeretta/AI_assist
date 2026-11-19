@@ -63,6 +63,40 @@ vm.runInNewContext(fs.readFileSync(process.argv[1], 'utf8'), {document, window, 
 
 class StaticTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_thinking_keyboard_groups_and_saved_zoom(self):
+        self.run_scenario(r'''
+        document.documentElement={style:{}};
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'premium.js'),'utf8'), {document,window,Map,Set,Error,String,Number,Boolean,Array,Date});
+        const p=window.premiumui;
+        assert.equal(p.splitThinking('<think>reason</think>Answer').answer,'Answer');
+        assert.equal(p.splitThinking('<think>partial').pending,true);
+        assert.equal(p.splitThinking('```html\n<think>literal</think>\n```').thinking,'');
+        const rendered=p.renderReply('<think>reason</think>Answer',2.2);
+        assert.equal(rendered.children[0].tagName,'details');
+        assert.equal(rendered.children[0].children[0].textContent,'Thought for 2 s');
+        const now=new Date('2026-11-19T12:00:00');
+        assert.equal(p.dateGroup('2026-11-19T01:00:00',now),'Today');
+        assert.equal(p.dateGroup('2026-11-18T12:00:00',now),'Yesterday');
+        assert.equal(p.dateGroup('2026-11-15T12:00:00',now),'Last 7 days');
+        assert.equal(p.dateGroup('2026-11-01T12:00:00',now),'Older');
+        window.pywebview.api.set_web_preferences=async value=>{calls.push(['zoom',value.zoom]);return {ok:true};};
+        p.onState({settings:{zoom:1.2}});
+        p.key({ctrlKey:true,key:'+',preventDefault(){}});
+        assert.equal(document.documentElement.style.zoom,'1.3');
+        assert.deepEqual(calls.at(-1),['zoom',1.3]);
+        p.key({ctrlKey:true,key:'0',preventDefault(){}});
+        assert.equal(document.documentElement.style.zoom,'1');
+        p.key({ctrlKey:true,key:'/',preventDefault(){}});
+        assert.equal(elements.get('shortcuts-dialog').open,true);
+        saved.messages=[{role:'user',content:'Edit this'},{role:'assistant',content:'answer'}];
+        await window.listeners.pywebviewready();
+        elements.get('prompt').value='';
+        elements.get('prompt').listeners.keydown({key:'ArrowUp',preventDefault(){}});
+        assert.equal(elements.get('prompt').value,'Edit this');
+        assert.equal(elements.get('edit-hint').hidden,false);
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
     def test_welcome_handles_progress_fast_completion_open_and_skip(self):
         self.run_scenario(r'''
         vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'welcome.js'),'utf8'), {document,window,Map,Set,Error,String,Number,Boolean,Array});

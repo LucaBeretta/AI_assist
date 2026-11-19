@@ -64,7 +64,7 @@ window.app = (() => {
       label.className = "msg-role";
       label.textContent = message.role;
       const text = document.createElement(message.role === "assistant" ? "div" : "pre");
-      if (message.role === "assistant") text.append(window.renderMarkdown(message.content));
+      if (message.role === "assistant") text.append(window.premiumui?.renderReply(message.content, message.thinking_seconds, selected + ":" + index) || window.renderMarkdown(message.content));
       else text.textContent = message.content;
       // Actions sit before the text in the DOM (CSS shows them after) so the text stays the last child.
       section.append(label, messageActions(record, message, index), text);
@@ -96,7 +96,7 @@ window.app = (() => {
         warning.textContent = "Not saved — copy this response before closing.";
         text.append(warning);
       }
-      text.append(window.renderMarkdown(stream.text));
+      text.append(window.premiumui?.renderReply(stream.text, undefined, stream.id) || window.renderMarkdown(stream.text));
       nodes.push(text);
     }
     const container = element("messages");
@@ -340,7 +340,7 @@ window.app = (() => {
       item.append(node);
       return item;
     });
-    element("chats").replaceChildren(...nodes);
+    element("chats").replaceChildren(...(window.premiumui ? window.premiumui.groupNodes([...chats.values()], nodes) : nodes));
   }
 
   const projectsById = new Map();
@@ -529,6 +529,7 @@ window.app = (() => {
     }));
     element("model").value = values.includes(previous) ? previous : values[0] || "";
     window.workspaceui?.onState(result);
+    window.premiumui?.onState(result);
     status(`${result.engine}: ${result.host}. ${result.models.length} models available.`);
     controls();
   }
@@ -740,6 +741,12 @@ window.app = (() => {
   element("prompt").addEventListener("input", () => { fitPrompt(); scheduleDraft(); });
   element("prompt").addEventListener("keydown", event => {
     if (window.workspaceui?.promptKey(event)) return;
+    if (event.key === "ArrowUp" && !element("prompt").value && !event.isComposing && !activeStream(selected)) {
+      const messages = chats.get(selected)?.messages || [];
+      for (let index = messages.length - 1; index >= 0; index--) {
+        if (messages[index].role === "user") { event.preventDefault(); startEditing(index); return; }
+      }
+    }
     if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
       event.preventDefault();
       if (!element("send").disabled) send(event);
@@ -764,6 +771,7 @@ window.app = (() => {
 
   if (document.addEventListener) {
     document.addEventListener("keydown", event => {
+      if (window.premiumui?.key(event)) return;
       const ctrl = event.ctrlKey || event.metaKey;
       const key = event.key.toLowerCase();
       if (ctrl && event.shiftKey && key === "l") { event.preventDefault(); toggleTheme(); }

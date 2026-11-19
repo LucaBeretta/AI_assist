@@ -120,7 +120,7 @@ class Api:
 
     @_json_method
     def set_web_preferences(self, values):
-        if not isinstance(values, dict) or not set(values) <= {"first_run_complete"}:
+        if not isinstance(values, dict) or not set(values) <= {"first_run_complete", "zoom"}:
             raise ValueError("Choose supported web preferences.")
         with self._lock:
             if self._closed:
@@ -1191,6 +1191,11 @@ class Api:
                 if compact and sum(map(len, stream["parts"])) + len(text) > stream["summary_chars"]:
                     raise RuntimeError("The model summary exceeded the requested size; no compaction was saved.")
                 stream["parts"].append(text)
+                combined = "".join(stream["parts"])
+                if "<think>" in combined and "thinking_started" not in stream:
+                    stream["thinking_started"] = time.monotonic()
+                if "</think>" in combined and "thinking_started" in stream and "thinking_seconds" not in stream:
+                    stream["thinking_seconds"] = max(0, time.monotonic() - stream["thinking_started"])
                 if text and "loading" in stream:
                     stream["loading"].first_output()
                 if not compact:
@@ -1263,7 +1268,10 @@ class Api:
                                       usage=usage, error=error if kind == "error" else None)
                     return
                 if content:
-                    current["messages"].append({"role": "assistant", "content": content})
+                    message = {"role": "assistant", "content": content}
+                    if "thinking_started" in stream:
+                        message["thinking_seconds"] = stream.get("thinking_seconds", max(0, time.monotonic() - stream["thinking_started"]))
+                    current["messages"].append(message)
                 current["last_response"] = {"status": kind, "kind": "chat", "metrics": stream["metrics"]}
                 current["last_response"]["memories_used"] = deepcopy(stream.get("memories_used", []))
                 if error and kind == "error":

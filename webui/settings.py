@@ -6,7 +6,7 @@ from pathlib import Path
 import tempfile
 
 
-DEFAULTS = {"idle_unload_minutes": 0, "first_run_complete": False}
+DEFAULTS = {"idle_unload_minutes": 0, "first_run_complete": False, "zoom": 1.0}
 
 
 def validate(values):
@@ -15,6 +15,9 @@ def validate(values):
         raise ValueError("Idle unload must be 0 (off) or 1 to 1440 minutes.")
     if type(values.get("first_run_complete", False)) is not bool:
         raise ValueError("First run completion must be true or false.")
+    zoom = values.get("zoom", 1.0)
+    if type(zoom) not in (int, float) or not .7 <= zoom <= 1.5:
+        raise ValueError("UI zoom must be between 0.7 and 1.5.")
     return {**DEFAULTS, **values}
 
 
