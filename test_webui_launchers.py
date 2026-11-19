@@ -17,18 +17,18 @@ class WebLauncherTests(unittest.TestCase):
             self.assertEqual(gui_runtime.main(["--launch", "AIassist.py", "--web"]), 0)
         launch.assert_called_once_with("AIassist.py", arguments=("--web",))
 
-    def test_wrappers_reuse_private_setup_and_default_tk_path(self):
+    def test_single_launchers_use_private_setup_and_the_default_web_entry(self):
         root = Path(__file__).parent
         for extension in ("cmd", "command"):
-            text = (root / f"Start AI Assist (new UI).{extension}").read_text(encoding="utf-8")
-            self.assertIn("AI_ASSIST_WEB_UI", text)
-            self.assertIn(f"Start AI Assist.{extension}", text)
+            self.assertFalse((root / f"Start AI Assist (new UI).{extension}").exists())
         windows = (root / "Start AI Assist.cmd").read_text(encoding="utf-8")
         mac = (root / "Start AI Assist.command").read_text(encoding="utf-8")
-        self.assertIn('if "%AI_ASSIST_WEB_UI%"=="1" set "APP_MODE=--web"', windows)
-        self.assertIn('--launch "%APP_DIR%AIassist.py" %APP_MODE%', windows)
-        self.assertIn('APP_ARGS=()', mac)
-        self.assertIn('AIassist.py "${APP_ARGS[@]}"', mac)
+        self.assertIn('--launch "%APP_DIR%AIassist.py"', windows)
+        self.assertIn('"$1" AIassist.py', mac)
+        for text in (windows, mac):
+            self.assertIn('gui_runtime.py', text)
+            self.assertIn('--probe', text)
+            self.assertNotIn('AI_ASSIST_WEB_UI', text)
 
 
 if __name__ == "__main__":

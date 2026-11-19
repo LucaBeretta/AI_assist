@@ -1,5 +1,5 @@
 #!/bin/bash
-# macOS launcher. Use an installed Python whose Tk can open the window; if none
+# macOS launcher. Use an installed Python with the web UI dependencies; if none
 # works, offer to download a private, checksum-verified Python into ./runtime.
 # The private copy needs no administrator password and changes nothing else.
 cd "$(dirname "$0")" || exit 1
@@ -7,8 +7,6 @@ cd "$(dirname "$0")" || exit 1
 RUNTIME_DIR="$PWD/runtime"
 PRIVATE_PYTHON="$RUNTIME_DIR/python/bin/python3"
 MANIFEST="$PWD/python-runtime.txt"
-APP_ARGS=()
-[ "${AI_ASSIST_WEB_UI:-}" = "1" ] && APP_ARGS+=(--web)
 
 close_prompt() {
     read -r -p "Press Return to close this window."
@@ -18,11 +16,7 @@ close_prompt() {
 try_python() {
     echo "Checking Python runtime: $1"
     if "$1" gui_runtime.py --probe; then
-        if [ "${AI_ASSIST_WEB_UI:-}" = "1" ] && ! "$1" -c 'import webview' >/dev/null 2>&1; then
-            echo "The new UI needs pywebview; checking another Python or the private setup."
-            return 1
-        fi
-        "$1" AIassist.py "${APP_ARGS[@]}" && exit 0
+        "$1" AIassist.py && exit 0
         echo
         echo "AI Assist could not start. The error is shown above."
         close_prompt
@@ -46,7 +40,7 @@ install_private_python() {
         return 1
     fi
 
-    echo "AI Assist can set up its own private Python with a modern Tk (about 25 MB download)."
+    echo "AI Assist can set up its own private Python and its web UI dependencies (about 25 MB download)."
     echo "It is stored only in: $RUNTIME_DIR"
     echo "No administrator password is needed and other Python installations are not changed."
     read -r -p "Download and set it up now? [Y/n] " answer
@@ -77,9 +71,9 @@ install_private_python() {
     rm -rf "$RUNTIME_DIR/python"
     mv "$staging/python" "$RUNTIME_DIR/python" && rm -rf "$staging"
     if ! "$PRIVATE_PYTHON" -m ensurepip --upgrade || ! "$PRIVATE_PYTHON" -m pip install -r "$PWD/requirements.txt"; then
-        echo "Could not install the optional web UI dependencies. Tk remains available."
+        echo "Could not install the required web UI dependencies."
         printf 'Retry with: "%s" -m pip install -r "%s/requirements.txt"\n' "$PRIVATE_PYTHON" "$PWD"
-        return 0
+        return 1
     fi
     echo "Private Python installed."
     echo
@@ -111,13 +105,13 @@ for candidate in "${candidates[@]}"; do
     try_python "$candidate"
 done
 
-echo "No installed Python 3 with a working Tk 8.6+ GUI was found."
+echo "No installed Python 3 with pywebview was found."
 if install_private_python; then
     try_python "$PRIVATE_PYTHON"
 fi
 
 echo "AI Assist could not find or set up a compatible Python."
 echo "Run this launcher again to retry the private setup, or install Python from"
-echo "https://www.python.org/downloads/ (or with Homebrew: brew install python-tk@3.13)."
+echo "https://www.python.org/downloads/ (or with Homebrew: brew install python)."
 close_prompt
 exit 1

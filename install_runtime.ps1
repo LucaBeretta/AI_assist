@@ -33,7 +33,7 @@ if (-not $base -or -not $entry -or $entry[2].Length -ne 64) {
 $file = $entry[1]
 $expected = $entry[2].ToLowerInvariant()
 
-Write-Host 'AI Assist can set up its own private Python with Tkinter (about 45 MB download).'
+Write-Host 'AI Assist can set up its own private Python and web UI dependencies (about 45 MB download).'
 Write-Host "It is stored only in: $runtime"
 Write-Host 'No administrator rights are needed and other Python installations are not changed.'
 $answer = Read-Host 'Download and set it up now? [Y/n]'
@@ -76,16 +76,11 @@ try {
     Move-Item -LiteralPath (Join-Path $staging 'python') -Destination $target
     Remove-Staging
     $privatePython = Join-Path $target 'python.exe'
-    # Optional web dependencies must not prevent the Tk launcher from starting.
-    try {
-        & $privatePython -m ensurepip --upgrade
-        if ($LASTEXITCODE -ne 0) { throw 'Could not prepare pip in the private Python.' }
-        & $privatePython -m pip install -r (Join-Path $root 'requirements.txt')
-        if ($LASTEXITCODE -ne 0) { throw 'Could not install pywebview.' }
-    } catch {
-        Write-Warning ('Optional web UI setup failed. Tk remains available. ' + $_.Exception.Message)
-        Write-Host ('Retry: & "' + $privatePython + '" -m pip install -r "' + (Join-Path $root 'requirements.txt') + '"')
-    }
+    # Web UI dependencies are required by the default interface.
+    & $privatePython -m ensurepip --upgrade
+    if ($LASTEXITCODE -ne 0) { throw 'Could not prepare pip in the private Python.' }
+    & $privatePython -m pip install -r (Join-Path $root 'requirements.txt')
+    if ($LASTEXITCODE -ne 0) { throw 'Could not install pywebview. Retry with this private Python and requirements.txt.' }
     Write-Host 'Private Python installed.'
     Write-Host ''
     exit 0

@@ -47,26 +47,26 @@ class RuntimeManifestTests(unittest.TestCase):
 
 class LauncherWiringTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("powershell.exe"), "PowerShell check is Windows-only")
-    def test_optional_dependency_failures_allow_tk_to_continue(self):
+    def test_required_dependency_failures_stop_private_setup(self):
         text = (ROOT / "install_runtime.ps1").read_text(encoding="utf-8")
-        optional = text.split("    # Optional web dependencies", 1)[1].split("    Write-Host 'Private Python installed.'", 1)[0]
+        required = text.split("    # Web UI dependencies", 1)[1].split("    Write-Host 'Private Python installed.'", 1)[0]
+        required = required[required.index("    & $privatePython"):]
         for failing_call in (1, 2):
             script = ("$ErrorActionPreference='Stop'; $root=(Get-Location).Path; $privatePython='FakePython'; $global:count=0; "
                       "function FakePython { $global:count++; $global:LASTEXITCODE=0; "
                       f"if ($global:count -eq {failing_call}) {{ $global:LASTEXITCODE=1 }} }}\n"
-                      + optional[optional.index("    try {"):] + "\nWrite-Output 'TK_CONTINUES'; exit 0")
+                      + "try {\n" + required + "\nWrite-Output 'INSTALLED'; exit 0 } catch { Write-Output $_.Exception.Message; exit 1 }")
             result = subprocess.run([shutil.which("powershell.exe"), "-NoProfile", "-NonInteractive", "-Command", script],
                                     cwd=ROOT, capture_output=True, text=True, timeout=15)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("TK_CONTINUES", result.stdout)
-            self.assertIn("Tk remains available", result.stdout)
-            self.assertIn("-m pip install -r", result.stdout)
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertNotIn("INSTALLED", result.stdout)
+            self.assertIn("Could not", result.stdout)
 
-    def test_mac_optional_dependency_failure_returns_success(self):
+    def test_mac_required_dependency_failure_returns_failure(self):
         text = (ROOT / "Start AI Assist.command").read_text(encoding="utf-8")
         optional = text.split('    if ! "$PRIVATE_PYTHON" -m ensurepip', 1)[1].split("    fi", 1)[0]
-        self.assertIn("return 0", optional)
-        self.assertNotIn("return 1", optional)
+        self.assertIn("return 1", optional)
+        self.assertNotIn("return 0", optional)
         self.assertIn("requirements.txt", optional)
 
     def test_launchers_use_the_manifest_and_verify_checksums(self):
