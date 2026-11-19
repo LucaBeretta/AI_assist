@@ -280,7 +280,7 @@ class SecurityTests(ServerCase):
     def test_the_api_has_no_command_write_or_approval_endpoints(self):
         # Adding an endpoint is a security decision: update this list deliberately.
         self.assertEqual(sorted((method, pattern) for method, pattern, _, _ in Handler.ROUTES), sorted([
-            ("POST", r"/api/session"), ("GET", r"/api/status"), ("GET", r"/api/models"), ("GET", r"/api/models/details"),
+            ("POST", r"/api/session"), ("POST", r"/api/monitor-launch"), ("POST", r"/api/monitor-session"), ("GET", r"/api/status"), ("GET", r"/api/models"), ("GET", r"/api/models/details"),
             ("GET", r"/api/hardware"), ("GET", r"/api/compute"), ("GET", r"/api/chats"), ("POST", r"/api/chats"),
             ("GET", r"/api/chats/(?P<chat>[0-9a-f-]{36})"), ("PATCH", r"/api/chats/(?P<chat>[0-9a-f-]{36})"),
             ("DELETE", r"/api/chats/(?P<chat>[0-9a-f-]{36})"), ("POST", r"/api/chats/(?P<chat>[0-9a-f-]{36})/messages"),
@@ -288,6 +288,59 @@ class SecurityTests(ServerCase):
             ("POST", r"/api/memory/notes"), ("GET", r"/api/projects"), ("GET", r"/api/projects/(?P<chat>[0-9a-f-]{36})/files"),
             ("GET", r"/api/projects/(?P<chat>[0-9a-f-]{36})/file"), ("GET", r"/api/log"), ("PUT", r"/api/settings/engine")]))
         self.assertEqual([name for _, _, name, public in Handler.ROUTES if not public], ["session"])
+
+    def test_monitor_window_page_has_strict_static_policy(self):
+        response, page = self.call("GET", "/monitor.html", token=False)
+        self.assertEqual(response.status, 200)
+        self.assertIn(b"monitor.js", page)
+        self.assertIn("default-src 'none'", response.getheader("Content-Security-Policy"))
+        response, script = self.call("GET", "/monitor.js", token=False)
+        self.assertEqual(response.status, 200)
+        self.assertIn(b"monitor-session", script)
+
+    def test_monitor_token_reads_only_compute_and_code_is_single_use(self):
+        response, _ = self.call("POST", "/api/monitor-launch", {}, token=False)
+        self.assertEqual(response.status, 401)
+        response, launch = self.call("POST", "/api/monitor-launch", {})
+        self.assertEqual(response.status, 200)
+        code = launch["code"]
+        response, session = self.call("POST", "/api/monitor-session", {"code": code}, token=False)
+        self.assertEqual(response.status, 200)
+        monitor_token = session["token"]
+        response, _ = self.call("POST", "/api/monitor-session", {"code": code}, token=False)
+        self.assertEqual(response.status, 401)
+        self.assertFalse(self.workspace.sessions.valid("Bearer " + monitor_token))
+        self.assertTrue(self.workspace.sessions.valid_monitor("Bearer " + monitor_token))
+        with patch.object(self.workspace.compute_sampler, "sample", return_value={
+            "schema": 1, "device": "local", "cpu": {}, "gpus": [], "ram": {}, "models": {}
+        }):
+            response, report = self.call("GET", "/api/compute",
+                headers={"Authorization": "Bearer " + monitor_token}, token=False)
+        self.assertEqual(response.status, 200)
+        self.assertFalse(report["remote_telemetry"])
+        for method, path, body in (
+            ("GET", "/api/models", None),
+            ("GET", "/api/status", None),
+            ("GET", "/api/chats", None),
+            ("GET", "/api/projects", None),
+            ("GET", "/api/memory", None),
+            ("GET", "/api/log", None),
+            ("POST", "/api/monitor-launch", {}),
+            ("POST", "/api/chats", {"model": "alpha:8b"}),
+        ):
+            with self.subTest(method=method, path=path):
+                response, _ = self.call(method, path, body,
+                    headers={"Authorization": "Bearer " + monitor_token}, token=False)
+                self.assertEqual(response.status, 401)
+
+    def test_monitor_code_expires_and_cannot_be_replayed(self):
+        clock = [0.0]
+        sessions = security.Sessions(clock=lambda: clock[0])
+        code = sessions.new_monitor_code()
+        clock[0] = security.LAUNCH_SECONDS + 1
+        self.assertIsNone(sessions.exchange_monitor(code))
+        self.assertIsNone(sessions.exchange_monitor("not-a-code"))
+        self.assertFalse(sessions.valid_monitor("Bearer wrong"))
 
     def test_unexpected_errors_reveal_no_details(self):
         with patch.object(WebWorkspace, "status", side_effect=KeyError("C:/secret/path")):
