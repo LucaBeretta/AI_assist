@@ -390,3 +390,12 @@ h2.md-heading { font-size: 1.25rem; }
   .compute-detail { font-size: 9px; }
   .compute-footer { padding-top: 4px; font-size: 9px; }
 }
+
+/* A separate local-only monitor window: no chat panels or scrolling. */
+.monitor-page { margin: 0; height: 100vh; height: 100dvh; overflow: hidden; }
+#monitor-root { display: flex; height: 100%; min-width: 0; min-height: 0; overflow: hidden; }
+#monitor-root > .compute-view { width: 100%; height: 100%; min-width: 0; min-height: 0; }
+.monitor-error { position: fixed; left: 12px; right: 12px; bottom: 12px;
+  padding: 8px 12px; border: 1px solid #ba5555; border-radius: 6px;
+  color: #ffe4e4; background: #361a24; font: 12px var(--font-sans); z-index: 2; }
+:fullscreen #monitor-root { width: 100%; height: 100%; }
