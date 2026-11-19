@@ -98,7 +98,7 @@ install_private_python() {
     fi
     rm -rf "$RUNTIME_DIR/python"
     mv "$staging/python" "$RUNTIME_DIR/python" && rm -rf "$staging"
-    if ! "$PRIVATE_PYTHON" -m ensurepip --upgrade || ! "$PRIVATE_PYTHON" -m pip install -r "$PWD/requirements.txt"; then
+    if ! "$PRIVATE_PYTHON" -m ensurepip --upgrade || ! "$PRIVATE_PYTHON" -m pip install -r "$PWD/requirements.txt" 'pywebview[qt]==6.2.1'; then
         echo "Could not install the required web UI dependencies."
         return 1
     fi
@@ -128,13 +128,14 @@ for candidate in "${candidates[@]}"; do
     try_python "$candidate"
 done
 
-echo "No installed Python 3 with pywebviewinter window was found."
+echo "No installed Python 3 with pywebview was found."
 if install_private_python; then
     try_python "$PRIVATE_PYTHON"
 fi
 
 echo "AI Assist could not find or set up a compatible Python."
-echo "Run this launcher again to retry the private setup, or install your distribution's Tkinter package:"
-echo "  Debian/Ubuntu: sudo apt install python3-tk   Fedora: sudo dnf install python3-tkinter   Arch: sudo pacman -S tk"
+echo "Run this launcher again to retry the private setup, or install requirements.txt and pywebview's Qt backend:"
+echo "  python3 -m pip install -r requirements.txt 'pywebview[qt]==6.2.1'"
+echo "A graphical desktop and the Qt platform's system libraries are required. Linux has not yet been tested on real hardware."
 close_prompt
 exit 1

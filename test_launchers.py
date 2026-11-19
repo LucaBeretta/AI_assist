@@ -84,6 +84,9 @@ class LauncherWiringTests(unittest.TestCase):
         for text in (mac, linux, windows):
             self.assertIn("gui_runtime.py", text)
         self.assertIn("runtime/linux", linux)
+        self.assertIn("pywebview[qt]==6.2.1", linux)
+        self.assertNotIn("Tkinter package", linux)
+        self.assertNotIn("pywebviewinter", linux)
 
     def test_every_download_needs_two_confirmations_and_defaults_to_no(self):
         for name in ("Start AI Assist.command", "Start AI Assist.sh", "install_runtime.ps1"):

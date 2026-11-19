@@ -1,6 +1,18 @@
 # Threat model
 
-Scope: the desktop app, the programs it starts, and the new web workspace (preview), as of 2026-11-19. Rule from the project: **protections are mandatory and fail closed.** Limits are stated, not hidden.
+Scope: the desktop app and the programs it starts, as of 2026-11-19. Rule from the project: **protections are mandatory and fail closed.** Limits are stated, not hidden.
+
+## Current desktop bridge (D8)
+
+The app now loads local HTML inside pywebview. Only its main window has the native `js_api`; generated HTML preview windows have no application API. There is **no application HTTP server, HTTP API listener, launch URL or sessionStorage bearer token**. HTTP-specific mitigations and removed test names below are retained as historical browser-preview design evidence. Current tests include `test_webui_imports`, `test_webui_static`, `test_webui_internet`, `test_webui_sharing` and the core security suite.
+
+Worker events pass through one batching bridge. Model text uses safe DOM construction and `textContent`; the existing CSP, including its pywebview injection exception, stays unchanged. The native API can approve file changes and commands, so generated content must never receive it. Commands still run with the user's rights, without an OS sandbox.
+
+`AIassist.py` installs the unchanged gate before pywebview. Approvals are serialized and fail closed, with two stages and a server-enforced three-second second step; Enter, Escape and close block. Python children retain `child_gate`. Native engines require the Windows firewall lock for network containment; macOS/Linux have no equivalent engine lock. Native libraries and same-user malicious code retain the residual risks below.
+
+The app process still cannot bind LAN sockets. Manual sharing, off on every launch, uses the unchanged `ManualSharingController` to create a gated Python child only after explicit approval. It exposes discovery and `peer_pairing` TLS enrollment, never the desktop API, inference, chats, files or commands. Certificate comparison precedes PIN submission; PIN windows last 120 seconds with three attempts. Closing/disabling stops the child. Keys/tokens stay on disk, outside Compute and bridge metadata. This does not implement remote chat/mobile scopes proposed in section 7.
+
+The sections below preserve the upstream browser-preview analysis and roadmap. HTTP/Tk-specific statements describe that retired interface; general engine, filesystem, child-gate, native-code and command risks still apply.
 
 ## 1. Assets
 

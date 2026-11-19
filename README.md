@@ -7,12 +7,13 @@ A local Ollama and Colibri workspace with saved chats, a developer agent, code p
 - Python 3 and the packages in `requirements.txt`, or the launcher's private Python setup.
 - Ollama with a downloaded model, or a configured Colibri installation/server.
 - On Windows, pywebview uses WebView2. On macOS, it uses WKWebView. **macOS has not yet been tested on real hardware.**
+- On Linux, use the Qt backend (`python3 -m pip install -r requirements.txt 'pywebview[qt]==6.2.1'`) and a graphical desktop with its required system libraries. **Linux launch and native rendering remain untested.**
 
 The interface loads local files with no CDN, build step or application HTTP server. Model inference uses the configured server. Downloads, update checks, remote servers and an explicitly requested Vercel deployment require network access.
 
 ## Run
 
-Double-click **Start AI Assist.cmd** on Windows or **Start AI Assist.command** on macOS. Each launcher checks for pywebview and prefers an existing private runtime. If no suitable Python is found, it offers a checksum-verified private Python download into `runtime`, then installs `requirements.txt`. It needs no administrator password and does not change other Python installations. Ollama and Colibri are installed separately.
+Double-click **Start AI Assist.cmd** on Windows or **Start AI Assist.command** on macOS; on Linux run `bash "Start AI Assist.sh"`. Each launcher checks for pywebview and prefers an existing private runtime. If no suitable Python is found, it offers a checksum-verified private Python download into `runtime`, then installs `requirements.txt` (plus the Qt backend on Linux). It needs no administrator password and does not change other Python installations. Ollama and Colibri are installed separately.
 
 On Windows the app starts detached with `pythonw` when available: closing the launcher does not close the app. Startup errors go to `%LOCALAPPDATA%\AI Assist\last-run.log`. Set `AI_ASSIST_PYTHON` to prefer a particular interpreter.
 
@@ -79,6 +80,16 @@ History defaults to `%LOCALAPPDATA%\AI Assist\chats` on Windows or `~/.aiassist/
 
 Open **Models** for hardware-based recommendations and installed models. Downloads show progress and can be stopped; a model can then be selected in the chat composer. Loaded models can be unloaded explicitly or after the configured idle period. Recommendations are estimates, not guarantees of speed or GPU placement. The status bar reports model placement, context, VRAM and measured token speed when available.
 
+## Privacy, Compute and local check-ins
+
+The mandatory internet gate starts before the native UI. External requests show what is sent and why, then require two confirmations. Block is the default, including Enter, Escape and closing the dialog; Allow unlocks after three seconds on the second step. Local Ollama traffic does not prompt. Model downloads, update checks, cloud models and deployment require approval. Settings → Privacy & internet shows the connection log and the Windows engine firewall lock. Firewall changes need explicit confirmation and may require administrator approval. Native engine networking is not covered by the Python audit hook; the firewall lock is Windows-only.
+
+Compute shows local CPU, GPU, RAM and Ollama model readings at most once every five seconds while visible. Unknown metrics stay unavailable. Paired-device records are enrollment metadata, not evidence a peer is online, and are not contacted for telemetry.
+
+Hourly quiet-time check-ins default off. On Windows, enabling them measures microphone sound levels locally; it saves or sends no audio. After one hour and twenty seconds of quiet, the report waits until chat and Developer work are idle. It summarizes recent saved work and hardware, with an optional reflection from a local Ollama model. Preview now does not enable audio detection. Update checks still require a separate user action and gate approval.
+
+LAN pairing is manual and **off on every launch**. Enter this computer's private IPv4 address in Settings before enabling it. A gated child process offers only discovery and TLS pairing, never the desktop API, chats, inference, files or commands. Compare the certificate code displayed by the target before entering its six-digit PIN; the PIN expires after 120 seconds and allows three attempts. Turning sharing off or closing the app stops the service. Creating the host identity requires the optional `cryptography` package (`python -m pip install cryptography`); the app reports a clear error rather than installing it automatically. Pairing credentials remain in the private data folder and never enter Compute or bridge metadata.
+
 ## Preview HTML
 
 Preview opens a project HTML file or a generated HTML code block in a separate preview window. Main chat output remains sanitized Markdown; executable preview content has no application API bridge. Relative project assets stay with the project file. Close the preview independently or close the app.
@@ -105,10 +116,10 @@ Use **Settings → Check for updates** to compare this copy with Luca's GitHub d
 
 ## Development and tests
 
-```sh
-python -m unittest discover
+```powershell
+python run_windows_tests.py --timeout 420
 ```
 
-Engine and web API tests inject providers and windows; they do not require a display or a real model. On Windows, `python run_windows_tests.py` runs the suite on a separate, invisible desktop when testing native integrations. Link tests may be skipped when Windows does not permit creating symbolic links. Colibri and Vercel tests use local fixtures or fake commands, not real downloads or deployments.
+On Windows the full suite runs on a separate, invisible desktop. Focused headless modules can run directly, for example `python -m unittest test_webui_static test_app_core`. Other platforms use `python -m unittest discover`; native checks need an isolated graphical session. Engine/API tests inject providers and windows; they do not require a real model. Link tests may be skipped when Windows does not permit symbolic links. Colibri and Vercel tests use fixtures or fake commands, not real downloads or deployments. The VS Code extension check is `node --test vscode-extension/extension.test.js`.
 
-`ollama_engine.py` contains the unchanged Ollama engine. Plain status and handoff logic lives in `status_values.py` and `hybrid_memory.py`. `webui/app.py` exposes JSON methods; workers emit through `webui/bridge.py`. The frontend is vanilla JavaScript with offline assets and English/Italian strings. No worker receives native UI objects.
+`app_core/ollama.py`, `streaming.py` and `providers.py` supply the shared engine; `app_core/runtime.py` is the desktop's thin compatibility adapter. Plain status and handoff logic lives in `status_values.py` and `hybrid_memory.py`. `webui/app.py` exposes JSON methods; workers emit through `webui/bridge.py`. The frontend is vanilla JavaScript with offline assets and English/Italian strings. No worker receives native UI objects. See [the D8 integration report](docs/d8-integration.md) for conflict decisions and verification limits.

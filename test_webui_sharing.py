@@ -94,3 +94,23 @@ class SharingTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "gate"):
                 process.start()
             spawn.assert_not_called()
+
+    def test_child_launch_keeps_gate_environment_and_stop_closes_private_pipes(self):
+        packet = {"ok": True, "address": "192.168.1.10", "port": 1234, "pin": "123456",
+                  "verification_code": "A" * 16, "expires_at": 9999999999, "token": "must-not-escape"}
+        child = Mock(stdout=io.StringIO(json.dumps(packet) + "\n"), stdin=Mock(), poll=Mock(return_value=None))
+        service = PairingProcess("192.168.1.10", self.store.directory)
+        environment = {"AI_ASSIST_GATE": "1234:parent-token", "PYTHONPATH": "child_gate"}
+        with patch("webui.sharing.network_gate.child_environment", return_value=environment), patch("webui.sharing.subprocess.Popen", return_value=child) as spawn:
+            service.start()
+            self.assertNotIn("token", service.details)
+            arguments = spawn.call_args.args[0]
+            self.assertEqual(arguments[1], "-u")
+            self.assertTrue(arguments[2].endswith("pairing_worker.py"))
+            self.assertEqual(spawn.call_args.kwargs["env"]["AI_ASSIST_GATE"], "1234:parent-token")
+            self.assertEqual(spawn.call_args.kwargs["env"]["PYTHONPATH"], "child_gate")
+            service.stop()
+        child.stdin.write.assert_called_once_with('{"command":"close"}\n')
+        child.stdin.close.assert_called_once()
+        child.wait.assert_called_once_with(timeout=2)
+        self.assertEqual(service.details, {})
