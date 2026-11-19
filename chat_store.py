@@ -25,6 +25,15 @@ class ChatStoreError(ValueError):
     """A saved chat is invalid, unreadable, or could not be safely written."""
 
 
+def default_directory():
+    """Resolve the app's data directory without creating or reading any records."""
+    override = os.environ.get("AI_ASSIST_DATA_DIR")
+    local_data = os.environ.get("LOCALAPPDATA")
+    directory = (Path(override) if override else Path(local_data) / "AI Assist" / "chats"
+                 if local_data else Path.home() / ".aiassist" / "chats")
+    return directory.expanduser().resolve()
+
+
 def default_environment(chat):
     """Derive optional environment fields for records written by older versions."""
     return {"backend": chat.get("backend", "Ollama"), "model": chat["model"],
@@ -94,14 +103,7 @@ class ChatStore:
 
     def __init__(self, directory=None):
         if directory is None:
-            override = os.environ.get("AI_ASSIST_DATA_DIR")
-            local_data = os.environ.get("LOCALAPPDATA")
-            if override:
-                directory = Path(override)
-            elif local_data:
-                directory = Path(local_data) / "AI Assist" / "chats"
-            else:
-                directory = Path.home() / ".aiassist" / "chats"
+            directory = default_directory()
         self.directory = Path(directory).expanduser().resolve()
         self.errors = []
         try:

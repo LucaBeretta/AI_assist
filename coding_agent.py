@@ -658,7 +658,11 @@ def run_agent(host, model, project_root, messages, on_event, approve_action,
     _run.planning = plan_first
     _run.keep_alive = keep_alive
     _run.task_id, _run.project = task_id, project
-    _run.checkpoint = checkpoint_store if checkpoint_store is not None else CheckpointStore(project / ".aiassist-checkpoints")
+    if checkpoint_store is None:
+        # Import lazily: chat attachments also depend on this module's file limits.
+        from chat_store import default_directory
+        checkpoint_store = CheckpointStore(default_directory() / "checkpoints")
+    _run.checkpoint = checkpoint_store
     try:
         result = _run_agent(host, model, project, messages, on_event, approve_action,
                             cancel_event, context_length, max_steps, chat_fn, plan_first, approve_plan)

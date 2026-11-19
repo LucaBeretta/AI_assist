@@ -9,6 +9,7 @@ import uuid
 
 from coding_agent import run_agent
 from task_checkpoints import CheckpointStore
+from test_agent_support import isolate_agent_data
 from test_coding_agent import tool_response, final_response
 import test_webui_app as fixtures
 
@@ -20,6 +21,21 @@ class CheckpointTests(unittest.TestCase):
         self.root = Path(folder.name) / "project"
         self.root.mkdir()
         self.store = CheckpointStore(Path(folder.name) / "backups")
+
+    def test_default_store_is_shared_app_data_and_never_inside_a_project(self):
+        from chat_store import ChatStore
+        data_directory = isolate_agent_data(self)
+        for project in (self.root, self.root.parent / "another-project"):
+            project.mkdir(exist_ok=True)
+            source = project / "main.py"
+            source.write_text("original")
+            replies = iter([tool_response("write_file", {"path": "main.py", "content": "changed"}), final_response()])
+            result = run_agent("http://localhost:11434", "m", project, [{"role": "user", "content": "task"}],
+                lambda event: None, lambda action: True, chat_fn=lambda *args: next(replies))
+            self.assertEqual(list(project.iterdir()), [source])
+            self.assertTrue((data_directory / "checkpoints" / result["task_id"] / "manifest.json").is_file())
+            self.assertEqual(len(CheckpointStore(data_directory / "checkpoints").list(project)), 1)
+        self.assertEqual(ChatStore().directory, data_directory.resolve())
 
     def test_first_original_only_and_new_files_are_restored_after_failed_task(self):
         original = self.root / "a.py"

@@ -9,12 +9,14 @@ import unittest
 from unittest.mock import patch
 
 import coding_agent
+from test_agent_support import isolate_agent_data
 from test_coding_agent import tool_response, final_response
 import test_webui_app as fixtures
 
 
 class PlanTests(unittest.TestCase):
     def setUp(self):
+        isolate_agent_data(self)
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
         self.root = Path(folder.name)

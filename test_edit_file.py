@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from coding_agent import run_agent
+from test_agent_support import isolate_agent_data
 
 
 def call(name, **arguments):
@@ -19,6 +20,7 @@ def done(text="Done."):
 
 class EditFileTests(unittest.TestCase):
     def setUp(self):
+        isolate_agent_data(self)
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
