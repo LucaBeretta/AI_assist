@@ -4,6 +4,13 @@
 # The private copy needs no administrator password and changes nothing else.
 cd "$(dirname "$0")" || exit 1
 
+# Allow a standalone local compute monitor using the same checked GUI runtime.
+APP_SCRIPT="${AI_ASSIST_ENTRYPOINT:-AIassist.py}"
+case "$APP_SCRIPT" in
+    AIassist.py|launch_compute_dashboard.py) ;;
+    *) echo "Unknown AI Assist entrypoint: $APP_SCRIPT"; exit 1 ;;
+esac
+
 RUNTIME_DIR="$PWD/runtime"
 PRIVATE_PYTHON="$RUNTIME_DIR/python/bin/python3"
 MANIFEST="$PWD/python-runtime.txt"
@@ -16,7 +23,7 @@ close_prompt() {
 try_python() {
     echo "Checking Python runtime: $1"
     if "$1" gui_runtime.py --probe; then
-        "$1" AIassist.py && exit 0
+        "$1" "$APP_SCRIPT" && exit 0
         echo
         echo "AI Assist could not start. The error is shown above."
         close_prompt
