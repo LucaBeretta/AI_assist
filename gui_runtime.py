@@ -10,6 +10,9 @@ class GUIRuntimeError(RuntimeError):
 
 
 def _guidance():
+    if sys.platform.startswith("linux"):
+        return ("Run Start AI Assist.sh, which can set up a private Python with Tkinter, or install your "
+                "distribution's Tkinter package (Debian/Ubuntu: python3-tk, Fedora: python3-tkinter, Arch: tk).")
     launch = "Start AI Assist.command" if sys.platform == "darwin" else "AI Assist"
     minimum = " On macOS, AI Assist requires Tk 8.6 or newer." if sys.platform == "darwin" else ""
     return ("Install a current Python from https://www.python.org/downloads/ with its Tcl/Tk support, "

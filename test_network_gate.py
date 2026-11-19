@@ -322,6 +322,15 @@ class LinkAndProgramTests(GateTestCase):
         self.assertEqual([(request.target, request.purpose) for request in self.asked],
                          [("m1", "Install m1"), ("m2", "Install m2")])
 
+    def test_linux_without_notify_send_uses_dbus_with_quoted_text(self):
+        with patch.object(gate.os, "name", "posix"), patch.object(gate.sys, "platform", "linux"), \
+                patch("network_gate.shutil.which", side_effect=lambda tool: "/usr/bin/gdbus" if tool == "gdbus" else None):
+            command, environment = gate.notification_command("It's blocked", "C:\\path \\' end")
+        self.assertIsNone(environment)
+        self.assertEqual(command[:2], ["gdbus", "call"])
+        self.assertIn("'It\\'s blocked'", command)
+        self.assertIn("'C:\\\\path \\\\\\' end'", command)
+
     @unittest.skipUnless(os.name == "nt", "Windows notifications")
     def test_notification_text_never_becomes_part_of_the_command(self):
         command, environment = gate.notification_command("Title'; calc", "Body\n$(evil)")

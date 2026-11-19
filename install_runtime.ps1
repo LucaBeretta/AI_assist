@@ -33,11 +33,14 @@ if (-not $base -or -not $entry -or $entry[2].Length -ne 64) {
 $file = $entry[1]
 $expected = $entry[2].ToLowerInvariant()
 
-Write-Host 'AI Assist can set up its own private Python with Tkinter (about 45 MB download).'
+Write-Host 'AI Assist can set up its own private Python with Tkinter (about 45 MB, downloaded from github.com).'
 Write-Host "It is stored only in: $runtime"
 Write-Host 'No administrator rights are needed and other Python installations are not changed.'
-$answer = Read-Host 'Download and set it up now? [Y/n]'
-if ($answer -match '^\s*[Nn]') { exit 2 }
+Write-Host 'This goes on the internet, so it needs two confirmations.'
+$answer = Read-Host 'Download it now? [y/N]'
+if ($answer -notmatch '^\s*[Yy]') { exit 2 }
+$answer = Read-Host "Second check: type yes to download $file"
+if ("$answer".Trim() -ne 'yes') { exit 2 }
 
 function Remove-Staging {
     if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }
