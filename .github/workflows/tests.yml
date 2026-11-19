@@ -1,0 +1,65 @@
+name: Tests
+
+# Runs the test suites on every upload and pull request, on Windows, macOS and Linux.
+# Read-only: no secrets, no AI model (the tests simulate Ollama), nothing published.
+# The browser end-to-end test (tools/web_e2e.py) needs a real model, so it is not run here.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python ${{ matrix.python }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 3.13 is the runtime the launchers install; 3.14 is the newest; 3.9 is the oldest supported.
+          - { os: windows-latest, python: "3.13" }
+          - { os: windows-latest, python: "3.14" }
+          - { os: macos-latest, python: "3.13" }
+          - { os: ubuntu-latest, python: "3.13" }
+          - { os: ubuntu-latest, python: "3.9" }
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Tkinter loads
+        run: python -c "import sys, tkinter; print(sys.version); print('Tk', tkinter.TkVersion)"
+      - name: Every file compiles
+        run: python -m compileall -q .
+      - name: Tests (Linux, on a virtual screen)
+        if: runner.os == 'Linux'
+        run: |
+          command -v xvfb-run || (sudo apt-get update && sudo apt-get install -y xvfb)
+          xvfb-run -a python -m unittest discover -v
+      - name: Tests
+        if: runner.os != 'Linux'
+        run: python -m unittest discover -v
+
+  page:
+    name: Page tests (Node)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - run: node --test webui/tests/markdown.test.mjs webui/tests/format.test.mjs
