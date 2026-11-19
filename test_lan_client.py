@@ -76,6 +76,14 @@ class EncryptedInferenceTests(unittest.TestCase):
         self.node = InferenceNode("127.0.0.1", self.server_directory, port=free_local_port())
         self.node.start()
         self.addCleanup(self.node.stop)
+        # Production allows only private LAN IPv4 peers. The test uses
+        # loopback deliberately to avoid exposing a listener to the LAN.
+        def local_record(peer_id, record):
+            return "127.0.0.1", record["fingerprint"], record["token"]
+
+        self.loopback = patch("lan_client.private_peer_record", side_effect=local_record)
+        self.loopback.start()
+        self.addCleanup(self.loopback.stop)
         self.client = PairedLANProvider(
             self.peer_id, "mac_1", store=self.store, port=self.node.port)
 
