@@ -58,7 +58,7 @@ class PeerPrivacyTests(unittest.TestCase):
 
 class TelemetryTests(unittest.TestCase):
     def test_mac_top_cpu_usage_is_parsed_from_idle_percentage(self):
-        sample = "CPU usage: 5.55% user, 19.41% sys, 75.2% idle\\n"
+        sample = "CPU usage: 5.55% user, 19.41% sys, 75.2% idle\n"
         self.assertEqual(compute_telemetry._parse_mac_cpu_usage(sample), 24.8)
         self.assertEqual(compute_telemetry._parse_mac_cpu_usage("CPU usage: 0% user, 0% sys, 100% idle"), 0.0)
         self.assertIsNone(compute_telemetry._parse_mac_cpu_usage("no CPU usage reading"))
@@ -66,7 +66,7 @@ class TelemetryTests(unittest.TestCase):
 
     def test_mac_sampler_uses_top_output_on_darwin(self):
         from types import SimpleNamespace
-        sample = "Processes: 130 total\\nCPU usage: 5.55% user, 19.41% sys, 75.2% idle\\n"
+        sample = "Processes: 130 total\nCPU usage: 5.55% user, 19.41% sys, 75.2% idle\n"
         with patch("compute_telemetry.subprocess.run", return_value=SimpleNamespace(stdout=sample)) as run:
             self.assertEqual(compute_telemetry._mac_cpu_percent(), 24.8)
         self.assertEqual(run.call_args.args[0], ["top", "-l", "1", "-n", "0"])
