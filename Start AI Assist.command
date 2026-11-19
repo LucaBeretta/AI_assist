@@ -7,6 +7,8 @@ cd "$(dirname "$0")" || exit 1
 RUNTIME_DIR="$PWD/runtime"
 PRIVATE_PYTHON="$RUNTIME_DIR/python/bin/python3"
 MANIFEST="$PWD/python-runtime.txt"
+APP_ARGS=()
+[ "${AI_ASSIST_WEB_UI:-}" = "1" ] && APP_ARGS+=(--web)
 
 close_prompt() {
     read -r -p "Press Return to close this window."
@@ -16,7 +18,11 @@ close_prompt() {
 try_python() {
     echo "Checking Python runtime: $1"
     if "$1" gui_runtime.py --probe; then
-        "$1" AIassist.py && exit 0
+        if [ "${AI_ASSIST_WEB_UI:-}" = "1" ] && ! "$1" -c 'import webview' >/dev/null 2>&1; then
+            echo "The new UI needs pywebview; checking another Python or the private setup."
+            return 1
+        fi
+        "$1" AIassist.py "${APP_ARGS[@]}" && exit 0
         echo
         echo "AI Assist could not start. The error is shown above."
         close_prompt

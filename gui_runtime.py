@@ -89,14 +89,14 @@ def windowless_python(executable=None):
     return str(candidate) if candidate.is_file() else None
 
 
-def launch_detached(script, executable=None, popen=subprocess.Popen):
+def launch_detached(script, executable=None, popen=subprocess.Popen, arguments=()):
     """Start ``script`` with pythonw, detached from this console, so closing the
     launcher window does not close the app. Returns False when that is not possible."""
     pythonw = windowless_python(executable)
     if pythonw is None:
         return False
     flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-    popen([pythonw, str(script)], cwd=str(Path(script).resolve().parent), creationflags=flags, close_fds=True,
+    popen([pythonw, str(script), *arguments], cwd=str(Path(script).resolve().parent), creationflags=flags, close_fds=True,
           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return True
 
@@ -105,9 +105,10 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--probe", action="store_true", help="check a hidden Tk window and print runtime details")
     parser.add_argument("--launch", metavar="SCRIPT", help="start SCRIPT detached with pythonw (Windows); exit 3 if unavailable")
+    parser.add_argument("--web", action="store_true", help="pass --web to the detached app")
     args = parser.parse_args(argv)
     if args.launch:
-        return 0 if launch_detached(args.launch) else 3
+        return 0 if launch_detached(args.launch, arguments=("--web",) if args.web else ()) else 3
     if not args.probe:
         parser.error("Use --probe to check the GUI runtime.")
     try:
