@@ -117,12 +117,30 @@ window.devui = (() => {
     const action = event.action || {};
     const card = node("section", "dev-card action-card");
     const head = node("div", "dev-card-head");
+    let blocks = [];
     if (action.kind === "write_file") {
       const {pre, added, removed} = diffBlock(action.diff);
       head.append(node("span", "mono strong", action.path), node("span", "grow"),
                   node("span", "dev-hint", action.exists ? "edit" : "new file"),
                   node("span", "diff-count add", "+" + added), node("span", "diff-count del", "−" + removed));
-      card.append(head, pre);
+      card.append(head);
+      // Several blocks on an existing file: review them one by one (Api applies only the checked ones).
+      if (action.exists && (action.hunks || []).length > 1) {
+        for (const [index, hunk] of action.hunks.entries()) {
+          const bar = node("label", "hunk-bar");
+          const box = node("input");
+          box.type = "checkbox";
+          box.checked = true;
+          box.addEventListener("change", updateApplyLabel);
+          bar.append(box, node("span", "", `Block ${index + 1}`), node("span", "mono dev-hint", hunk.header));
+          const {pre: lines} = diffBlock(hunk.header + "\n" + hunk.lines.join(""));
+          lines.firstChild?.remove?.();
+          card.append(bar, lines);
+          blocks.push({id: hunk.id, box});
+        }
+      } else {
+        card.append(pre);
+      }
       if (action.destination && !action.destination.replaceAll("\\", "/").includes("/" + action.path.replaceAll("\\", "/"))) {
         card.append(node("p", "dev-warning", "Destination: " + action.destination));
       }
@@ -138,19 +156,30 @@ window.devui = (() => {
     const actions = node("div", "dev-card-actions");
     const decide = async (approved) => {
       for (const item of actions.querySelectorAll("button")) item.disabled = true;
+      const chosen = blocks.filter(item => item.box.checked).map(item => item.id);
+      const partial = approved && blocks.length && chosen.length < blocks.length;
       try {
-        await call("approve_action", event.task_id, event.approval_id, approved);
+        if (partial) await call("approve_action", event.task_id, event.approval_id, true, chosen);
+        else await call("approve_action", event.task_id, event.approval_id, approved);
         card.classList.add("is-decided");
-        actions.replaceChildren(node("span", "dev-decided " + (approved ? "ok" : "no"), approved ? "Approved" : "Rejected"));
+        for (const item of blocks) item.box.disabled = true;
+        actions.replaceChildren(node("span", "dev-decided " + (approved ? "ok" : "no"),
+          !approved ? "Rejected" : partial ? `Applied ${chosen.length} of ${blocks.length} blocks` : "Approved"));
       } catch (error) {
         status(error.message);
         for (const item of actions.querySelectorAll("button")) item.disabled = false;
       }
     };
-    const yes = action.kind === "run_command" ? "Run" : "Apply";
+    const yes = btn(action.kind === "run_command" ? "Run" : "Apply", "btn primary", () => decide(true));
+    function updateApplyLabel() {
+      const chosen = blocks.filter(item => item.box.checked).length;
+      yes.textContent = chosen === blocks.length ? "Apply all" : `Apply ${chosen} of ${blocks.length}`;
+      yes.disabled = chosen === 0;
+    }
+    if (blocks.length) updateApplyLabel();
     actions.append(btn("Reject", "btn ghost", () => decide(false)), node("span", "grow"),
                    node("span", "dev-hint", action.kind === "write_file" ? "The original is kept: you can restore it from Checkpoints." : "Runs on this computer, not sandboxed."),
-                   btn(yes, "btn primary", () => decide(true)));
+                   yes);
     card.append(actions);
     append(card);
     if (window.Notification?.permission === "granted" && document.hidden) new Notification("AI Assist needs your review", {body: action.path || action.command || ""});
@@ -209,6 +238,8 @@ window.devui = (() => {
     element("dev-step").textContent = "";
     controls();
     loadCheckpoints();
+    loadFiles();
+    loadPins();
   }
 
   function controls() {
@@ -278,11 +309,82 @@ window.devui = (() => {
     } catch (error) { list.replaceChildren(node("p", "dev-hint", error.message)); }
   }
 
+  // ---------- files, pins, preview ----------
+  let files = [];
+  let pinned = [];   // [{path, size_bytes, estimated_tokens, error}]
+
+  function tokensLabel(n) { return n >= 1000 ? (n / 1000).toFixed(1).replace(/\.0$/, "") + "k tok" : (n || 0) + " tok"; }
+
+  async function loadFiles() {
+    const project = element("dev-project").value.trim();
+    const list = element("dev-files");
+    if (!project) { files = []; list.replaceChildren(node("p", "dev-hint", "Choose a project folder to list its files.")); return; }
+    try {
+      files = (await call("list_project_files", project)).files;
+      renderFiles();
+    } catch (error) { files = []; list.replaceChildren(node("p", "dev-hint", error.message)); }
+  }
+
+  async function loadPins() {
+    if (!chatId) { pinned = []; renderPins(); return; }
+    try { pinned = (await call("open_chat", chatId)).pinned_files || []; } catch (error) { pinned = []; }
+    renderPins();
+    renderFiles();
+  }
+
+  function renderPins() {
+    const box = element("dev-pins");
+    if (!pinned.length) {
+      box.replaceChildren(node("p", "dev-hint", chatId ? "Pin files to send them with every request." : "Pins are available after the first task in this project."));
+      return;
+    }
+    box.replaceChildren(...pinned.map(item => {
+      const chip = node("span", "chip pin-chip" + (item.error ? " is-error" : ""));
+      chip.title = item.error || item.path;
+      chip.append(node("span", "mono", item.path), node("span", "dev-hint", item.error ? "unavailable" : tokensLabel(item.estimated_tokens)),
+                  btn("×", "chip-x", () => togglePin(item.path, false)));
+      chip.lastChild.setAttribute("aria-label", "Unpin " + item.path);
+      return chip;
+    }));
+  }
+
+  function renderFiles() {
+    const list = element("dev-files");
+    if (!files.length) return;
+    const filter = element("dev-file-filter").value.trim().toLowerCase();
+    const shown = files.filter(item => !filter || item.path.toLowerCase().includes(filter)).slice(0, 200);
+    const pins = new Set(pinned.map(item => item.path));
+    list.replaceChildren(...shown.map(item => {
+      const row = node("div", "file-row" + (pins.has(item.path) ? " is-pinned" : ""));
+      row.append(node("span", "file-path mono", item.path), node("span", "dev-hint", tokensLabel(item.estimated_tokens)));
+      if (/\.html?$/i.test(item.path)) row.append(btn("Preview", "file-btn", () => preview(item.path)));
+      const pin = btn(pins.has(item.path) ? "Unpin" : "Pin", "file-btn", () => togglePin(item.path, !pins.has(item.path)));
+      pin.disabled = !chatId;
+      row.append(pin);
+      return row;
+    }));
+  }
+
+  async function togglePin(path, on) {
+    try {
+      const result = await call(on ? "pin_file" : "unpin_file", chatId, path);
+      pinned = result.pinned_files || [];
+      renderPins();
+      renderFiles();
+    } catch (error) { status(error.message); }
+  }
+
+  async function preview(path) {
+    try { await call("preview_file", element("dev-project").value.trim(), path); status("Preview opened in a separate window."); }
+    catch (error) { status(error.message); }
+  }
+
   // ---------- wiring ----------
-  function onShow() { loadCheckpoints(); element("dev-task").focus?.(); }
+  function onShow() { loadCheckpoints(); loadFiles(); loadPins(); element("dev-task").focus?.(); }
 
   element("dev-project").value = recall("aiassist-dev-project") || "";
-  element("dev-project").addEventListener("change", () => { chatId = null; loadCheckpoints(); });
+  element("dev-project").addEventListener("change", () => { chatId = null; loadCheckpoints(); loadFiles(); loadPins(); });
+  element("dev-file-filter").addEventListener("input", renderFiles);
   element("dev-form").addEventListener("submit", run);
   element("dev-task").addEventListener("keydown", event => {
     if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) run(event);

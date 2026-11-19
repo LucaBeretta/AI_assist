@@ -103,7 +103,7 @@ window.app = (() => {
     const follow = nearBottom();
     container.replaceChildren(...nodes);
     // markdown.js renders code toolbars disabled; Copy works here, Save/Preview wait for their Api methods.
-    for (const node of container.querySelectorAll?.('.code-actions [data-action="copy"]') || []) node.disabled = false;
+    for (const node of container.querySelectorAll?.('.code-actions [data-action="copy"], .code-actions [data-action="preview"]') || []) node.disabled = false;
     renderInterrupted(record);
     renderAttachments(record);
     if (follow) scrollToEnd();
@@ -143,7 +143,33 @@ window.app = (() => {
       again.disabled = busy;
       bar.append(again);
     }
+    const used = message.role === "assistant" && index === messages.length - 1 ? record?.last_response?.memories_used || [] : [];
+    if (used.length) bar.append(memoriesUsed(used));
     return bar;
+  }
+
+  // "Used 2 memories": what the model was given from shared memory, with a way to forget each one.
+  function memoriesUsed(items) {
+    const box = document.createElement("details");
+    box.className = "mem-used";
+    const summary = document.createElement("summary");
+    summary.textContent = `Used ${items.length} memor${items.length === 1 ? "y" : "ies"}`;
+    const list = document.createElement("div");
+    list.className = "mem-list";
+    for (const item of items) {
+      const row = document.createElement("div");
+      row.className = "mem-row";
+      const text = document.createElement("span");
+      text.textContent = item.text;
+      const forget = button("Forget", "btn ghost", async () => {
+        try { await call("forget_memory", item.id); forget.disabled = true; forget.textContent = "Forgotten"; status("Memory removed; it will not be used again."); }
+        catch (error) { showError(error); }
+      });
+      row.append(text, forget);
+      list.append(row);
+    }
+    box.append(summary, list);
+    return box;
   }
 
   async function copyText(text, node) {
@@ -497,6 +523,19 @@ window.app = (() => {
       case "project_deleted":
         refreshProjects().catch(showError);
         return true;
+      case "chat_changed":
+        refreshChats().then(() => { if (event.chat_id === selected) return reloadChat(selected).then(renderMessages); }).catch(showError);
+        return true;
+      case "chat_deleted":
+        chats.delete(event.chat_id);
+        renderChats();
+        if (event.chat_id === selected) {
+          selected = null;
+          (chats.size ? openChat(chats.keys().next().value) : newChat()).catch(showError);
+        }
+        return true;
+      case "memories_changed":
+        return true;
       case "checkpoint_restored":
         status(`Restored ${event.restored} files from the task checkpoint.`);
         return true;
@@ -617,6 +656,7 @@ window.app = (() => {
       else if (ctrl && event.shiftKey && key === "n") { event.preventDefault(); newChat(true).catch(showError); }
       else if (ctrl && !event.shiftKey && key === "n") { event.preventDefault(); newChat().catch(showError); }
       else if (ctrl && key === ",") { event.preventDefault(); openSettings(); }
+      else if (ctrl && key === "k") { event.preventDefault(); openPalette(); }
       else if (event.key === "Escape") {
         if (element("context-menu").open) closeContextMenu();
         else if (window.devui && !element("dev-view").hidden) { if (window.devui.isRunning()) window.devui.stop(); }
@@ -629,10 +669,13 @@ window.app = (() => {
   element("jump").addEventListener("click", () => { scrollToEnd(); updateJump(); });
   element("conversation").addEventListener("scroll", updateJump);
   element("messages").addEventListener("click", event => {
-    const node = event.target?.closest?.('.code-actions [data-action="copy"]');
+    const node = event.target?.closest?.('.code-actions [data-action="copy"], .code-actions [data-action="preview"]');
     if (!node) return;
     const code = node.parentElement?.nextElementSibling;
-    if (code) copyText(code.textContent, node);
+    if (!code) return;
+    if (node.getAttribute("data-action") === "preview") {
+      call("preview_code", code.textContent).then(() => status("Preview opened in a separate window.")).catch(showError);
+    } else copyText(code.textContent, node);
   });
 
   element("composer").addEventListener("submit", send);
@@ -713,6 +756,100 @@ window.app = (() => {
     } catch (error) { showError(error); }
     if (lastState?.interrupted?.length) status(`${lastState.interrupted.length} chat(s) have an interrupted reply: open them to keep or discard it.`);
   });
+  // ---------- rename / delete / export ----------
+  element("rename-chat").addEventListener("click", () => {
+    const record = chats.get(selected);
+    if (!record) return;
+    element("rename-input").value = record.title;
+    openDialog("rename-dialog");
+    element("rename-input").select?.();
+  });
+  element("rename-cancel").addEventListener("click", () => closeDialog("rename-dialog"));
+  element("rename-form").addEventListener("submit", async event => {
+    event.preventDefault();
+    try {
+      const result = await call("rename_chat", selected, element("rename-input").value);
+      closeDialog("rename-dialog");
+      chats.set(selected, {...chats.get(selected), title: result.chat.title});
+      renderChats(); renderMessages();
+    } catch (error) { showError(error); }
+  });
+  element("delete-chat").addEventListener("click", async () => {
+    const record = chats.get(selected);
+    if (!record) return;
+    if (window.confirm && !window.confirm(`Delete "${record.title}"? This removes the chat and its attachments from this computer.`)) return;
+    try {
+      const result = await call("delete_chat", selected);
+      status(result.warnings?.length ? result.warnings.join(" ") : "Chat deleted.");
+    } catch (error) { showError(error); }
+  });
+  element("export-chats").addEventListener("click", async () => {
+    try {
+      const result = await call("export_chats");
+      element("export-result").textContent = result.cancelled ? "" : `Saved ${result.count} chats to ${result.path}`;
+    } catch (error) { element("export-result").textContent = error.message; }
+  });
+
+  // ---------- Ctrl+K palette: search chats and run commands ----------
+  const commands = [
+    ["New chat", "Ctrl+N", () => newChat().catch(showError)],
+    ["New incognito chat", "Ctrl+Shift+N", () => newChat(true).catch(showError)],
+    ["Developer", "", () => showView("dev")],
+    ["Models", "", () => showView("models")],
+    ["Settings", "Ctrl+,", () => openSettings()],
+    ["Switch theme", "Ctrl+Shift+L", () => toggleTheme()],
+  ];
+  let paletteItems = [];
+  let paletteIndex = 0;
+  let paletteTimer = null;
+
+  function openPalette() {
+    element("palette-input").value = "";
+    openDialog("palette");
+    renderPalette([]);
+    element("palette-input").focus?.();
+  }
+
+  function renderPalette(results) {
+    const query = element("palette-input").value.trim().toLowerCase();
+    const matching = commands.filter(([label]) => !query || label.toLowerCase().includes(query));
+    paletteItems = [];
+    const nodes = [];
+    const group = text => { const li = document.createElement("li"); li.className = "palette-group"; li.textContent = text; nodes.push(li); };
+    const item = (title, snippet, run) => {
+      const li = document.createElement("li");
+      const node = button("", "palette-item", () => { closeDialog("palette"); run(); });
+      const t = document.createElement("span"); t.className = "palette-title"; t.textContent = title;
+      node.append(t);
+      if (snippet) { const s = document.createElement("span"); s.className = "palette-snippet"; s.textContent = snippet; node.append(s); }
+      li.append(node);
+      nodes.push(li);
+      paletteItems.push(node);
+    };
+    if (results.length) { group("Chats"); for (const chat of results.slice(0, 30)) item(chat.title, chat.snippet, () => { showView("chat"); openChat(chat.id).catch(showError); }); }
+    if (matching.length) { group("Commands"); for (const [label, keys, run] of matching) item(label, keys, run); }
+    element("palette-list").replaceChildren(...nodes);
+    paletteIndex = 0;
+    highlightPalette();
+  }
+
+  function highlightPalette() { paletteItems.forEach((node, index) => node.setAttribute("aria-selected", index === paletteIndex ? "true" : "false")); }
+
+  element("palette-input").addEventListener("input", () => {
+    if (typeof clearTimeout === "function") clearTimeout(paletteTimer);
+    const query = element("palette-input").value.trim();
+    if (!query) { renderPalette([]); return; }
+    paletteTimer = later(async () => {
+      try { renderPalette((await call("search_chats", query)).chats); } catch (error) { renderPalette([]); }
+    }, 150);
+  });
+  element("palette-input").addEventListener("keydown", event => {
+    if (event.key === "ArrowDown") { event.preventDefault(); paletteIndex = Math.min(paletteItems.length - 1, paletteIndex + 1); highlightPalette(); }
+    else if (event.key === "ArrowUp") { event.preventDefault(); paletteIndex = Math.max(0, paletteIndex - 1); highlightPalette(); }
+    else if (event.key === "Enter") { event.preventDefault(); paletteItems[paletteIndex]?.click(); }
+  });
+  element("open-palette").addEventListener("click", openPalette);
+
   // ---------- views (Chats / Developer / Models) ----------
   const views = {chat: ["chat-view", "nav-chats"], dev: ["dev-view", "nav-dev"], models: ["models-view", "nav-models"]};
   function showView(name) {
