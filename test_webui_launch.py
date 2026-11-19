@@ -10,6 +10,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from webui.app import main
+from test_agent_support import isolate_agent_data
 
 
 class Hook:
@@ -19,6 +20,9 @@ class Hook:
 
 
 class WebLaunchTests(unittest.TestCase):
+    def setUp(self):
+        isolate_agent_data(self)
+
     def test_absolute_file_uri_and_no_http_server(self):
         loaded = Hook()
         window = SimpleNamespace(events=SimpleNamespace(loaded=loaded), evaluate_js=Mock())
