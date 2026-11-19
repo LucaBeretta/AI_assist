@@ -55,7 +55,7 @@ window.app = (() => {
   // ---------- conversation ----------
   function renderMessages() {
     const record = chats.get(selected);
-    element("chat-title").textContent = record?.title || t("Conversation");
+    element("chat-title").textContent = record ? chatTitle(record) : t("Conversation");
     element("incognito-badge").hidden = !record?.incognito;
     const nodes = [];
     const messages = record?.messages || [];
@@ -328,10 +328,10 @@ window.app = (() => {
       node.type = "button";
       node.className = "chat-item" + (record.incognito ? " incognito" : "");
       node.setAttribute("aria-current", record.id === selected ? "true" : "false");
-      node.textContent = record.title;
+      node.textContent = chatTitle(record);
       if (activeStream(record.id)) {
         const working = document.createElement("span");
-        working.className = t("working");
+        working.className = "working";
         working.textContent = t("working");
         node.append(working);
       }
@@ -474,6 +474,18 @@ window.app = (() => {
     } catch (error) {
       if (selected === id) element("context-usage").textContent = "–";
     }
+  }
+
+  // Stored titles stay in English ("New chat" is the engine's default); show it translated.
+  function chatTitle(record) { return record.title === "New chat" ? t("New chat") : record.title; }
+
+  // The status bar polls the engine, so it learns the loaded context after the chat was opened.
+  function syncContext(value) {
+    if (!value || value.chat_id !== selected || !value.context_total) return;
+    const used = value.context_used || 0, total = value.context_total;
+    element("context-usage").textContent = `${tokens(used)} / ${tokens(total)}`;
+    element("context-meter").value = Math.min(1, used / total);
+    element("context-menu").className = "ctx level-" + (used * 100 >= total * 95 ? "full" : used * 100 >= total * 80 ? "warn" : "ok");
   }
 
   function tokens(n) {
@@ -912,14 +924,14 @@ window.app = (() => {
     const record = chats.get(id);
     if (!record) return;
     renameTarget = id;
-    element("rename-input").value = record.title;
+    element("rename-input").value = chatTitle(record);
     openDialog("rename-dialog");
     element("rename-input").select?.();
   }
   async function deleteChat(id) {
     const record = chats.get(id);
     if (!record) return;
-    if (window.confirm && !window.confirm(t("Delete \"{v0}\"? This removes the chat and its attachments from this computer.", {v0: (record.title)}))) return;
+    if (window.confirm && !window.confirm(t("Delete \"{v0}\"? This removes the chat and its attachments from this computer.", {v0: (chatTitle(record))}))) return;
     try {
       const result = await call("delete_chat", id);
       status(result.warnings?.length ? result.warnings.join(" ") : t("Chat deleted."));
@@ -989,7 +1001,7 @@ window.app = (() => {
       nodes.push(li);
       paletteItems.push(node);
     };
-    if (results.length) { group(t("Chats")); for (const chat of results.slice(0, 30)) item(chat.title, chat.snippet, () => { showView("chat"); openChat(chat.id).catch(showError); }); }
+    if (results.length) { group(t("Chats")); for (const chat of results.slice(0, 30)) item(chatTitle(chat), chat.snippet, () => { showView("chat"); openChat(chat.id).catch(showError); }); }
     if (matching.length) { group(t("Commands")); for (const [label, keys, run] of matching) item(label, keys, run); }
     element("palette-list").replaceChildren(...nodes);
     paletteIndex = 0;
@@ -1041,7 +1053,7 @@ window.app = (() => {
 
   function setPrompt(text) { element("prompt").value = text; fitPrompt(); scheduleDraft(); element("prompt").focus?.(); }
   window.addEventListener("languagechange", () => { renderMessages(); renderChats(); renderProjectBar(); });
-  return {onEvent, showView, selectModel, modelChoice, setPrompt,
+  return {onEvent, showView, syncContext, selectModel, modelChoice, setPrompt,
           currentChat: () => chats.get(selected), refreshChat: async id => { await reloadChat(id); if (selected === id) renderMessages(); },
           refreshModels: () => refreshModels().catch(showError)};
 })();

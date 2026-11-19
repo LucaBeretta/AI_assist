@@ -144,6 +144,7 @@ window.workspaceui = (() => {
     el("status-privacy").textContent = t(value.privacy_kind || value.privacy || "");
     el("status-privacy").className = "privacy" + (value.privacy_kind && value.privacy_kind !== "local only" ? " is-remote" : "");
     el("status-meter").className = value.fraction >= .95 ? "level-full" : value.fraction >= .8 ? "level-warn" : "";
+    window.app?.syncContext?.(value);
   }
   function onEvent(event) {
     if (event.type === "memories_changed" && el("settings-dialog").open) renderMemories().catch(error);
