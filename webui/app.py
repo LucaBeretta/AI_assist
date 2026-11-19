@@ -33,6 +33,8 @@ from webui.preview import HtmlPreview
 from webui.memories import Memories, revision as memory_revision
 from webui.instance import SingleInstance
 from webui.window_state import rectangle, visible_rectangle, saved_theme
+from webui.status import StatusPush
+from status_bar import snapshot_values, generation_rate, is_cloud_model, is_local
 
 
 log = logging.getLogger(__name__)
@@ -108,6 +110,50 @@ class Api:
         self._preview = HtmlPreview(self._store.directory, self._desktop)
         self._pulls = {}
         self._memories = Memories(self._store.directory)
+        self._status_chat = None
+        self._status = StatusPush(self.status_snapshot, self._bridge.emit)
+
+    def _start_status(self):
+        self._status.start()
+
+    @_json_method
+    def status_snapshot(self, chat_id=None):
+        try:
+            details = self._engine.running_details()
+            connected = True
+        except Exception:
+            details, connected = {}, False
+        with self._lock:
+            identity = chat_id if chat_id is not None else self._status_chat
+            record = self._load_chat(identity) if identity else None
+            model = record["model"] if record else ""
+            backend = record.get("backend", "Ollama") if record else "Ollama"
+            metrics = deepcopy(record.get("last_response", {}).get("metrics", {})) if record else {}
+            stream = next((item for item in self._streams.values() if item["chat_id"] == identity), None)
+            if stream is not None:
+                with stream["data_lock"]:
+                    metrics = deepcopy(stream["metrics"])
+            task = self._developer.status(identity)
+            if task:
+                metrics = task["metrics"]
+        usage = self._usage(record, details.get(model, {}).get("context_length")) if record else {}
+        if stream is None and not task and type(metrics.get("prompt_eval_count")) is int:
+            usage["used"] = metrics["prompt_eval_count"] + int(metrics.get("eval_count") or 0)
+        host = self._engine.ollama_url()
+        values = snapshot_values(engine=backend, connected=connected, model=model, details=details,
+            metrics=metrics, choice=usage.get("total"), used=usage.get("used"), url=host,
+            step=task.get("step", 0), agent_active=bool(task), max_steps=task.get("max_steps", 20))
+        detail = details.get(model, {})
+        size = detail.get("size", 0)
+        gpu = min(1.0, max(0.0, detail.get("size_vram", 0) / size)) if size else None
+        return {"ok": True, **values, "chat_id": identity, "backend": backend, "model_name": model,
+                "engine_state": "ready" if connected else "offline", "gpu_fraction": gpu,
+                "cpu_fraction": 1 - gpu if gpu is not None else None,
+                "vram_bytes": sum(item.get("size_vram", 0) for item in details.values()),
+                "context_used": usage.get("used"), "context_total": usage.get("total"),
+                "tokens_per_second": generation_rate(metrics), "agent_step": task.get("step", 0),
+                "agent_max_steps": task.get("max_steps", 20),
+                "privacy_kind": "cloud model" if is_cloud_model(model) else "local only" if is_local(host) else "remote server"}
 
     @_json_method
     def set_window_state(self, value):
@@ -538,6 +584,7 @@ class Api:
             record["mode"] = "dev"
             record["context_length"] = record["environment"]["context_length"] = context
             record = self._save_chat(record)
+            self._status_chat = chat_id
             return self._developer.start(chat_id, record, host=self._engine.ollama_url(), model=record["model"],
                 project_root=str(root), messages=history, plan_first=plan_first, max_steps=max_steps,
                 context_length=context, file_limit=chat_attachments.file_limit(self._store.directory),
@@ -570,7 +617,7 @@ class Api:
                 if current.get(key) != before.get(key):
                     raise RuntimeError("This chat changed while the Developer task was running.")
             current["agent_history"] = result["messages"]
-            current["last_response"] = {"kind": "dev", "status": "done"}
+            current["last_response"] = {"kind": "dev", "status": "done", "metrics": result.get("metrics", {})}
             current.pop("_agent_history_stale", None)
             current["messages"].append({"role": "assistant", "content": result["assistant_text"]})
             self._save_chat(current)
@@ -628,6 +675,8 @@ class Api:
                     except OSError as error:
                         warnings.append(f"Chat deleted, but attachment cleanup failed: {error}")
             self._unsaved = {key: value for key, value in self._unsaved.items() if value["chat_id"] != id}
+            if self._status_chat == id:
+                self._status_chat = None
         self._bridge.emit("chat_deleted", chat_id=id)
         return {"ok": True, "warnings": warnings}
 
@@ -686,6 +735,7 @@ class Api:
     def open_chat(self, id):
         with self._lock:
             record = self._load_chat(id)
+            self._status_chat = id
             return {"ok": True, "chat": record, "versions": chat_versions.versions(record), "pinned_files": self._pinned_files(record),
                     "unsaved_replies": deepcopy([item for item in self._unsaved.values() if item["chat_id"] == id])}
 
@@ -946,6 +996,7 @@ class Api:
                                 vision_checked=True, memories_used=memories)
 
     def _launch(self, record, **operation):
+        self._status_chat = record["id"]
         stream_id = str(uuid.uuid4())
         stream = {"chat_id": record["id"], "cancel": threading.Event(), "finished": threading.Event(),
                   "parts": [], "metrics": {}, "data_lock": threading.Lock(), "record": record,
@@ -1133,6 +1184,7 @@ class Api:
             self._bridge.emit("error", error=str(error))
 
     def _close(self, timeout=2):
+        self._status.close()
         with self._lock:
             self._closed = True
             streams = list(self._streams.values())
@@ -1194,6 +1246,7 @@ def main():
             desktop.set_theme(saved_theme(store.directory))
             bridge.start()
             instance.start(desktop.request_activation)
+            api._start_status()
         def remember(*args):
             try:
                 api.set_window_state({key: getattr(window, key) for key in ("x", "y", "width", "height")})

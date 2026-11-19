@@ -91,7 +91,7 @@ class WindowTests(unittest.TestCase):
         settings.save(self.directory, {"window": value, "idle_unload_minutes": 2})
         events = SimpleNamespace(**{name: Hook() for name in ("loaded", "moved", "resized", "closing")})
         window = SimpleNamespace(events=events, evaluate_js=Mock(), **value)
-        api = SimpleNamespace(_ensure_engine=Mock(), _close=Mock(), set_window_state=Mock())
+        api = SimpleNamespace(_ensure_engine=Mock(), _close=Mock(), _start_status=Mock(), set_window_state=Mock())
         view = SimpleNamespace(create_window=Mock(return_value=window),
             screens=[SimpleNamespace(x=0, y=0, width=1920, height=1080)])
         def start(callback, **options):
@@ -126,7 +126,7 @@ class WindowTests(unittest.TestCase):
         desktop.open_preview("file:///example.html")
         events = SimpleNamespace(loaded=Hook(), closing=Hook())
         window = SimpleNamespace(events=events, x=10, y=20, width=800, height=600)
-        api = SimpleNamespace(_ensure_engine=Mock(), _close=Mock(), set_window_state=Mock())
+        api = SimpleNamespace(_ensure_engine=Mock(), _close=Mock(), _start_status=Mock(), set_window_state=Mock())
         view = SimpleNamespace(create_window=Mock(return_value=window))
         def start(*args, **kwargs):
             events.closing.callback()

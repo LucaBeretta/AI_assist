@@ -70,6 +70,56 @@ def generation_rate(metrics):
     return None
 
 
+def snapshot_values(*, engine="Ollama", connected=False, model="", details=None, metrics=None,
+                    choice="", report=None, url="", step=0, agent_active=False,
+                    max_steps=AGENT_MAX_STEPS, used=None):
+    """Compute shared status values from plain data, without inspecting widgets."""
+    details, metrics, report = details or {}, metrics or {}, report or {}
+    choice = str(choice) if choice is not None else ""
+    server = report.get("server") if isinstance(report, dict) else None
+    stopped = engine == "Colibri" and isinstance(server, dict) and server.get("state") == "stopped"
+    state = "stopped" if stopped else ("ready" if connected else "offline")
+    detail = details.get(model) if engine == "Ollama" else None
+    where = placement(detail) if engine == "Ollama" else ("ram + ssd" if model else "")
+    model_text = (f"{model} · {where}" if where else model) if model else "no model selected"
+
+    if used is None and isinstance(metrics.get("prompt_eval_count"), int):
+        used = metrics["prompt_eval_count"] + int(metrics.get("eval_count") or 0)
+    total = int(choice) if choice.isdigit() else (detail or {}).get("context_length")
+    if used is not None and total:
+        context_text, fraction = f"{short_tokens(used)} / {short_tokens(total)}", min(1.0, used / total)
+    elif total:
+        context_text, fraction = short_tokens(total), 0.0
+    elif used is not None:
+        context_text, fraction = short_tokens(used), 0.0
+    else:
+        context_text, fraction = "default", 0.0
+
+    vram = sum(item.get("size_vram", 0) for item in details.values()) if engine == "Ollama" else 0
+    vram_text = f"vram {vram / 1024 ** 3:.1f} GB" if vram else ""
+
+    rate = generation_rate(metrics)
+    if engine == "Colibri" and isinstance(server, dict):
+        speed = server.get("tokens_per_second")
+        rate = speed if isinstance(speed, (int, float)) and not isinstance(speed, bool) and speed > 0 else rate
+    speed_text = (f"{rate:.1f} tok/s" if rate < 10 else f"{rate:.0f} tok/s") if rate else ""
+
+    agent_text = f"agent step {step} / {max_steps}" if agent_active and step else ""
+
+    if is_cloud_model(model):
+        privacy, privacy_role = "cloud model: prompts leave this computer", "amber"
+    elif url and not is_local(url):
+        privacy, privacy_role = "remote server", "amber"
+    else:
+        privacy, privacy_role = "local only", "success"
+    return {
+        "engine": f"{engine.lower()} {state}", "engine_role": "success" if state == "ready" else "muted",
+        "model": model_text, "context": context_text, "fraction": fraction,
+        "vram": vram_text, "speed": speed_text, "agent": agent_text,
+        "privacy": privacy, "privacy_role": privacy_role,
+    }
+
+
 class StatusBar:
     POLL_SECONDS = 10
 
@@ -116,65 +166,20 @@ class StatusBar:
     # ------------------------------------------------------------ values
 
     def snapshot(self):
-        """Every text and colour role the bar shows, computed from the app's state."""
+        """Gather Tk values on its UI thread, then use the shared plain-data logic."""
         app = self.app
         engine = getattr(app, "backend", "Ollama")
-        connected = "connected" in str(app.connection_label.cget("text")).lower()
-        report = getattr(app, "colibri_report", None) or {}
-        server = report.get("server") if isinstance(report, dict) else None
-        stopped = engine == "Colibri" and isinstance(server, dict) and server.get("state") == "stopped"
-        state = "stopped" if stopped else ("ready" if connected else "offline")
-        model = app.model_name.get()
-        detail = self.details.get(model) if engine == "Ollama" else None
-        where = placement(detail) if engine == "Ollama" else ("ram + ssd" if model else "")
-        model_text = (f"{model} · {where}" if where else model) if model else "no model selected"
-
-        metrics = getattr(app, "last_metrics", {}) or {}
-        used = None
-        if isinstance(metrics.get("prompt_eval_count"), int):
-            used = metrics["prompt_eval_count"] + int(metrics.get("eval_count") or 0)
-        choice = str(app.context_choice.get()) if hasattr(app, "context_choice") else ""
-        total = int(choice) if choice.isdigit() else (detail or {}).get("context_length")
-        if used is not None and total:
-            context_text, fraction = f"{short_tokens(used)} / {short_tokens(total)}", min(1.0, used / total)
-        elif total:
-            context_text, fraction = short_tokens(total), 0.0
-        elif used is not None:
-            context_text, fraction = short_tokens(used), 0.0
-        else:
-            context_text, fraction = "default", 0.0
-
-        vram = sum(item.get("size_vram", 0) for item in self.details.values()) if engine == "Ollama" else 0
-        vram_text = f"vram {vram / 1024 ** 3:.1f} GB" if vram else ""
-
-        rate = generation_rate(metrics)
-        if engine == "Colibri" and isinstance(server, dict):
-            speed = server.get("tokens_per_second")
-            rate = speed if isinstance(speed, (int, float)) and not isinstance(speed, bool) and speed > 0 else rate
-        speed_text = (f"{rate:.1f} tok/s" if rate < 10 else f"{rate:.0f} tok/s") if rate else ""
-
-        step = getattr(app, "agent_step", 0)
-        agent_text = f"agent step {step} / {AGENT_MAX_STEPS}" if getattr(app, "agent_active", False) and step else ""
-
-        if engine == "Colibri":
-            url = getattr(app, "colibri_url", "")
-        else:
-            try:
-                url = app.ollama_url() if hasattr(app, "ollama_url") else ""
-            except (RuntimeError, ValueError):
-                url = ""
-        if is_cloud_model(model):
-            privacy, privacy_role = "cloud model: prompts leave this computer", "amber"
-        elif url and not is_local(url):
-            privacy, privacy_role = "remote server", "amber"
-        else:
-            privacy, privacy_role = "local only", "success"
-        return {
-            "engine": f"{engine.lower()} {state}", "engine_role": "success" if state == "ready" else "muted",
-            "model": model_text, "context": context_text, "fraction": fraction,
-            "vram": vram_text, "speed": speed_text, "agent": agent_text,
-            "privacy": privacy, "privacy_role": privacy_role,
-        }
+        try:
+            url = getattr(app, "colibri_url", "") if engine == "Colibri" else app.ollama_url()
+        except (AttributeError, RuntimeError, ValueError):
+            url = ""
+        return snapshot_values(engine=engine,
+            connected="connected" in str(app.connection_label.cget("text")).lower(),
+            model=app.model_name.get(), details=self.details,
+            metrics=getattr(app, "last_metrics", {}),
+            choice=app.context_choice.get() if hasattr(app, "context_choice") else "",
+            report=getattr(app, "colibri_report", None), url=url,
+            step=getattr(app, "agent_step", 0), agent_active=getattr(app, "agent_active", False))
 
     # ------------------------------------------------------------ drawing
 

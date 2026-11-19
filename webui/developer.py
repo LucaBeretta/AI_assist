@@ -30,6 +30,11 @@ class DeveloperTasks:
         with self.lock:
             return any(task["record"]["model"] == name and not task["finished"].is_set() for task in self.tasks.values())
 
+    def status(self, chat_id):
+        with self.lock:
+            task = next((item for item in self.tasks.values() if item["chat_id"] == chat_id), None)
+            return deepcopy(task.get("status", {})) if task else {}
+
     def uses_project(self, project):
         with self.lock:
             return any(task["record"]["project_path"] == str(project) and not task["finished"].is_set() for task in self.tasks.values())
@@ -41,7 +46,8 @@ class DeveloperTasks:
             identity = str(uuid.uuid4())
             options["task_id"] = identity
             task = {"chat_id": chat_id, "record": deepcopy(record), "cancel": threading.Event(),
-                    "finished": threading.Event(), "pending": {}}
+                    "finished": threading.Event(), "pending": {},
+                    "status": {"active": True, "step": 0, "max_steps": options.get("max_steps", 20), "metrics": {}}}
             self.tasks[identity] = task
             thread = threading.Thread(target=self._run, args=(identity, task, options), daemon=True,
                                       name="webui-developer-" + identity[:8])
@@ -124,6 +130,11 @@ class DeveloperTasks:
             event = deepcopy(event)
             kind = event.pop("type")
             event.pop("task_id", None)
+            with self.lock:
+                if type(event.get("step")) is int:
+                    task["status"]["step"] = event["step"]
+                if kind == "metrics" and isinstance(event.get("metrics"), dict):
+                    task["status"]["metrics"] = deepcopy(event["metrics"])
             if kind in {"assistant", "tool_start", "metrics", "plan"}:
                 loading.first_output()
             self.bridge.emit(kind, task_id=identity, chat_id=task["chat_id"], **event)
@@ -139,7 +150,7 @@ class DeveloperTasks:
                 approve_plan=lambda text: self._wait(identity, task, "plan", {"text": text}), **options)
             if task["cancel"].is_set():
                 raise coding_agent.AgentCancelled("Developer task cancelled.")
-            self.save_result(task["record"], result)
+            self.save_result(task["record"], {**result, "metrics": deepcopy(task["status"]["metrics"])})
             kind, extra = "agent_done", {"text": result["assistant_text"]}
         except coding_agent.AgentCancelled as error:
             kind, extra = "agent_stopped", {"text": str(error)}

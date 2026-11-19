@@ -26,7 +26,7 @@ class WebLaunchTests(unittest.TestCase):
     def test_absolute_file_uri_and_no_http_server(self):
         loaded = Hook()
         window = SimpleNamespace(events=SimpleNamespace(loaded=loaded), evaluate_js=Mock())
-        api = SimpleNamespace(_ensure_engine=Mock(), _close=Mock())
+        api = SimpleNamespace(_ensure_engine=Mock(), _close=Mock(), _start_status=Mock())
         view = SimpleNamespace(create_window=Mock(return_value=window))
         def start(callback, **options):
             self.assertEqual(options, {"http_server": False})
@@ -39,6 +39,7 @@ class WebLaunchTests(unittest.TestCase):
         self.assertTrue(view.create_window.call_args.kwargs["text_select"])
         api._ensure_engine.assert_called_once_with()
         api._close.assert_called_once_with()
+        api._start_status.assert_called_once_with()
 
     def test_missing_dependency_is_clear_and_nonzero(self):
         error = io.StringIO()

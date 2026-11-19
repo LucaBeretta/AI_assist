@@ -29,7 +29,7 @@ import uuid
 import developer_tools as projects
 import diff_hunks
 from task_checkpoints import CheckpointStore
-from response_metrics import metrics_summary
+from response_metrics import metrics_summary, response_metrics
 
 
 _MAX_FILE_BYTES = 64000
@@ -761,7 +761,8 @@ def _run_agent(host, model, project_root, messages, on_event, approve_action,
         _check_cancelled(cancel_event)
         summary = metrics_summary(response)
         if summary:
-            _emit(on_event, "metrics", f"Step {step + 1}/{max_steps}: {summary}")
+            _emit(on_event, "metrics", f"Step {step + 1}/{max_steps}: {summary}",
+                  step=step + 1, max_steps=max_steps, metrics=response_metrics(response))
         message = response.get("message")
         if not isinstance(message, dict) or not isinstance(message.get("content", ""), str):
             raise RuntimeError("Ollama returned an unreadable agent message.")
