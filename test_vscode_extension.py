@@ -25,6 +25,12 @@ class LocalHostTests(unittest.TestCase):
             with self.subTest(host=host), self.assertRaises(ValueError):
                 BRIDGE.local_host(host)
 
+    def test_cloud_models_are_not_considered_local(self):
+        self.assertTrue(BRIDGE.is_local_model("qwen3:8b"))
+        for model in ("qwen3:cloud", "qwen3-cloud", "Qwen3:Cloud"):
+            with self.subTest(model=model):
+                self.assertFalse(BRIDGE.is_local_model(model))
+
 
 if __name__ == "__main__":
     unittest.main()

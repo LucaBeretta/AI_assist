@@ -8,7 +8,7 @@ import time
 import tkinter as tk
 from tkinter import ttk
 
-from app_core import hourly_summary, privacy, settings as app_settings
+from app_core import hourly_summary, ollama, privacy, settings as app_settings
 from model_advisor import detect_hardware
 import network_gate
 from quiet_audio import QUIET_THRESHOLD, WindowsQuietDetector, is_quiet
@@ -254,10 +254,10 @@ class HourlyStatusReport:
             prompt = "Recent chat titles and the user's own prompts from the last hour:\n" + json.dumps(
                 {"topics": snapshot["topics"], "prompts": snapshot["prompts"]}, ensure_ascii=False)
             try:
-                answer = self.app.request_ollama([
+                answer = ollama.stream_chat(host, [
                     {"role": "system", "content": "Give a concise, private work check-in in at most two short sentences. Identify progress and one useful next step. Do not invent completed work."},
                     {"role": "user", "content": prompt},
-                ], model=model, context_length=2048)
+                ], model, context_length=2048)
                 if isinstance(answer, str) and answer.strip():
                     reflection = " ".join(answer.split())[:320]
                     reflected_by_model = True

@@ -10,7 +10,7 @@ ROOT = Path(os.environ.get("AI_ASSIST_REPOSITORY", Path(__file__).resolve().pare
 sys.path.insert(0, str(ROOT))
 
 import network_gate
-from app_core import ollama
+from app_core import ollama, privacy
 from coding_agent import AgentCancelled, run_agent
 
 MAX_LINE_BYTES = 16 * 1024 * 1024
@@ -41,10 +41,14 @@ def local_host(value):
     return value.rstrip("/")
 
 
+def is_local_model(name):
+    return isinstance(name, str) and bool(name.strip()) and not privacy.is_cloud_model(name)
+
+
 def _models(request):
     try:
         host = local_host(request.get("host"))
-        models = ollama.list_models(host)
+        models = [name for name in ollama.list_models(host) if is_local_model(name)]
         try:
             running = ollama.running_details(ollama.api_json(host, "/api/ps"))
         except (RuntimeError, OSError):
@@ -92,7 +96,7 @@ def _start(request):
         try:
             host = local_host(request.get("host"))
             model = request.get("model")
-            if not isinstance(model, str) or model not in ollama.list_models(host):
+            if not is_local_model(model) or model not in ollama.list_models(host):
                 raise ValueError("Choose an installed local Ollama model.")
             project = request.get("project")
             if not isinstance(project, str) or not Path(project).is_dir():

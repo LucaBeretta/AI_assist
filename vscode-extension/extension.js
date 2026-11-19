@@ -91,6 +91,11 @@ class AgentViewProvider {
     this.post({ type: "status", text: this.status, error });
   }
 
+  rejectTurn(text) {
+    this.setStatus(text, true);
+    this.postState();
+  }
+
   ensureBridge() {
     if (this.process && !this.process.killed) return true;
     const bridge = path.join(this.context.extensionPath, "agent_bridge.py");
@@ -259,16 +264,16 @@ class AgentViewProvider {
     const prompt = typeof text === "string" ? text.trim() : "";
     if (!prompt || this.running) return;
     if (!this.model || !this.models.includes(this.model)) {
-      this.setStatus("Select an installed local Ollama model first.", true);
+      this.rejectTurn("Select an installed local Ollama model first.");
       return;
     }
     const folders = vscode.workspace.workspaceFolders || [];
     if (!folders.length) {
-      this.setStatus("Open a local project folder in VS Code before chatting with the coding agent.", true);
+      this.rejectTurn("Open a local project folder in VS Code before chatting with the coding agent.");
       return;
     }
     if (folders.some((folder) => folder.uri.scheme !== "file")) {
-      this.setStatus("The local agent needs a project folder stored on this computer.", true);
+      this.rejectTurn("The local agent needs a project folder stored on this computer.");
       return;
     }
     if (!this.currentChat()) await this.createChat();
@@ -277,14 +282,17 @@ class AgentViewProvider {
     if (chat.project) {
       folder = folders.find((item) => path.resolve(item.uri.fsPath) === path.resolve(chat.project));
       if (!folder) {
-        this.setStatus(`Reopen ${chat.project} in VS Code to continue this conversation.`, true);
+        this.rejectTurn(`Reopen ${chat.project} in VS Code to continue this conversation.`);
         return;
       }
     } else if (folders.length > 1) {
       const selected = await vscode.window.showQuickPick(folders.map((item) => ({ label: item.name, description: item.uri.fsPath, folder: item })), {
         placeHolder: "Choose the project folder the agent may inspect"
       });
-      if (!selected) return;
+      if (!selected) {
+        this.postState();
+        return;
+      }
       folder = selected.folder;
     } else {
       folder = folders[0];

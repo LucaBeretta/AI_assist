@@ -1,7 +1,11 @@
 from datetime import datetime, timezone
+import queue
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from app_core.hourly_summary import fallback_feedback, hardware_summary, recent_chats, work_snapshot
+from hourly_status import HourlyStatusReport
 from quiet_audio import is_quiet, rms_level
 
 
@@ -44,6 +48,29 @@ class HourlySummaryTests(unittest.TestCase):
         self.assertIn("RAM 8.0 GB free", text)
         self.assertIn("RTX 4060", text)
         self.assertIn("Disk 50 GB free", text)
+
+
+class HourlyCollectionTests(unittest.TestCase):
+    def test_local_model_reflection_uses_the_ollama_client(self):
+        now = datetime(2026, 11, 19, 12, 0, tzinfo=timezone.utc)
+        chat = {
+            "title": "Improve the sidebar",
+            "updated_at": now.isoformat(),
+            "messages": [{"role": "user", "content": "Tighten spacing"}],
+        }
+        app = SimpleNamespace(chat_store=SimpleNamespace(list_chats=lambda: [chat]))
+        report = object.__new__(HourlyStatusReport)
+        report.app = app
+        report.events = queue.Queue()
+        with patch("hourly_status.ollama.stream_chat", return_value="Good progress. Continue with spacing.") as stream_chat, \
+                patch("hourly_status.detect_hardware", return_value={"ollama_running": True}):
+            report._collect(now, "Not checked", "http://localhost:11434", "local-model", "Ollama", True, "Connected")
+        kind, value = report.events.get_nowait()
+        self.assertEqual(kind, "report")
+        self.assertTrue(value["reflected_by_model"])
+        self.assertEqual(value["reflection"], "Good progress. Continue with spacing.")
+        self.assertEqual(stream_chat.call_args.args[0], "http://localhost:11434")
+        self.assertEqual(stream_chat.call_args.args[2], "local-model")
 
 
 class QuietAudioTests(unittest.TestCase):
