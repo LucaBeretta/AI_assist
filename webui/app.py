@@ -24,6 +24,8 @@ import developer_tools
 from task_checkpoints import CheckpointStore
 from project_store import ProjectStore, inherited_environment
 from webui import settings
+from webui.desktop import Desktop
+from webui.preview import HtmlPreview
 
 
 log = logging.getLogger(__name__)
@@ -76,7 +78,7 @@ def _json_method(method):
 
 
 class Api:
-    def __init__(self, bridge, store=None, engine=None, hardware=None):
+    def __init__(self, bridge, store=None, engine=None, hardware=None, desktop=None):
         self._bridge = bridge
         self._store = store if store is not None else ChatStore()
         self._engine = engine if engine is not None else importlib.import_module("AIassist")
@@ -93,6 +95,22 @@ class Api:
         self._developer = DeveloperTasks(bridge, self._save_agent_result, self._engine.running_details)
         self._checkpoints = CheckpointStore(self._store.directory / "checkpoints")
         self._projects = ProjectStore(self._store.directory / "projects")
+        self._desktop = desktop if desktop is not None else Desktop()
+        self._preview = HtmlPreview(self._store.directory, self._desktop)
+
+    @_json_method
+    def preview_file(self, project, path):
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("The web UI is closing.")
+            return {"ok": True, "uri": self._preview.file(project, path)}
+
+    @_json_method
+    def preview_code(self, html):
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("The web UI is closing.")
+            return {"ok": True, "uri": self._preview.code(html)}
 
     def _load_chat(self, chat_id):
         if chat_id in self._incognito_ids:
@@ -853,6 +871,7 @@ class Api:
             finished.wait(max(0, deadline - time.monotonic()))
         with self._lock:
             self._incognito.clear()
+            self._preview.close()
             self._unsaved = {key: value for key, value in self._unsaved.items()
                              if value["chat_id"] not in self._incognito_ids}
 
