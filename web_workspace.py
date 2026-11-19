@@ -32,7 +32,12 @@ def main(argv=None):
     parser.add_argument("--host", choices=("127.0.0.1", "::1"), default="127.0.0.1",
                         help="loopback address to listen on; other addresses are refused")
     parser.add_argument("--no-browser", action="store_true", help="print the link without opening a browser")
+    lan = parser.add_argument_group("optional paired Windows inference")
+    lan.add_argument("--lan-peer-id", help="Already paired Windows node ID")
+    lan.add_argument("--lan-client-id", help="Client ID used when pairing this Mac")
     args = parser.parse_args(argv)
+    if bool(args.lan_peer_id) != bool(args.lan_client_id):
+        parser.error("Use both --lan-peer-id and --lan-client-id to opt into paired LAN inference.")
     if not 0 <= args.port <= 65535:
         parser.error("Choose a port between 1 and 65535, or 0 for any free port.")
 
@@ -66,7 +71,21 @@ def main(argv=None):
         except (OSError, ValueError) as error:
             print(f"Shared memory is unavailable: {error}", file=sys.stderr)
             memory = None
-        workspace = WebWorkspace(store, memory)
+        if args.lan_peer_id:
+            # This opt-in changes the inference provider only. The browser and
+            # its authenticated API remain bound to this Mac's loopback interface.
+            from lan_client import LANInferenceError, PairedLANProvider
+            from peer_pairing import TrustStore
+            from paired_node_watch import pairing_directory
+            trust = TrustStore(pairing_directory())
+            try:
+                remote = PairedLANProvider(args.lan_peer_id, args.lan_client_id, store=trust)
+            except LANInferenceError as error:
+                print(f"Could not enable paired LAN inference: {error}", file=sys.stderr)
+                return 1
+            workspace = WebWorkspace(store, memory, provider_factory=lambda: remote)
+        else:
+            workspace = WebWorkspace(store, memory)
 
         def daily_backup():
             try:
@@ -90,6 +109,10 @@ def main(argv=None):
         print("AI Assist web workspace (preview) is running on this computer only.")
         print(f"  Saved chats: {store.directory}")
         print("  Internet access: blocked (approvals happen in the desktop app).")
+        if args.lan_peer_id:
+            print("  Inference: authenticated paired Windows LAN node (prompts sent to Windows only).")
+        else:
+            print("  Inference: this computer only (LAN inference OFF).")
         print("  Developer agent: read-only here (edits and commands run in the desktop app).")
         print()
         print("Open this single-use link in your browser (valid for 5 minutes):")
