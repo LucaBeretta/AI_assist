@@ -61,12 +61,26 @@ def _cpu_times():
     raise OSError("Cumulative CPU counters unsupported")
 
 
+def _parse_mac_cpu_usage(output):
+    """Derive busy CPU from macOS top's idle field (user + system usage).
+
+    The format is 'CPU usage: 5.55% user, 19.41% sys, 75.2% idle'.
+    Missing/invalid output stays unknown instead of inventing 0%.
+    """
+    if not isinstance(output, str):
+        return None
+    match = re.search(r"^CPU usage:[^\n]*?([0-9]+(?:\.[0-9]+)?)%\s+idle\b",
+                      output, flags=re.IGNORECASE | re.MULTILINE)
+    return _finite_percent(100.0 - float(match.group(1))) if match else None
+
+
 def _mac_cpu_percent():
     try:
+        # On older Intel Macs 'top -l 1' can take more than 3 seconds before
+        # it prints the CPU usage line. Keep this on the background worker.
         p = subprocess.run(["top", "-l", "1", "-n", "0"], capture_output=True,
-                           text=True, timeout=3, check=False)
-        match = re.search(r"CPU usage:.*?(\d+(?:\.\d+)?)%\s+idle", p.stdout)
-        return _finite_percent(100.0 - float(match.group(1))) if match else None
+                           text=True, timeout=8, check=False)
+        return _parse_mac_cpu_usage(p.stdout)
     except (OSError, ValueError, subprocess.TimeoutExpired):
         return None
 
