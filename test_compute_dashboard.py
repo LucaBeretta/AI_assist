@@ -57,6 +57,25 @@ class PeerPrivacyTests(unittest.TestCase):
 
 
 class TelemetryTests(unittest.TestCase):
+    def test_mac_top_cpu_usage_is_parsed_from_idle_percentage(self):
+        sample = "CPU usage: 5.55% user, 19.41% sys, 75.2% idle\\n"
+        self.assertEqual(compute_telemetry._parse_mac_cpu_usage(sample), 24.8)
+        self.assertEqual(compute_telemetry._parse_mac_cpu_usage("CPU usage: 0% user, 0% sys, 100% idle"), 0.0)
+        self.assertIsNone(compute_telemetry._parse_mac_cpu_usage("no CPU usage reading"))
+        self.assertIsNone(compute_telemetry._parse_mac_cpu_usage("CPU usage: 5% user, 3% sys, 120% idle"))
+
+    def test_mac_sampler_uses_top_output_on_darwin(self):
+        from types import SimpleNamespace
+        sample = "Processes: 130 total\\nCPU usage: 5.55% user, 19.41% sys, 75.2% idle\\n"
+        with patch("compute_telemetry.subprocess.run", return_value=SimpleNamespace(stdout=sample)) as run:
+            self.assertEqual(compute_telemetry._mac_cpu_percent(), 24.8)
+        self.assertEqual(run.call_args.args[0], ["top", "-l", "1", "-n", "0"])
+
+    def test_mac_probe_timeout_reports_unknown_instead_of_zero(self):
+        import subprocess
+        with patch("compute_telemetry.subprocess.run", side_effect=subprocess.TimeoutExpired("top", 8)):
+            self.assertIsNone(compute_telemetry._mac_cpu_percent())
+
     def test_remote_ollama_is_not_queried(self):
         with patch("compute_telemetry.urllib.request.urlopen") as opener:
             result = compute_telemetry._installed_models("http://192.168.1.21:11434")
