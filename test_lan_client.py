@@ -134,7 +134,7 @@ class EncryptedInferenceTests(unittest.TestCase):
                 {"message": {"role": "assistant", "content": "RTX says READY"}, "done": False},
                 {"done": True, "eval_count": 4, "eval_duration": 1000000000},
             ]
-            raw = b"".join(json.dumps(item).encode() + b"\\n" for item in response)
+            raw = b"".join(json.dumps(item).encode() + b"\n" for item in response)
             with patch("lan_inference.local_models", return_value=["qwen3-coder:30b"]), patch(
                 "lan_inference.ollama.api_json", return_value={"models": []}
             ), patch("lan_inference.model_is_local", return_value=True), patch(
