@@ -26,6 +26,32 @@ class ChatStoreTests(unittest.TestCase):
         self.directory = Path(self.temporary.name) / "chats"
         self.store = ChatStore(self.directory)
 
+    def test_listing_again_sees_every_change_made_outside_this_store(self):
+        kept = self.store.create(model="demo", title="Kept")
+        changed = self.store.create(model="demo", title="Before")
+        removed = self.store.create(model="demo", title="Removed")
+        self.assertEqual(len(self.store.list_chats()), 3)
+        other = ChatStore(self.directory)  # another writer, e.g. a restored backup
+        record = other.load(changed["id"])
+        record["title"], record["_manual_title"] = "After", True
+        other.save(record)
+        other.delete(removed["id"])
+        (self.directory / f"{kept['id']}.json").write_text("{damaged", encoding="utf-8")
+        listed = {chat["id"]: chat["title"] for chat in self.store.list_chats()}
+        self.assertEqual(listed, {changed["id"]: "After"})
+        self.assertEqual(len(self.store.errors), 1)
+        self.assertEqual(len(self.store.list_chats()), 1)  # a damaged file is reported again, never remembered
+        self.assertEqual(len(self.store.errors), 1)
+
+    def test_changing_a_listed_record_does_not_change_the_next_listing(self):
+        chat = self.store.create(model="demo", title="Original")
+        listed = self.store.list_chats()[0]
+        listed["title"] = "Changed in memory only"
+        returned = self.store.save(dict(self.store.load(chat["id"]), draft="x"))
+        returned["messages"].append({"role": "user", "content": "changed after saving"})
+        again = self.store.list_chats()[0]
+        self.assertEqual((again["title"], again["messages"]), ("Original", []))
+
     def test_create_persists_complete_record_in_its_own_uuid_file(self):
         chat = self.store.create(model="qwen3:8b", mode="dev", project_path="C:/Projects/demo")
         self.assertEqual(str(uuid.UUID(chat["id"])), chat["id"])

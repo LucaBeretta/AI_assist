@@ -16,7 +16,12 @@ Endpoints (all JSON, all under /api, all needing a session except /api/session):
     PATCH  /api/chats/<id>                    rename
     DELETE /api/chats/<id>                    delete
     POST   /api/chats/<id>/messages           send; the answer streams as NDJSON events
-    POST   /api/requests/<id>/cancel          stop a streaming answer
+    POST   /api/chats/<id>/agent              a developer-agent task (developer chats); streams events,
+                                              including each edit and command to review
+    POST   /api/approvals/<id> {choice}       approve, second_check (commands) or reject a review
+    POST   /api/chats/<id>/undo               undo the agent's last task in this chat
+    POST   /api/projects/<chat id>/chats      a new task in the same project folder
+    POST   /api/requests/<id>/cancel          stop a streaming answer or task
     GET    /api/memory  /  PUT /api/memory    shared notes
     GET    /api/projects                      folders of saved developer chats
     GET    /api/projects/<chat id>/files      their text files (agent exclusions apply)
@@ -26,8 +31,12 @@ Endpoints (all JSON, all under /api, all needing a session except /api/session):
     GET    /api/backups, POST /api/backups    automatic backups; back up now
     POST   /api/backups/restore {name}        restore one of them (adds missing chats only)
 
-Nothing here runs commands, writes project files or approves internet access:
-those stay in the desktop window, behind its reviewed, two-step confirmations.
+No endpoint runs a command or writes a file by itself. The developer agent
+proposes edits and commands; each waits for the person's approval here, under
+the same rules as the desktop window (app_core.approvals): a command needs a
+second check and three seconds before it can be approved. The agent works only
+in project folders chosen in the desktop window. Internet approvals stay in the
+desktop window, so web mode blocks internet access.
 """
 
 import http.server
@@ -45,7 +54,9 @@ import urllib.parse
 
 from app_core import backups, ollama, settings
 from compute_telemetry import TelemetrySampler
+from app_core.agent_service import AgentService
 from app_core.chat_service import ChatService, ServiceError
+from app_core.explain import explain
 from app_core.privacy import is_cloud_model, privacy_status
 from app_core.providers import configured_provider
 from chat_store import ChatStoreError
@@ -92,6 +103,7 @@ class WebWorkspace:
         self.shared_memory = shared_memory
         self.provider_factory = provider_factory or (lambda: configured_provider(self.directory))
         self.service = ChatService(store, self.provider_factory, shared_memory)
+        self.agent = AgentService(self.service)
         self.sessions = Sessions()
         self.requests = {}
         self.lock = threading.Lock()
@@ -115,9 +127,10 @@ class WebWorkspace:
             "manages_lifecycle": info.manages_lifecycle,
             "gate": {"installed": gate["installed"], "online": gate["online"]},
             "privacy": {"text": text, "role": role},
-            # What this interface does; the desktop window does the rest.
-            "capabilities": {"chat": True, "developer_agent": False, "internet_approvals": False,
-                             "project_files": "read-only"},
+            # What this interface does; the desktop window does the rest. The agent changes
+            # files and runs commands only after a person approves each one here.
+            "capabilities": {"chat": True, "developer_agent": True, "internet_approvals": False,
+                             "project_files": "read-only", "new_project_folders": False},
             "memory": {"available": memory is not None, "enabled": bool(memory and memory.enabled)},
             "data_directory": str(self.directory),
         }
@@ -308,6 +321,12 @@ class WebWorkspace:
         return self.status()
 
 
+def workspace_answer(workspace, approval, choice):
+    if choice not in ("approve", "second_check", "reject"):
+        raise HttpError(400, "Choose approve, second_check or reject.")
+    return workspace.agent.answer(approval, choice)
+
+
 class WorkspaceServer(http.server.ThreadingHTTPServer):
     daemon_threads = True
     # Never share the port: on Windows SO_REUSEADDR would let another program bind it too.
@@ -361,6 +380,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ("PATCH", rf"/api/chats/{_CHAT}", "rename_chat", True),
         ("DELETE", rf"/api/chats/{_CHAT}", "delete_chat", True),
         ("POST", rf"/api/chats/{_CHAT}/messages", "send_message", True),
+        ("POST", rf"/api/chats/{_CHAT}/agent", "run_agent", True),
+        ("POST", r"/api/approvals/(?P<approval>[0-9a-f]{16})", "answer_approval", True),
+        ("POST", rf"/api/chats/{_CHAT}/undo", "undo", True),
+        ("POST", rf"/api/projects/{_CHAT}/chats", "new_task", True),
         ("POST", r"/api/requests/(?P<request>[0-9a-f]{16})/cancel", "cancel", True),
         ("GET", r"/api/memory", "get_memory", True),
         ("PUT", r"/api/memory", "put_memory", True),
@@ -475,6 +498,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Security-Policy", policy)
 
     def send_json(self, status, payload):
+        if status >= 400 and "error" in payload and "help" not in payload:
+            # What happened and what to do, in plain words, for problems people can fix.
+            explained = explain(payload["error"])
+            if explained:
+                payload = dict(payload, help=explained)
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.security_headers(API_POLICY)
@@ -550,7 +578,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         return {"chat": record}
 
     def api_get_chat(self, body, chat):
-        return {"chat": self.workspace.service.get(chat)}
+        record = self.workspace.service.get(chat)
+        return {"chat": record, "undo": record["mode"] == "dev" and self.workspace.agent.undo_available(chat)}
 
     def api_rename_chat(self, body, chat):
         return {"chat": ChatService.summary(self.workspace.service.rename(chat, body.get("title")))}
@@ -599,15 +628,44 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def api_restore_backup(self, body):
         return self.workspace.restore_backup(body.get("name"))
 
-    def api_send_message(self, body, chat):
-        """Stream one answer as newline-delimited JSON. This handler thread is the
-        only writer; the service's events reach it through a queue."""
-        workspace = self.workspace
-        text, model, context = body.get("content"), body.get("model", ""), body.get("context_length")
+    @staticmethod
+    def context_choice(body):
+        context = body.get("context_length")
         if context is not None and (type(context) is not int or not 2048 <= context <= 1048576):
             raise HttpError(400, "Choose a context between 2,048 and 1,048,576 tokens, or the server default.")
+        return context
+
+    def api_send_message(self, body, chat):
+        workspace = self.workspace
+        text, model, context = body.get("content"), body.get("model", ""), self.context_choice(body)
         backend = workspace.provider().name
         workspace.service.prepare(chat, text, model, backend)
+        return self.stream(chat, workspace.service.release, lambda emit, cancel: workspace.service.send(
+            chat, text, model, backend, emit, cancel, context))
+
+    def api_run_agent(self, body, chat):
+        """A developer-agent task. Each edit and command arrives as an ``approval`` event and
+        waits for POST /api/approvals/<id>; nothing is written or run before that."""
+        workspace = self.workspace
+        text, model, context = body.get("content"), body.get("model", ""), self.context_choice(body)
+        backend = workspace.provider().name
+        workspace.agent.prepare(chat, text, model, backend)
+        return self.stream(chat, workspace.agent.release, lambda emit, cancel: workspace.agent.run(
+            chat, text, model, backend, emit, cancel, context))
+
+    def api_answer_approval(self, body, approval):
+        return workspace_answer(self.workspace, approval, body.get("choice"))
+
+    def api_undo(self, body, chat):
+        return self.workspace.agent.undo(chat)
+
+    def api_new_task(self, body, chat):
+        return {"chat": self.workspace.agent.create_task(chat, self.workspace.provider().name)}
+
+    def stream(self, chat, release, work):
+        """Stream ``work(emit, cancel)``'s events as newline-delimited JSON. This handler
+        thread is the only writer; the worker's events reach it through a queue."""
+        workspace = self.workspace
         request_id = secrets.token_hex(8)
         cancel = threading.Event()
         workspace.requests[request_id] = cancel
@@ -621,11 +679,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.close_connection = True
             self.write_event({"type": "start", "request": request_id})
         except OSError:
-            workspace.service.release(chat)
+            release(chat)
             workspace.requests.pop(request_id, None)
             raise
-        threading.Thread(target=workspace.service.send, args=(chat, text, model, backend, events.put, cancel, context),
-                         name="web-answer", daemon=True).start()
+        threading.Thread(target=work, args=(events.put, cancel), name="web-work", daemon=True).start()
         connected = True
         try:
             while True:
@@ -633,12 +690,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     event = events.get(timeout=self.HEARTBEAT_SECONDS)
                 except queue.Empty:
                     event = {"type": "waiting"}
+                if event["type"] == "error" and explain(event["error"]):
+                    event = dict(event, help=explain(event["error"]))
                 if event["type"] == "done":
                     saved = event["chat"]
                     last = saved["messages"][-1] if saved["messages"] else None
                     event = {"type": "done", "stopped": event["stopped"], "chat": ChatService.summary(saved),
                              "message": last if last and last["role"] == "assistant" else None,
-                             "local": event.get("local", False)}
+                             "local": event.get("local", False), "changed": event.get("changed", 0)}
                 if connected:
                     try:
                         self.write_event(event)

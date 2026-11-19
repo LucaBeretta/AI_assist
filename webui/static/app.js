@@ -40,7 +40,8 @@ const store = createStore({
   view: "chats", navOpen: false, inspectorOpen: !narrow.matches && inspectorPreference(),
   theme: loadPreference("aiassist.theme", "system"),
   status: null, statusError: null,
-  models: [], modelsError: null, modelsLoading: false, selectedModel: loadPreference("aiassist.model", ""),
+  models: [], modelsError: null, modelsHelp: null, modelsLoading: false, selectedModel: loadPreference("aiassist.model", ""),
+  sendHelp: null, reviews: [], tick: 0, chatUndo: false,
   context: "default",
   chats: [], chatsLoading: true, chatsError: null, chatQuery: "",
   chat: null, chatLoading: false, chatError: null,
@@ -182,9 +183,10 @@ const ctx = {
       const names = result.models.map((/** @type {any} */ model) => model.name);
       let selected = store.get().selectedModel;
       if (!names.includes(selected)) selected = names[0] || "";
-      store.set({ models: result.models, modelsError: null, selectedModel: selected, modelsLoading: false });
+      store.set({ models: result.models, modelsError: null, modelsHelp: null, selectedModel: selected, modelsLoading: false });
     } catch (error) {
-      store.set({ modelsError: error instanceof Error ? error.message : String(error), modelsLoading: false });
+      store.set({ modelsError: error instanceof Error ? error.message : String(error), modelsLoading: false,
+        modelsHelp: error instanceof ApiError ? error.help : null });
     }
   },
 
@@ -236,9 +238,9 @@ const ctx = {
     if (store.get().streaming) { toast("Stop the current answer before opening another chat."); return; }
     store.set({ view: "chats", navOpen: false, chatLoading: true, chatError: null, sendError: null });
     try {
-      const { chat } = await api.get(`/api/chats/${id}`);
+      const { chat, undo } = await api.get(`/api/chats/${id}`);
       const names = store.get().models.map((/** @type {any} */ model) => model.name);
-      const patch = { chat, chatLoading: false, context: chat.context_length ? String(chat.context_length) : "default" };
+      const patch = { chat, chatUndo: Boolean(undo), chatLoading: false, context: chat.context_length ? String(chat.context_length) : "default" };
       if (chat.model && names.includes(chat.model)) Object.assign(patch, { selectedModel: chat.model });
       store.set(patch);
     } catch (error) {
@@ -286,7 +288,7 @@ const ctx = {
     const state = store.get();
     if (state.streaming) return false;
     let chat = state.chat;
-    store.set({ sendError: null });
+    store.set({ sendError: null, sendHelp: null });
     try {
       if (!chat) {
         chat = (await api.request("POST", "/api/chats", { model: state.selectedModel })).chat;
@@ -333,14 +335,15 @@ const ctx = {
             : event.local ? "Saved to shared memory." : "Answer complete.");
         } else if (event.type === "error") {
           finished = true;
-          store.set({ sendError: event.error });
+          store.set({ sendError: event.error, sendHelp: event.help || null });
           announce(`The answer failed: ${event.error}`);
         }
       });
       if (!finished) store.set({ sendError: "The connection closed before the answer finished. Your message was saved; send it again when ready." });
     } catch (error) {
       if (!(error instanceof ApiError && error.status === 401)) {
-        store.set({ sendError: error instanceof Error ? error.message : String(error) });
+        store.set({ sendError: error instanceof Error ? error.message : String(error),
+          sendHelp: error instanceof ApiError ? error.help : null });
       }
     }
     if (frame) window.cancelAnimationFrame(frame);
@@ -348,6 +351,110 @@ const ctx = {
     ctx.loadChats();
     ctx.loadStatus();
     return accepted;
+  },
+
+  /**
+   * A developer-agent task in the open developer chat. Each edit and command
+   * arrives as a review; nothing happens until the person answers it.
+   * @param {string} text
+   * @returns {Promise<boolean>} whether the request was accepted
+   */
+  async runAgent(text) {
+    const state = store.get();
+    const chat = state.chat;
+    if (state.streaming || !chat || chat.mode !== "dev") return false;
+    const chatId = chat.id;
+    store.set({ sendError: null, sendHelp: null, reviews: [],
+      streaming: { chatId, requestId: "", text: "", stopping: false, status: "Starting the agent…", steps: [] } });
+    const update = (/** @type {Record<string, any>} */ patch) => {
+      const current = store.get().streaming;
+      if (current?.chatId === chatId) store.set({ streaming: { ...current, ...patch } });
+    };
+    let accepted = false;
+    let finished = false;
+    try {
+      await api.stream(`/api/chats/${chatId}/agent`, { content: text, model: state.selectedModel,
+        context_length: state.context === "default" ? null : Number(state.context) }, (event) => {
+        const current = store.get().chat;
+        if (event.type === "start") update({ requestId: event.request });
+        else if (event.type === "user") {
+          accepted = true;
+          if (current?.id === chatId) store.set({ chat: { ...current, messages: [...current.messages, event.message] } });
+        } else if (event.type === "agent") {
+          const steps = [...(store.get().streaming?.steps || []), event.event].slice(-8);
+          update({ steps, status: event.event.text.split("\n")[0].slice(0, 160) });
+        } else if (event.type === "approval") {
+          store.set({ reviews: [...store.get().reviews, { id: event.id, action: event.action, step: 1, unlockAt: 0 }] });
+          announce(event.action.kind === "run_command" ? "Review needed: the agent wants to run a command."
+            : `Review needed: the agent wants to change ${event.action.path}.`);
+        } else if (event.type === "approval_closed") {
+          store.set({ reviews: store.get().reviews.filter((/** @type {any} */ review) => review.id !== event.id) });
+        } else if (event.type === "done") {
+          finished = true;
+          const messages = current?.id === chatId && event.message ? [...current.messages, event.message] : current?.messages;
+          if (current?.id === chatId) store.set({ chat: { ...current, ...event.chat, messages }, chatUndo: event.changed > 0 || store.get().chatUndo });
+          const changed = event.changed ? ` The AI changed ${event.changed} file${event.changed === 1 ? "" : "s"}; Undo puts them back.` : "";
+          announce((event.stopped ? "The agent was stopped." : "The agent finished.") + changed);
+          if (changed) toast(changed.trim());
+        } else if (event.type === "error") {
+          finished = true;
+          store.set({ sendError: event.error, sendHelp: event.help || null });
+          announce(`The agent stopped: ${event.error}`);
+        }
+      });
+      if (!finished) store.set({ sendError: "The connection closed before the agent finished. Check Activity in Projects." });
+    } catch (error) {
+      if (!(error instanceof ApiError && error.status === 401)) {
+        store.set({ sendError: error instanceof Error ? error.message : String(error),
+          sendHelp: error instanceof ApiError ? error.help : null });
+      }
+    }
+    store.set({ streaming: null, reviews: [] });
+    ctx.loadChats();
+    return accepted;
+  },
+
+  /**
+   * Answer a waiting review: "reject", "second_check" (commands) or "approve".
+   * @param {string} id @param {"reject" | "second_check" | "approve"} choice
+   */
+  async answerReview(id, choice) {
+    try {
+      const result = await api.request("POST", `/api/approvals/${id}`, { choice });
+      if (choice === "second_check") {
+        const unlockAt = Date.now() + Math.max(0, result.seconds_left || 0) * 1000;
+        store.set({ reviews: store.get().reviews.map((/** @type {any} */ review) =>
+          review.id === id ? { ...review, step: 2, unlockAt } : review) });
+        startTicker();
+      }
+      return true;
+    } catch (error) {
+      failed(error, "Could not answer the review");
+      return false;
+    }
+  },
+
+  /** @param {any} chat */
+  async undoTask(chat) {
+    const sure = await openDialog({ title: "Undo the AI's last task?",
+      body: "The files it changed go back to how they were, and files it created are removed. A file you changed after the AI is left as it is. Changes made by commands cannot be undone here.",
+      confirm: "Undo" });
+    if (sure !== true) return;
+    try {
+      const result = await api.request("POST", `/api/chats/${chat.id}/undo`, {});
+      toast(result.message);
+      announce(result.message);
+      await ctx.openChat(chat.id);
+    } catch (error) { failed(error, "Could not undo"); }
+  },
+
+  /** A fresh developer chat in the same project folder. @param {string} chatId */
+  async newTask(chatId) {
+    try {
+      const { chat } = await api.request("POST", `/api/projects/${chatId}/chats`, {});
+      ctx.loadChats();
+      await ctx.openChat(chat.id);
+    } catch (error) { failed(error, "Could not start a new task"); }
   },
 
   async stop() {
@@ -478,6 +585,17 @@ const ctx = {
   },
 };
 
+// A command's second check counts down on screen; the server enforces the same wait.
+let ticker = 0;
+function startTicker() {
+  if (ticker) return;
+  ticker = window.setInterval(() => {
+    const waiting = store.get().reviews.some((/** @type {any} */ review) => review.step === 2 && review.unlockAt > Date.now() - 300);
+    store.set({ tick: Date.now() });
+    if (!waiting) { window.clearInterval(ticker); ticker = 0; }
+  }, 250);
+}
+
 // ------------------------------------------------------------ shell
 
 const app = /** @type {HTMLElement} */ (document.getElementById("app"));
@@ -561,8 +679,9 @@ function renderShell(state, previous) {
           h("span", { class: "chip-text" }, status.privacy.text)),
         h("span", { class: `chip ${status.endpoint_local ? "is-success" : "is-amber"}`, title: status.endpoint },
           h("span", { class: "chip-text" }, engine)),
-        h("span", { class: "chip is-muted", title: "Edits, commands and internet approvals run in the desktop app" },
-          h("span", { class: "chip-text" }, "agent: desktop app")));
+        h("span", { class: "chip is-muted",
+          title: "The developer agent shows each edit and each command for your approval. Internet approvals stay in the desktop app." },
+          h("span", { class: "chip-text" }, "agent: you approve each step")));
     }
   }
 }

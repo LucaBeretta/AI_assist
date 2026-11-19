@@ -10,8 +10,11 @@ import tkinter as tk
 from tkinter import END, filedialog, messagebox, scrolledtext, simpledialog, ttk
 
 from app_core import approvals, backups, documents
+from app_core.activity import activity_record
 from app_core.checkpoints import CheckpointError, CheckpointStore
+from app_core.explain import ACTION_LABELS, explain
 from backup_ui import BackupWindow
+from welcome_ui import WelcomeGuide, ready
 from app_core import conversation as conversation_rules
 from app_core import settings as app_settings
 from app_core.settings import load_file_limit  # noqa: F401  (long-standing name)
@@ -160,6 +163,8 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         self.backup_window = None
         self.answer_footer = ""
         self.documents_indexing = False
+        self.welcome = None
+        self.last_lifecycle = None
         self.initialize_backend()
         self.initialize_hybrid()
         self.agent_settings = self.chat_store.directory / "agent.settings" if self.chat_store else None
@@ -347,6 +352,9 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         self.settings_menu.add_command(label="Connection log...", command=self.open_connection_log)
         self.settings_menu.add_command(label="Firewall lock...", command=self.open_firewall_lock)
         self.settings_menu.add_command(label="Compute monitor...", command=self.open_compute_dashboard)
+        self.settings_menu.add_separator()
+        self.settings_menu.add_command(label="Get started...", command=self.open_welcome)
+        self.settings_menu.add_command(label="Use the browser version...", command=self.switch_to_browser)
         self.menubar.add_cascade(label="Settings", menu=self.settings_menu)
         self.root.configure(menu=self.menubar)
         self.main_frame = tk.Frame(self.root, bg=c["background"])
@@ -373,6 +381,13 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
                                         c["background"], c["muted"], c["user"])
         self.chat_actions.config(font=(self.mono, 9), padx=10, pady=5)
         self.chat_actions.pack(side="right")
+        self.documents_menu = tk.Menu(self.root, tearoff=False)
+        self.documents_menu.add_command(label="Use another folder...", command=self.choose_documents)
+        self.documents_menu.add_command(label="Stop using documents", command=self.stop_using_documents)
+        self.documents_button = self.button(header, "Use documents...", self.documents_clicked,
+                                            c["background"], c["muted"], c["user"])
+        self.documents_button.config(font=(self.mono, 9), padx=10, pady=5)
+        self.documents_button.pack(side="right", padx=(0, 8))
         self.theme_button = self.button(header, "\u2600", lambda: self.appearance.toggle(),
                                         c["background"], c["muted"], c["user"])
         self.theme_button.config(font=("Segoe UI Symbol", 11), padx=9, pady=3, highlightthickness=1, highlightbackground=c["border"])
@@ -539,6 +554,7 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
             self.chat_menu.entryconfigure(label, state="normal" if self.current_chat else "disabled")
         ordinary = self.current_mode == "chat" and self.chat_store is not None and not self.documents_indexing
         self.chat_menu.entryconfigure("Use documents from a folder...", state="normal" if ordinary else "disabled")
+        self.documents_button.config(state="normal" if ordinary and not busy else "disabled")
         self.chat_menu.entryconfigure("Stop using documents", state="normal" if ordinary and
                                       (self.current_chat or {}).get("library_path") else "disabled")
         ready = bool(self.model_name.get()) and not busy and (self.current_mode != "dev" or self.project_ready)
@@ -576,6 +592,15 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
             self.chat_subtitle.config(text=(self.model_name.get() or "Choose a model") + (
                 "  /  Coding agent" if self.current_mode == "dev" else
                 f"  /  Documents: {Path(library).name}" if library else "  /  Local conversation"))
+        if hasattr(self, "documents_button"):
+            library = (self.current_chat or {}).get("library_path", "")
+            self.documents_button.config(text=f"Documents: {Path(library).name}" if library else "Use documents...")
+            # Documents belong to ordinary chats; developer chats work on project files instead.
+            if self.current_section == "chat" and self.current_mode == "chat":
+                if not self.documents_button.winfo_manager():
+                    self.documents_button.pack(side="right", padx=(0, 8), after=self.chat_actions)
+            elif self.documents_button.winfo_manager():
+                self.documents_button.pack_forget()
 
     def show_section(self, section):
         if self.closing:
@@ -977,6 +1002,8 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
             remember = self.button(heading, "Add to memory", lambda: self.add_shared_note(message), bg, c["muted"], c["user"])
             remember.config(font=("Segoe UI", 8), padx=6, pady=2)
             remember.pack(side="right", padx=(0, 6))
+        if role == "error":
+            self.add_error_help(card, message, bg)
         body = render_message(card, message, self, role=role)
         body.pack(fill="x", padx=14, pady=(2, 12))
         if role == "ai":
@@ -1152,17 +1179,7 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
             self.workspace_events.put(("preview", request, None, str(error)))
 
     def log_activity(self, event):
-        record = {"type": str(event.get("type", "status")), "text": str(event.get("text", ""))}
-        if isinstance(event.get("path"), str):
-            record["path"] = event["path"]
-        if isinstance(event.get("command"), str):
-            record["command"] = event["command"]
-        if record["type"] == "changed" and isinstance(event.get("destination"), str):
-            record["destination"] = event["destination"]
-        if record["type"] == "changed" and isinstance(event.get("diff"), str):
-            record["diff"] = event["diff"][:40000]
-            if len(event["diff"]) > 40000:
-                record["diff"] += "\n[Diff truncated for saved history.]"
+        record = activity_record(event)
         self.dev_activity.append(record)
         if record["type"] == "changed":
             self.project_dirty = True
@@ -1177,6 +1194,49 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         if record["type"] == "changed":
             self.refresh_changes()
         self.refresh_verification()
+
+    def add_error_help(self, card, message, bg):
+        """Above an error's details: what happened, what to do, and the button that fixes it."""
+        help_ = explain(message)
+        if help_ is None:
+            return
+        c = self.COLORS
+        box = tk.Frame(card, bg=bg)
+        box.pack(fill="x", padx=14, pady=(2, 0))
+        tk.Label(box, text=help_["title"], bg=bg, fg=c["ink"], font=("Segoe UI", 11, "bold"), anchor="w",
+                 justify="left", wraplength=560).pack(fill="x")
+        tk.Label(box, text=help_["help"], bg=bg, fg=c["muted"], font=("Segoe UI", 10), anchor="w",
+                 justify="left", wraplength=560).pack(fill="x", pady=(2, 6))
+        if help_["action"]:
+            button = self.button(box, ACTION_LABELS[help_["action"]], lambda: self.run_error_action(help_["action"]),
+                                 c["accent"], c["on_accent"], c["accent_hover"])
+            button.config(font=("Segoe UI", 9), padx=12, pady=5)
+            button.pack(anchor="w", pady=(0, 6))
+        tk.Label(box, text="Details:", bg=bg, fg=c["muted"], font=("Segoe UI", 8), anchor="w").pack(fill="x")
+
+    def run_error_action(self, action):
+        if action == "refresh":
+            self.manage_models("refresh")
+        elif action == "get_started":
+            self.open_welcome()
+        elif action == "find_model":
+            self.open_model_suggestions()
+        elif action == "documents":
+            self.choose_documents()
+
+    def open_model_suggestions(self):
+        """Find & download models, on the models suggested for this computer."""
+        self.open_downloads()
+        dialog = self.download_dialog
+        if dialog is not None and not dialog.closed and hasattr(dialog, "advisor") and self.backend == "Ollama":
+            dialog.notebook.select(dialog.advisor.frame)
+
+    def loading_note(self, model):
+        """Why the first answer is slow, when the model is not in memory yet; "" when it is."""
+        if self.backend != "Ollama" or model in self.loaded_models:
+            return ""
+        return (f"Loading {model} into memory first. The first answer can take up to a minute; "
+                "the next ones are faster.")
 
     def undo_last_task(self):
         """Put back the files the AI's last task in this chat changed, after the person confirms."""
@@ -1279,7 +1339,7 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
             self.agent_active = True
             self.agent_cancel = threading.Event()
             self.dev_tabs.select(self.activity_tab)
-            self.set_status("Checking model tools and preparing the coding agent...")
+            self.set_status(self.loading_note(model) or "Checking model tools and preparing the coding agent...")
             system_prompt = conversation_rules.developer_system_prompt(
                 self.project_path, QUALITY_GUIDANCE if self.active_hybrid_config else "",
                 self.project_context, self.dev_activity)
@@ -1291,7 +1351,7 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
                                                              messages, context or 4096, self.agent_cancel), daemon=True).start()
         else:
             messages = conversation_rules.chat_messages(self.conversation, shared_context)
-            self.set_status(f"{model} is thinking...")
+            self.set_status(self.loading_note(model) or f"{model} is thinking...")
             self.chat_cancel = threading.Event()
             self.answer_footer = ""
             library = (self.current_chat or {}).get("library_path")
@@ -1601,7 +1661,8 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
             else:
                 self.set_status("Stopped before the model answered.")
         elif error:
-            self.set_status(error, error=True)
+            explained = explain(error)
+            self.set_status(f"{explained['title']}. {error}" if explained else error, error=True)
             self.display_message("Request failed", error, "error")
         else:
             response = response or "The agent finished without a final message. Check Activity for its results."
@@ -1609,6 +1670,13 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
             self.display_message("AI Assist", response, "ai")
             summary = metrics_summary(self.last_metrics)
             self.set_status(summary or "Ready for your next message.")
+        if self.current_mode == "dev":
+            self.refresh_undo()
+        changed = (len(self.agent_checkpoint.manifest["files"])
+                   if self.current_mode == "dev" and self.agent_checkpoint is not None else 0)
+        if changed:
+            self.set_status(f"{self.status_label.cget('text')}  The AI changed {changed} file{'s' if changed != 1 else ''}: "
+                            "Changes > Undo the AI's last task puts them back.", error=bool(error))
         self.persist_current()
         if self.project_dirty and self.current_mode == "dev" and self.project_path:
             self.project_dirty = False
@@ -1665,6 +1733,39 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
             self.update_heading()
             if self.storage_error:
                 self.set_status(f"Chat storage needs attention: {self.storage_error}", error=True)
+            self.maybe_show_welcome()
+        elif was_busy and not self.lifecycle_busy and self.welcome is not None:
+            self.welcome.render()
+
+    def switch_to_browser(self):
+        """Close this window and open the browser version, signed in (AIassist.py starts it after closing)."""
+        if self.busy():
+            self.set_status("Wait for the current work to finish, or stop it, before switching.")
+            return
+        if not messagebox.askokcancel(
+                "Use the browser version?",
+                "This window closes and AI Assist opens in your web browser, on this computer only, with the same "
+                "chats. Only one of the two can use your chats at a time.\n\nIn the browser version you can chat, "
+                "use documents and read developer projects. The developer agent and model downloads stay in this "
+                "window for now.\n\nA small window stays open while it runs: close it to stop the browser version.",
+                parent=self.root):
+            return
+        self.switch_to_web = True
+        self.close()
+
+    def maybe_show_welcome(self):
+        """Open Get started after the first model check when something is missing (once per start)."""
+        if (self.closing or self.backend != "Ollama" or ready(self.last_lifecycle, self.backend)
+                or not WelcomeGuide.wanted(self)):
+            return
+        self.open_welcome()
+
+    def open_welcome(self):
+        if self.welcome is not None and self.welcome.window.winfo_exists():
+            self.welcome.window.lift()
+            self.welcome.render()
+            return
+        self.welcome = WelcomeGuide(self)
 
     def send_or_stop(self):
         if self.is_waiting:
@@ -1774,6 +1875,14 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
             self.workspace_events.put(("doc_index", 0, (library.root.name, stats), error))
 
         threading.Thread(target=work, name="documents", daemon=True).start()
+
+    def documents_clicked(self):
+        """The header's Documents button: choose a folder, or change or stop the one in use."""
+        if not (self.current_chat or {}).get("library_path"):
+            self.choose_documents()
+            return
+        button = self.documents_button
+        self.documents_menu.tk_popup(button.winfo_rootx(), button.winfo_rooty() + button.winfo_height())
 
     def stop_using_documents(self):
         if self.busy() or not (self.current_chat or {}).get("library_path"):
@@ -1932,8 +2041,9 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
             if job:
                 self.root.after_cancel(job)
         self.draft_job = self.search_job = self.backup_job = None
-        if self.backup_window is not None and self.backup_window.window.winfo_exists():
-            self.backup_window.window.destroy()
+        for window in (self.backup_window, self.welcome):
+            if window is not None and window.window.winfo_exists():
+                window.window.destroy()
         self.finish_close()
 
     def finish_close(self):

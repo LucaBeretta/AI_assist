@@ -277,13 +277,16 @@ class SecurityTests(ServerCase):
         response, _ = self.call("POST", "/api/chats", raw=b"{}", headers={"Content-Length": str(2 * 1024 * 1024)})
         self.assertEqual(response.status, 413)
 
-    def test_the_api_has_no_command_write_or_approval_endpoints(self):
-        # Adding an endpoint is a security decision: update this list deliberately.
+    def test_the_api_has_no_direct_command_write_or_internet_endpoints(self):
+        # Adding an endpoint is a security decision: update this list deliberately. Edits and commands
+        # happen only through the agent's reviewed approvals (/agent, /approvals); none runs directly.
         self.assertEqual(sorted((method, pattern) for method, pattern, _, _ in Handler.ROUTES), sorted([
             ("POST", r"/api/session"), ("POST", r"/api/monitor-launch"), ("POST", r"/api/monitor-session"), ("GET", r"/api/status"), ("GET", r"/api/models"), ("GET", r"/api/models/details"),
             ("GET", r"/api/hardware"), ("GET", r"/api/compute"), ("GET", r"/api/chats"), ("POST", r"/api/chats"),
             ("GET", r"/api/chats/(?P<chat>[0-9a-f-]{36})"), ("PATCH", r"/api/chats/(?P<chat>[0-9a-f-]{36})"),
             ("DELETE", r"/api/chats/(?P<chat>[0-9a-f-]{36})"), ("POST", r"/api/chats/(?P<chat>[0-9a-f-]{36})/messages"),
+            ("POST", r"/api/chats/(?P<chat>[0-9a-f-]{36})/agent"), ("POST", r"/api/approvals/(?P<approval>[0-9a-f]{16})"),
+            ("POST", r"/api/chats/(?P<chat>[0-9a-f-]{36})/undo"), ("POST", r"/api/projects/(?P<chat>[0-9a-f-]{36})/chats"),
             ("POST", r"/api/requests/(?P<request>[0-9a-f]{16})/cancel"), ("GET", r"/api/memory"), ("PUT", r"/api/memory"),
             ("POST", r"/api/memory/notes"), ("GET", r"/api/projects"), ("GET", r"/api/projects/(?P<chat>[0-9a-f-]{36})/files"),
             ("GET", r"/api/projects/(?P<chat>[0-9a-f-]{36})/file"), ("GET", r"/api/log"), ("PUT", r"/api/settings/engine"),
@@ -356,8 +359,8 @@ class ApiTests(ServerCase):
     def test_status_says_what_this_interface_cannot_do(self):
         response, body = self.call("GET", "/api/status")
         self.assertEqual(response.status, 200)
-        self.assertEqual(body["capabilities"], {"chat": True, "developer_agent": False, "internet_approvals": False,
-                                                "project_files": "read-only"})
+        self.assertEqual(body["capabilities"], {"chat": True, "developer_agent": True, "internet_approvals": False,
+                                                "project_files": "read-only", "new_project_folders": False})
         self.assertEqual((body["engine"], body["endpoint_local"]), ("Ollama", True))
 
     def test_compute_endpoint_requires_session_and_exposes_local_only(self):
@@ -426,7 +429,7 @@ class ApiTests(ServerCase):
         developer = self.store.save(self.store.new_record(model="alpha:8b", mode="dev", project_path="/p"))
         response, payload = self.call("POST", f"/api/chats/{developer['id']}/messages", {"content": "Hi", "model": "alpha:8b"})
         self.assertEqual(response.status, 409)
-        self.assertIn("desktop app", payload["error"])
+        self.assertIn("developer agent", payload["error"])
 
     def stream_with_stop(self, stop):
         self.provider = ScriptedProvider(chunks=("Partial",), hold=True)

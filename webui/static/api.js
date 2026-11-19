@@ -12,10 +12,11 @@ import { createLineSplitter } from "./ndjson.js";
 const TOKEN_KEY = "aiassist.session";
 
 export class ApiError extends Error {
-  /** @param {string} message @param {number} status */
-  constructor(message, status) {
+  /** @param {string} message @param {number} status @param {any} [help] what happened and what to do */
+  constructor(message, status, help = null) {
     super(message);
     this.status = status;
+    this.help = help;
   }
 }
 
@@ -38,16 +39,18 @@ export function createApi() {
   /** @param {Response} response */
   async function failure(response) {
     let message = `AI Assist answered ${response.status}.`;
+    let help = null;
     try {
       const body = await response.json();
       if (body && typeof body.error === "string") message = body.error;
+      if (body && body.help && typeof body.help.title === "string") help = body.help;
     } catch { /* Not JSON: keep the status message. */ }
     if (response.status === 401) {
       token = "";
       storage()?.removeItem(TOKEN_KEY);
       expired.forEach((listener) => listener());
     }
-    return new ApiError(message, response.status);
+    return new ApiError(message, response.status, help);
   }
 
   return {

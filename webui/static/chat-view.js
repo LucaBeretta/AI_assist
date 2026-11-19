@@ -2,7 +2,7 @@
 /** Chats: the saved-chat list (sidebar) and the conversation (main area). */
 import { h, icon, replace } from "./dom.js";
 import { renderMarkdown } from "./markdown.js";
-import { relativeTime } from "./format.js";
+import { diffLines, relativeTime } from "./format.js";
 
 const SUGGESTIONS = [
   ["Explain an idea", "Explain a complex idea with a useful everyday example."],
@@ -10,6 +10,29 @@ const SUGGESTIONS = [
   ["Think it through", "Help me think through a decision. Start by asking what I am deciding."],
   ["Learn something", "Help me learn something new. Ask what topic I want to explore."],
 ];
+// Fixes that only the desktop app can do: say where to go instead.
+const DESKTOP_FIXES = {
+  get_started: "Open the desktop app's Settings > Get started.",
+  find_model: "Use Find & download models in the desktop app, or choose another installed model above.",
+  documents: "Choose the folder again in the desktop app (Chat options > Use documents from a folder).",
+};
+
+/**
+ * What happened and what to do, above an error's details.
+ * @param {any} ctx @param {any} help
+ */
+export function errorHelp(ctx, help) {
+  if (!help) return null;
+  return h("div", { class: "error-help" },
+    h("strong", null, help.title), h("p", null, help.help),
+    help.action === "refresh"
+      ? h("button", { class: "button button-small button-primary", type: "button",
+        onClick: () => { ctx.loadModels(); ctx.loadStatus(); ctx.announce("Checking again."); } }, "Check again")
+      : DESKTOP_FIXES[/** @type {keyof typeof DESKTOP_FIXES} */ (help.action)]
+        ? h("p", { class: "muted" }, DESKTOP_FIXES[/** @type {keyof typeof DESKTOP_FIXES} */ (help.action)]) : null,
+    h("span", { class: "muted" }, "Details:"));
+}
+
 const CONTEXTS = [["default", "Server default"], ["4096", "4k context"], ["8192", "8k context"], ["16384", "16k context"],
   ["32768", "32k context"], ["65536", "64k context"], ["131072", "128k context"]];
 
@@ -58,7 +81,11 @@ export function createChatView(ctx) {
   const actions = h("div", { class: "card-row" });
   const header = h("header", { class: "view-header" }, h("div", { class: "view-heading" }, title, subtitle), actions);
   const messages = h("div", { class: "messages", role: "log", "aria-label": "Conversation", "aria-live": "off" });
-  const body = h("div", { class: "view-body" }, h("div", { class: "conversation" }, messages));
+  // The agent's edits and commands wait here for the person's answer.
+  const reviews = h("div", { class: "reviews" });
+  const body = h("div", { class: "view-body" }, h("div", { class: "conversation" }, messages, reviews));
+  /** @type {Map<string, {element: HTMLElement, run: HTMLButtonElement | null, step: number}>} */
+  const reviewCards = new Map();
   const textarea = /** @type {HTMLTextAreaElement} */ (h("textarea", {
     id: "composer-input", rows: 2, placeholder: "Message your local model…", "aria-label": "Message",
     "aria-describedby": "composer-hint",
@@ -97,7 +124,7 @@ export function createChatView(ctx) {
     if (!text || sendButton.disabled) return;
     textarea.value = "";
     grow();
-    const accepted = await ctx.send(text);
+    const accepted = state.chat?.mode === "dev" ? await ctx.runAgent(text) : await ctx.send(text);
     // A message the server never accepted goes back into the composer.
     if (!accepted && !textarea.value) { textarea.value = text; grow(); }
     textarea.focus();
@@ -119,6 +146,71 @@ export function createChatView(ctx) {
       bodyNode);
   }
 
+  /** One review: what the agent wants to do, and the buttons to answer. @param {any} review */
+  function reviewCard(review) {
+    const action = review.action;
+    const command = action.kind === "run_command";
+    const second = command && review.step === 2;
+    const headingId = `review-${review.id}`;
+    const heading = h("h2", { id: headingId, tabindex: "-1" }, command
+      ? (second ? "Second check: run this command?" : "Run this command?")
+      : `${action.exists ? "Change" : "Create"} ${action.path}`);
+    const detail = command
+      ? (second
+        ? h("p", { class: "review-warning" }, "It runs as a separate program with your account, outside the internet gate: "
+          + "AI Assist cannot see or stop what it does online. Run it only if you expect what it does.")
+        : h("p", { class: "muted" }, `Folder: ${action.cwd}`, action.description ? h("br") : null, action.description || ""))
+      : h("p", { class: "muted" }, `File: ${action.destination || action.path}. Review the exact change before applying it.`);
+    const shown = command
+      ? h("pre", { class: "review-command", tabindex: "0" }, h("code", null, action.command))
+      : h("pre", { class: "review-diff", tabindex: "0", "aria-label": `Changes to ${action.path}` }, h("code", null,
+        diffLines(action.diff || "").map((line) => h("span", { class: `diff-line ${line.kind}` }, line.text + "\n"))));
+    /** One answer at a time: both buttons wait for the server's reply. @param {string} choice */
+    const answer = async (choice) => {
+      reject.disabled = true;
+      primary.disabled = true;
+      if (!(await ctx.answerReview(review.id, choice)) && element.isConnected) {
+        reject.disabled = false;
+        primary.disabled = false;
+      }
+    };
+    const reject = /** @type {HTMLButtonElement} */ (h("button", { class: "button", type: "button",
+      onClick: () => answer("reject") }, "Reject"));
+    const primary = /** @type {HTMLButtonElement} */ (h("button", { class: "button button-primary", type: "button",
+      onClick: () => answer(!command ? "approve" : second ? "approve" : "second_check") },
+      command ? (second ? "Run" : "Run command") : "Apply change"));
+    const element = h("section", { class: `review${second ? " is-second" : ""}`, "aria-labelledby": headingId },
+      h("div", { class: "review-kicker" }, "Waiting for your review"), heading, detail, shown,
+      action.diff_shortened ? h("p", { class: "muted" }, "The diff is long; only its beginning is shown.") : null,
+      h("div", { class: "card-row review-actions" }, reject, primary));
+    return { element, run: second ? primary : null, step: review.step };
+  }
+
+  /** Keep the review cards in step with the waiting reviews; count down a command's second check. @param {any} state */
+  function renderReviews(state) {
+    const open = new Set(state.reviews.map((/** @type {any} */ review) => review.id));
+    for (const [id, card] of reviewCards) {
+      if (!open.has(id)) { card.element.remove(); reviewCards.delete(id); }
+    }
+    for (const review of state.reviews) {
+      const existing = reviewCards.get(review.id);
+      if (!existing || existing.step !== review.step) {
+        const card = reviewCard(review);
+        if (existing) existing.element.replaceWith(card.element);
+        else reviews.appendChild(card.element);
+        reviewCards.set(review.id, card);
+        body.scrollTop = body.scrollHeight;
+        /** @type {HTMLElement | null} */ (card.element.querySelector("h2"))?.focus();
+      }
+      const card = /** @type {any} */ (reviewCards.get(review.id));
+      if (card.run) {
+        const left = Math.ceil((review.unlockAt - Date.now()) / 1000);
+        card.run.disabled = left > 0;
+        card.run.textContent = left > 0 ? `Run (${left})` : "Run";
+      }
+    }
+  }
+
   /** @param {any} state */
   function emptyState(state) {
     const ready = Boolean(state.selectedModel) && !state.streaming;
@@ -127,7 +219,8 @@ export function createChatView(ctx) {
       h("h2", { id: "empty-title" }, "What are we working on?"),
       h("p", { class: "muted" }, "A question, a rough idea, a fresh start. Your models run on this computer, and nothing goes online from here."),
       state.modelsError ? h("div", { class: "notice is-amber", role: "alert" }, icon("lock"),
-        h("div", null, h("strong", null, "No models answered. "), state.modelsError)) : null,
+        h("div", null, state.modelsHelp ? errorHelp(ctx, state.modelsHelp) : h("strong", null, "No models answered. "),
+          state.modelsError)) : null,
       h("div", { class: "suggestions" }, SUGGESTIONS.map(([label, prompt]) =>
         h("button", { class: "suggestion", type: "button", disabled: !ready,
           onClick: () => { textarea.value = prompt; grow(); textarea.focus(); } },
@@ -144,17 +237,25 @@ export function createChatView(ctx) {
     // Header
     title.textContent = chat ? chat.title : "New chat";
     const library = chat?.library_path ? String(chat.library_path).split(/[\\/]/).filter(Boolean).pop() : "";
+    const project = developer ? String(chat.project_path || "").split(/[\\/]/).filter(Boolean).pop() : "";
     subtitle.textContent = chat
-      ? `${chat.backend || "Ollama"} / ${chat.model || "no model"}${developer ? "  /  developer chat (read-only here)" : ""}`
+      ? `${chat.backend || "Ollama"} / ${chat.model || "no model"}${developer ? `  /  developer · ${project}` : ""}`
         + (library ? `  /  documents: ${library}` : "")
       : `${state.status?.engine || "engine"} / ${state.selectedModel || "choose a model"}`;
-    replace(actions, chat && !developer ? [
+    const busy = Boolean(state.streaming);
+    replace(actions, chat ? [
+      developer ? h("button", { class: "button button-small", type: "button", disabled: busy || !state.chatUndo,
+        title: state.chatUndo ? "Put back the files the AI's last task changed" : "No AI file changes to undo",
+        onClick: () => ctx.undoTask(chat) }, icon("refresh"), "Undo last task") : null,
+      developer ? h("button", { class: "button button-small", type: "button", onClick: () => ctx.openProject(chat.id) },
+        icon("folder"), "Files") : null,
+      developer ? h("button", { class: "button button-small", type: "button", disabled: busy, onClick: () => ctx.newTask(chat.id) },
+        icon("plus"), "New task") : null,
       h("button", { class: "icon-button", type: "button", "aria-label": "Rename chat", title: "Rename", onClick: () => ctx.renameChat(chat),
-        disabled: Boolean(state.streaming) }, icon("edit")),
+        disabled: busy }, icon("edit")),
       h("button", { class: "icon-button", type: "button", "aria-label": "Delete chat", title: "Delete", onClick: () => ctx.deleteChat(chat),
-        disabled: Boolean(state.streaming) }, icon("trash")),
-    ] : developer ? [h("button", { class: "button button-small", type: "button", onClick: () => ctx.openProject(chat.id) },
-      icon("folder"), "Open project")] : []);
+        disabled: busy }, icon("trash")),
+    ] : []);
 
     // Messages: rebuilt when the chat or its message count changes; streaming text updates in place.
     const key = [chat?.id || "new", chat?.messages.length || 0, state.chatLoading, state.chatError || "", state.sendError || "",
@@ -173,11 +274,13 @@ export function createChatView(ctx) {
       if (state.sendError) {
         messages.appendChild(h("div", { class: "message is-error", role: "alert" },
           h("div", { class: "message-header" }, h("span", { class: "message-role" }, "request failed")),
+          errorHelp(ctx, state.sendHelp),
           h("div", { class: "message-body" }, state.sendError)));
       }
       body.scrollTop = body.scrollHeight;
     }
     if (state.streaming && state.streaming.chatId === chat?.id) {
+      const fresh = !streamNode;
       if (!streamNode) {
         streamNode = h("div", { class: "message-body" });
         messages.appendChild(h("article", { class: "message is-assistant", "aria-busy": "true", "aria-label": "AI Assist, writing" },
@@ -188,12 +291,24 @@ export function createChatView(ctx) {
       }
       const status = messages.querySelector(".stream-status");
       if (status) status.textContent = state.streaming.stopping ? "stopping…" : state.streaming.text ? "writing…" : state.streaming.status || "writing…";
-      if (state.streaming.text !== previous?.streaming?.text) {
+      if (developer) {
+        if (fresh || state.streaming.steps !== previous?.streaming?.steps) {
+          // The agent's latest steps: what it read, changed and ran.
+          replace(streamNode, h("ol", { class: "agent-steps", "aria-label": "Agent steps" },
+            (state.streaming.steps || []).map((/** @type {any} */ step) => h("li", { class: `agent-step is-${step.type}` },
+              h("span", { class: "agent-step-type" }, String(step.type).replace(/_/g, " ")),
+              h("span", null, step.command || String(step.text || "").split("\n")[0].slice(0, 200))))));
+        }
+      } else if (fresh || state.streaming.text !== previous?.streaming?.text) {
         const nearBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 120;
         replace(streamNode, renderMarkdown(state.streaming.text, document));
         if (nearBottom) body.scrollTop = body.scrollHeight;
       }
     }
+    if (state.reviews !== previous?.reviews || state.tick !== previous?.tick || chat?.id !== previous?.chat?.id) {
+      renderReviews(state.streaming && state.streaming.chatId === chat?.id ? state : { reviews: [] });
+    }
+
     // Composer
     if (state.models !== previous?.models || state.selectedModel !== previous?.selectedModel) {
       replace(modelSelect, state.models.length
@@ -206,21 +321,24 @@ export function createChatView(ctx) {
     contextSelect.disabled = colibri || Boolean(state.streaming);
     contextSelect.title = colibri ? "Colibri's context is set when its model is installed" : "Context for this chat's next answer";
     modelSelect.disabled = Boolean(state.streaming) || !state.models.length;
-    const blocked = developer || mismatch;
-    form.hidden = Boolean(developer);
-    replace(notice, developer
-      ? h("div", { class: "notice" }, icon("lock"), h("div", null, h("strong", null, "Read-only here. "),
-        "Developer chats run in the desktop app, where every edit and command is reviewed before it happens. ",
-        h("button", { class: "button button-small", type: "button", onClick: () => ctx.openProject(chat.id) }, "View its project")))
-      : mismatch ? h("div", { class: "notice is-amber" }, icon("lock"), h("div", null,
-        `This chat was written with ${chat.backend || "Ollama"}. Switch the engine in Settings to continue it.`))
+    const blocked = mismatch;
+    replace(notice, mismatch ? h("div", { class: "notice is-amber" }, icon("lock"), h("div", null,
+      `This chat was written with ${chat.backend || "Ollama"}. Switch the engine in Settings to continue it.`))
+      : developer && !state.streaming ? h("div", { class: "notice" }, icon("lock"), h("div", null,
+        h("strong", null, "You approve every step. "), "The agent shows each file change and each command here before "
+        + "it happens. Commands run with your account, outside the internet gate."))
         : null);
     const streaming = Boolean(state.streaming);
+    textarea.placeholder = developer ? "Describe the change you need…" : "Message your local model…";
+    textarea.setAttribute("aria-label", developer ? "Task for the developer agent" : "Message");
     sendButton.disabled = !streaming && (Boolean(blocked) || !state.selectedModel);
-    replace(sendButton, streaming ? [icon("stop"), state.streaming.stopping ? "Stopping…" : "Stop"] : [icon("send"), "Send"]);
-    sendButton.setAttribute("aria-label", streaming ? "Stop the answer" : "Send message");
-    hint.textContent = streaming ? "Stop keeps the part already written." : state.selectedModel
-      ? "Enter to send · Shift+Enter for a new line" : "Choose a model to start.";
+    replace(sendButton, streaming ? [icon("stop"), state.streaming.stopping ? "Stopping…" : "Stop"]
+      : [icon("send"), developer ? "Run agent" : "Send"]);
+    sendButton.setAttribute("aria-label", streaming ? (developer ? "Stop the agent" : "Stop the answer")
+      : developer ? "Run the developer agent" : "Send message");
+    hint.textContent = streaming ? (developer ? "Stop declines what is waiting; applied changes stay (Undo puts them back)."
+      : "Stop keeps the part already written.")
+      : state.selectedModel ? "Enter to send · Shift+Enter for a new line" : "Choose a model to start.";
     textarea.disabled = Boolean(blocked);
   }
 

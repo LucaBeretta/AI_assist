@@ -398,6 +398,7 @@ class OllamaAssistantBase:
                 continue
             action, selected, models, loaded, errors = value
             models = self.merged_model_names(models)
+            self.last_lifecycle = {"action": action, "models": list(models), "errors": list(errors)}
             self.lifecycle_busy = False
             self.loaded_models = loaded
             self.model_picker.config(values=models)
@@ -543,6 +544,16 @@ class AIAssistantGUI(BackendMixin, WorkspaceMixin, OllamaAssistantBase):
     """Saved chats, developer tools, and capabilities over the Ollama runtime."""
 
 
+def launch_web_workspace():
+    """Start the browser version as its own program, in its own window on Windows (closing that
+    window stops it). Called after this window closed and released the saved chats."""
+    import subprocess
+    import sys
+    here = os.path.dirname(os.path.abspath(__file__))
+    options = {"creationflags": subprocess.CREATE_NEW_CONSOLE} if os.name == "nt" else {}
+    return subprocess.Popen([sys.executable, os.path.join(here, "web_workspace.py")], cwd=here, **options)
+
+
 if __name__ == "__main__":
     network_gate.install()
     from app_core.instance_lock import AlreadyRunning, InstanceLock
@@ -567,3 +578,7 @@ if __name__ == "__main__":
     app.gate_ui = GateUI(app)
     app.firewall = FirewallLockUI(app)
     root.mainloop()
+    if getattr(app, "switch_to_web", False):
+        # Release the saved chats first: the browser version takes the same lock.
+        instance.release()
+        launch_web_workspace()

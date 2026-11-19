@@ -71,6 +71,11 @@ class OllamaProvider:
         self._ready()
         return ollama.stream_chat(self.base_url, messages, model, context_length, on_chunk, on_metrics)
 
+    def agent_backend(self, cancel_event=None):
+        """(host, chat_fn) for coding_agent.run_agent: Ollama's own tool-calling API."""
+        self._ready()
+        return self.base_url, None
+
 
 class ColibriProvider:
     """Colibri's OpenAI-compatible server. With a known local folder, the
@@ -110,6 +115,15 @@ class ColibriProvider:
             report = colibri_launcher.start_server(self.directory, cancel_event=cancel_event)
             self.url = colibri_launcher.server_url(report) or self.url
         return self.client().chat(messages, model, on_chunk=on_chunk, on_metrics=on_metrics)
+
+    def agent_backend(self, cancel_event=None):
+        """(host, chat_fn) for coding_agent.run_agent, through Colibri's OpenAI tool-calling API."""
+        if self.manageable():
+            import colibri_launcher
+            report = colibri_launcher.start_server(self.directory, cancel_event=cancel_event)
+            self.url = colibri_launcher.server_url(report) or self.url
+        client = self.client()
+        return client.url, client.agent_chat
 
 
 def configured_provider(data_directory, environ=None):

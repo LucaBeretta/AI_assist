@@ -152,6 +152,9 @@ class Recorder:
     def __init__(self):
         self.messages = None
 
+    def running(self):
+        return {"m": {}}
+
     def stream_chat(self, messages, model, **options):
         self.messages = messages
         options["on_chunk"]("Boil it [1].")

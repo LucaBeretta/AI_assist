@@ -117,13 +117,21 @@ def main(argv=None):
         print()
         print("Open this single-use link in your browser (valid for 5 minutes):")
         print(f"  {first}")
-        print("Press Enter for a new link, Ctrl+C to stop.")
-        if not args.no_browser:
+        if args.no_browser:
+            print("Press Enter for a new link. Press Ctrl+C or close this window to stop.")
+        else:
+            print("Closed the browser tab? Press Enter here to open it again.")
+            print("Press Ctrl+C or close this window to stop.")
             webbrowser.open(first)
 
         def new_links():
             for _line in sys.stdin:
-                print(f"New single-use link: {link()}", flush=True)
+                fresh = link()
+                if args.no_browser:
+                    print(f"New single-use link: {fresh}", flush=True)
+                else:
+                    print("Opening AI Assist in your browser again...", flush=True)
+                    webbrowser.open(fresh)
 
         if sys.stdin is not None and sys.stdin.isatty():
             threading.Thread(target=new_links, name="web-links", daemon=True).start()
