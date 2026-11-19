@@ -26,10 +26,11 @@ jobs:
       matrix:
         include:
           # 3.13 is the runtime the launchers install; 3.14 is the newest; 3.9 is the oldest
-          # supported, and GitHub offers it only up to Ubuntu 24.04.
+          # supported, and GitHub offers it only up to Ubuntu 24.04. macOS is in
+          # tests-macos.yml: on 2026-11-19 GitHub gave this project no Mac machine for 14+ hours,
+          # and a job that never starts would keep every run here unfinished.
           - { os: windows-latest, python: "3.13" }
           - { os: windows-latest, python: "3.14" }
-          - { os: macos-latest, python: "3.13" }
           - { os: ubuntu-latest, python: "3.13" }
           - { os: ubuntu-24.04, python: "3.9" }
     steps:

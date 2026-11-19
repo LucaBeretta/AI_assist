@@ -6,14 +6,18 @@
 
 | Configuration | Desktop app (Tk) | Web workspace (preview) | Firewall lock | Evidence |
 | --- | --- | --- | --- | --- |
-| Windows 11 x64, Python 3.14.10, Tk 9.0 | **Tested** | **Tested** (Edge 157 headless, real Ollama 0.40.16) | Read path tested; admin (UAC) path untested | 468 unit tests (6 skipped), `tools/web_e2e.py` 32/32 |
+| Windows 11 x64, Python 3.14.10 and 3.9.25 | **Tested** | **Tested** (Edge 157 headless, real Ollama 0.40.16) | Read path tested; admin (UAC) path untested | 585 unit tests (7 skipped) on both Pythons, also with a short 8.3 temp folder; `tools/web_e2e.py` 43/43 |
+| GitHub `windows-latest` x64, Python 3.13 and 3.14 | **Tested in CI** (full suite) | Unit and API tests only (no browser run) | Mocked only | `.github/workflows/tests.yml`, run 44613399296 (`f608dec`) |
 | Windows 11 ARM64 | Untested; launcher and private-runtime entry exist | Untested; no platform-specific code | Same code as x64 | `install_runtime.ps1`, `python-runtime.txt` |
-| macOS Apple silicon / Intel | Partially tested earlier (Apple-silicon memory logic has unit tests with mocks); not run in this milestone | Untested; standard library only | Not available (Windows only) | `test_apple_silicon.py`, `Start AI Assist.command` |
-| Linux x86_64 / ARM64 | Untested in this milestone; launcher added in `e02fd1b` | Untested; standard library only | Not available | `Start AI Assist.sh`, `test_launchers.py` (static checks) |
-| Python 3.9–3.13 | Expected to work (minimum 3.9: `str.removeprefix`, `Path.is_relative_to`); not run | same | — | audit §1 |
+| macOS Apple silicon / Intel | Partially tested earlier (Apple-silicon memory logic has unit tests with mocks); **not run**: the CI job exists (`tests-macos.yml`, started by hand) but on 2026-11-19 GitHub gave this project no Mac machine for 14+ hours | Untested; standard library only | Not available (Windows only) | `test_apple_silicon.py`, `Start AI Assist.command` |
+| Linux x86_64: Ubuntu 26.04 (Python 3.13), Ubuntu 24.04 (Python 3.9) | **Tested in CI** (full suite, Tk under Xvfb) | Unit and API tests only | Not available | `.github/workflows/tests.yml`, run 44613399296; WSL Ubuntu (Python 3.14, no Tk): the 408 tests that load without Tk |
+| Linux ARM64 | Untested; launcher exists | Untested | Not available | `Start AI Assist.sh`, `test_launchers.py` (static checks) |
+| Python 3.10–3.12 | Expected to work (3.9, 3.13 and 3.14 are tested; minimum 3.9: `str.removeprefix`, `Path.is_relative_to`); not run | same | — | audit §1 |
 | Android, iOS | **Unsupported** | Not offered (loopback only; LAN pairing not built) | — | section 4 |
 
-Known gaps: no CI, so non-Windows results are not continuously verified; the POSIX-only permission tests (2) and symlink tests (4) are skipped on this Windows machine.
+CI: every upload and pull request runs `.github/workflows/tests.yml` (Windows and Linux, Python 3.9/3.13/3.14, plus the page's Node tests). A failed test is shown as a public note, because GitHub shows full logs only to signed-in users.
+
+Known gaps: macOS is not run (see its row); the browser end-to-end test needs a real model, so it runs only by hand; ARM64 is not run anywhere.
 
 ## 1. Distribution today (unchanged)
 
@@ -23,7 +27,7 @@ Source ZIP or git clone + a launcher per OS. When no Python with Tk works, the l
 
 | Step | What | Why this order |
 | --- | --- | --- |
-| P1 | **CI matrix** (GitHub Actions): Windows x64, macOS arm64 + x64, Ubuntu x64 (+ arm64 runner); Python 3.9 and the pinned 3.13 runtime; Tk tests under Xvfb on Linux; `node --test` for the page. | Turns "untested" rows into evidence before shipping installers. |
+| P1 | **CI matrix** (GitHub Actions). Done: Windows x64 and Ubuntu x64, Python 3.9, 3.13 and 3.14, Tk under Xvfb, `node --test`. Left: macOS (job ready, no Mac machine given yet) and ARM64 runners. | Turns "untested" rows into evidence before shipping installers. |
 | P1 | **Release process:** semantic version tags, a changelog, release notes, and a **signed release manifest** (file list + SHA-256, signed with a minisign/Ed25519 key kept offline). The update checker compares against the latest *tagged release* manifest instead of `main`, and verifies the signature. | Today the checker reports any development copy as "different"; tags give stable/beta channels. |
 | P2 | **Self-contained bundles** built in CI from the same pinned python-build-standalone runtime: Windows `.zip` + per-user installer (no admin), macOS `.app` (notarized, Developer ID signed), Linux AppImage (and Flatpak later). No pip packages, so bundling is copy + launcher. | Removes the "find a Python" step without new dependencies. |
 | P2 | **Code signing:** Authenticode (Windows), Developer ID + notarization (macOS), signed AppImage/checksums (Linux). | Required for SmartScreen/Gatekeeper and for update verification. |

@@ -1,0 +1,40 @@
+name: Tests (macOS)
+
+# The Python suite on macOS, started by hand (Actions > Tests (macOS) > Run workflow).
+# It is not run on every upload: on 2026-11-19 GitHub gave this project no Mac machine
+# for 14+ hours, and a job that waits that long would keep every test run unfinished.
+# Move the macOS row back into tests.yml once Mac jobs start here.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python 3.13 on macos-latest
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Tkinter loads
+        run: python -c "import sys, tkinter; print(sys.version); print('Tk', tkinter.TkVersion)"
+      - name: Every file compiles
+        run: python -m compileall -q .
+      - name: Tests
+        shell: bash
+        run: python -m unittest discover -v 2>&1 | tee unittest.log
+      - name: Failures as public notes
+        if: failure()
+        shell: bash
+        run: test -f unittest.log && python tools/ci_notes.py unittest.log
