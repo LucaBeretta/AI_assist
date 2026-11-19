@@ -456,11 +456,77 @@ window.i18n = (() => {
   "Port": "Porta",
   "Pair device": "Abbina dispositivo",
   "PIN expired. Generate a new one.": "PIN scaduto. Generane uno nuovo.",
+  "Internet connection": "Connessione a internet",
+  "Reverse DNS lookup": "Ricerca DNS inversa",
+  "Ollama cloud model": "Modello cloud di Ollama",
+  "Open outside AI Assist": "Apertura fuori da AI Assist",
+  "colibri model download": "Download di un modello colibri",
+  "Vercel production deployment": "Pubblicazione su Vercel",
+  "LAN pairing listener": "Ascolto per l'abbinamento LAN",
+  "Pair LAN device": "Abbinamento di un dispositivo LAN",
+  "Developer command": "Comando del Developer",
+  "Developer agent command": "Comando dell'agente Developer",
+  "Ollama model download": "Download di un modello Ollama",
+  "Ollama model upload": "Caricamento di un modello Ollama",
+  "Ollama model creation": "Creazione di un modello Ollama",
+  "Read Ollama's online model list": "Leggere l'elenco online dei modelli Ollama",
+  "Send a message through Colibri": "Inviare un messaggio tramite Colibri",
+  "Check AI Assist source files for updates": "Controllare se ci sono aggiornamenti di AI Assist",
+  "Publish the chosen web project to Vercel": "Pubblicare su Vercel il progetto web scelto",
+  "Run the command explicitly approved for this project.": "Eseguire il comando approvato per questo progetto.",
+  "Upload the explicitly approved web project.": "Caricare il progetto web approvato.",
+  "Enable manual LAN pairing until you turn it off or close AI Assist.": "Attivare l'abbinamento LAN finché non lo spegni o chiudi AI Assist.",
+  "Pair the device you selected; no chat content is sent.": "Abbinare il dispositivo scelto; nessun contenuto delle chat viene inviato.",
+  "A request for one page of ollama.com. No chats or files are sent.": "Una richiesta per una pagina di ollama.com. Nessuna chat o file viene inviato.",
+  "Ollama asks its online registry for this model and downloads it. No chats or files are sent.": "Ollama chiede questo modello al suo registro online e lo scarica. Nessuna chat o file viene inviato.",
+  "Your request, the conversation, and the project files and command output the agent has read.": "La tua richiesta, la conversazione, e i file del progetto e i risultati dei comandi letti dall'agente.",
+  "Your message, conversation, shared notes and attached or pinned context.": "Il tuo messaggio, la conversazione, le note condivise e il contesto allegato o fissato.",
+  "Your message and the conversation sent with it.": "Il tuo messaggio e la conversazione inviata con esso.",
+  "colibri downloads the model and its engine files from the internet.": "colibri scarica da internet il modello e i file del suo motore.",
+  "The chosen web project folder is uploaded to Vercel by its CLI.": "La cartella del progetto web scelto viene caricata su Vercel dalla sua CLI.",
+  "Discovery metadata and pairing credentials over verified TLS; no chats, files or commands.": "Dati di individuazione e credenziali di abbinamento su TLS verificato; nessuna chat, file o comando.",
+  "The six-digit PIN and this device's random ID, sent only after checking the target TLS code.": "Il PIN di sei cifre e l'ID casuale di questo dispositivo, inviati solo dopo aver verificato il codice TLS.",
+  "Another program, usually the browser, opens this address from the internet.": "Un altro programma, di solito il browser, apre questo indirizzo da internet.",
+  "Ollama downloads the model from its online registry.": "Ollama scarica il modello dal suo registro online.",
+  "Ollama uploads the model to its online registry.": "Ollama carica il modello sul suo registro online.",
+  "Ollama may download a base model from its online registry.": "Ollama può scaricare un modello di base dal suo registro online.",
+  "until this task finishes": "fino alla fine di questa operazione",
+  "allowed": "consentito",
+  "blocked": "bloccato",
+  "ran outside the gate": "eseguito fuori dal cancello",
+  "blocked: firewall lock": "bloccato: blocco firewall",
+  "blocked: listening beyond this computer": "bloccato: ascolto oltre questo computer",
+  "blocked: AI Assist is not running to approve it": "bloccato: AI Assist non è aperto per approvarlo",
+  "Internet access was blocked: AI Assist could not read which model this request uses.": "Accesso a internet bloccato: AI Assist non ha potuto leggere quale modello usa questa richiesta.",
+  "LAN sharing was blocked.": "La condivisione LAN è stata bloccata.",
+  "Pairing was blocked.": "L'abbinamento è stato bloccato.",
+  "The deployment was blocked before starting the Vercel CLI.": "La pubblicazione è stata bloccata prima di avviare la CLI di Vercel.",
+  "colibri setup was not started: internet access for this download was not approved.": "L'installazione di colibri non è partita: l'accesso a internet per questo download non è stato approvato.",
   "{v0} downloaded.": "{v0} scaricato."
 };
   const en = Object.fromEntries(Object.keys(it).map(key => [key, key]));
   const messages = {en, it};
   let preference = "system", language = String(window.navigator?.language || "en").toLowerCase().startsWith("it") ? "it" : "en";
+  // Internet-gate texts come from Python in English and may carry a model or host name.
+  const gatePatterns = {it: [
+    [/^Send your message to (.+)$/, "Inviare il tuo messaggio a $1"],
+    [/^Run a developer agent step with (.+)$/, "Eseguire un passo dell'agente Developer con $1"],
+    [/^Download (.+) through Ollama$/, "Scaricare $1 tramite Ollama"],
+    [/^Install the colibri model (.+)$/, "Installare il modello colibri $1"],
+    [/^for (\d+) seconds$/, "per $1 secondi"],
+    [/^(.+) \(Ollama contacts its online registry\)$/, "$1 (Ollama contatta il suo registro online)"],
+    [/^(.+) \(runs on Ollama's servers\)$/, "$1 (gira sui server di Ollama)"],
+    [/^Ollama did not answer, so AI Assist could not confirm that (.+) runs on this computer\. Start Ollama and try again\.$/,
+      "Ollama non ha risposto, quindi AI Assist non ha potuto confermare che $1 gira su questo computer. Avvia Ollama e riprova."],
+  ]};
+  function gate(text) {
+    if (typeof text !== "string" || !text) return text;
+    const blocked = /^Internet access was not approved, so it was blocked \((.+?): (.+)\)\. Settings > Connection log lists every request\.$/.exec(text);
+    if (blocked && language === "it") return "L'accesso a internet non è stato approvato ed è stato bloccato (" + gate(blocked[1]) + ": " + gate(blocked[2]) + "). Impostazioni > Registro connessioni elenca ogni richiesta.";
+    if (messages[language][text] !== undefined) return t(text);
+    for (const [pattern, replacement] of gatePatterns[language] || []) if (pattern.test(text)) return text.replace(pattern, replacement);
+    return text;
+  }
   function t(key, vars = {}) {
     const value = messages[language][key] ?? key;
     return String(value).replace(/\\n/g, "\n").replace(/\{(\w+)\}/g, (_, name) => String(vars[name] ?? ""));
@@ -487,5 +553,5 @@ window.i18n = (() => {
     if (changed && window.dispatchEvent && window.Event) window.dispatchEvent(new window.Event("languagechange"));
   }
   if (document.addEventListener) document.addEventListener("DOMContentLoaded", apply);
-  return {t, apply, setLanguage, messages, get language() { return language; }, get preference() { return preference; }};
+  return {t, gate, apply, setLanguage, messages, get language() { return language; }, get preference() { return preference; }};
 })();

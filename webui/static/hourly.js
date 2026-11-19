@@ -4,7 +4,7 @@ window.hourlyui = (() => {
   const el = id => document.getElementById(id);
   const t = (key, vars = {}) => window.i18n ? window.i18n.t(key, vars) : key.replace(/\{(\w+)\}/g, (_, k) => String(vars[k] ?? ""));
   let report = null;
-  const call = async (name, ...args) => { const result = await window.pywebview.api[name](...args); if (result.ok === false) throw new Error(result.error); return result; };
+  const call = async (name, ...args) => { const result = await window.pywebview.api[name](...args); if (result.ok === false) throw new Error(window.i18n?.gate?.(result.error) || result.error); return result; };
   function state(value) {
     el("hourly-enabled").checked = value.enabled;
     el("hourly-status").textContent = value.message || (value.enabled ? t("Listening for quiet locally; no audio is saved or sent.") : t("Off by default. Preview does not turn on quiet detection."));

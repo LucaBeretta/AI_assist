@@ -13,7 +13,7 @@ window.modelsui = (() => {
 
   async function call(method, ...args) {
     const result = await window.pywebview.api[method](...args);
-    if (!result || result.ok === false) throw new Error(result?.error || t("Invalid API response"));
+    if (!result || result.ok === false) throw new Error(window.i18n?.gate?.(result?.error) || result?.error || t("Invalid API response"));
     return result;
   }
   function node(tag, className, text) {
@@ -92,7 +92,7 @@ window.modelsui = (() => {
     const list = element("models-recommended");
     if (!advice) { list.replaceChildren(node("p", "dev-hint", t("Checking which models fit this computer…"))); return; }
     const cards = advice.recommendations || [];
-    if (!cards.length) { list.replaceChildren(node("p", "dev-hint", advice.catalog_error ? advice.catalog_error : t("No recommendations: the model catalog could not be read (offline?) or nothing fits."))); return; }
+    if (!cards.length) { list.replaceChildren(node("p", "dev-hint", advice.catalog_error ? (window.i18n?.gate?.(advice.catalog_error) || advice.catalog_error) : t("No recommendations: the model catalog could not be read (offline?) or nothing fits."))); return; }
     list.replaceChildren(...cards.map(card => {
       const item = node("article", "model-card");
       const head = node("div", "model-card-head");

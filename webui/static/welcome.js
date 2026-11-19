@@ -8,7 +8,7 @@ window.welcomeui = (() => {
   const finished = new Set();
   const call = async (method, ...args) => {
     const value = await window.pywebview.api[method](...args);
-    if (!value || value.ok === false) throw new Error(value?.error || t("Invalid API response"));
+    if (!value || value.ok === false) throw new Error(window.i18n?.gate?.(value?.error) || value?.error || t("Invalid API response"));
     return value;
   };
   const installed = () => state?.ollama?.models || (state?.engine === "Ollama" ? state.models || [] : []);

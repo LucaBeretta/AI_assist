@@ -221,6 +221,11 @@ class StaticTests(unittest.TestCase):
         assert.equal(window.i18n.language,'it');
         assert.equal(window.i18n.t('New chat'),'Nuova chat');
         assert.equal(window.i18n.t('Thought for {v0} s',{v0:3}),'Ha ragionato per 3 s');
+        assert.equal(window.i18n.gate("Read Ollama's online model list"),"Leggere l'elenco online dei modelli Ollama");
+        assert.equal(window.i18n.gate('Download qwen3:8b through Ollama'),'Scaricare qwen3:8b tramite Ollama');
+        assert.equal(window.i18n.gate('Internet access was not approved, so it was blocked (Internet connection: ollama.com). Settings > Connection log lists every request.'),
+          "L'accesso a internet non è stato approvato ed è stato bloccato (Connessione a internet: ollama.com). Impostazioni > Registro connessioni elenca ogni richiesta.");
+        assert.equal(window.i18n.gate('ollama.com'),'ollama.com');
         for(const [key,value] of Object.entries(window.i18n.messages.it)) {
           assert.deepEqual((key.match(/\{\w+\}/g)||[]).sort(),(value.match(/\{\w+\}/g)||[]).sort());
         }

@@ -37,7 +37,7 @@ window.computeui = (() => {
     if (!window.pywebview?.api?.set_compute_active) return;
     try {
       const result = await window.pywebview.api.set_compute_active(value && document.hidden !== true);
-      if (result.ok === false) throw new Error(result.error);
+      if (result.ok === false) throw new Error(window.i18n?.gate?.(result.error) || result.error);
       if (visible) render(result.data);
     } catch (error) { el("compute-note").textContent = error.message; }
   }

@@ -3,8 +3,9 @@
 window.securityui = (() => {
   const el = id => document.getElementById(id);
   const t = (key, vars = {}) => window.i18n ? window.i18n.t(key, vars) : key.replace(/\{(\w+)\}/g, (_, k) => String(vars[k] ?? ""));
+  const gate = text => window.i18n?.gate ? window.i18n.gate(text) : text;
   let approval = null, timer = null, deadline = 0, logs = [], refreshTimer = null;
-  const call = async (name, ...args) => { const value = await window.pywebview.api[name](...args); if (!value || value.ok === false) throw new Error(value?.error || t("Invalid API response")); return value; };
+  const call = async (name, ...args) => { const value = await window.pywebview.api[name](...args); if (!value || value.ok === false) throw new Error(window.i18n?.gate?.(value?.error) || value?.error || t("Invalid API response")); return value; };
   function countdown() {
     if (!approval) return;
     const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
@@ -14,8 +15,8 @@ window.securityui = (() => {
   function show(value) {
     approval = value;
     const request = value.request;
-    el("internet-title").textContent = value.stage === 1 ? t("AI Assist wants to use the internet") : t("Second check: allow {v0}?", {v0: request.target});
-    for (const key of ["kind", "target", "purpose", "sends", "source", "scope"]) el("internet-" + key).textContent = request[key] || t("Not declared. Block unless you expected it.");
+    el("internet-title").textContent = value.stage === 1 ? t("AI Assist wants to use the internet") : t("Second check: allow {v0}?", {v0: gate(request.target)});
+    for (const key of ["kind", "target", "purpose", "sends", "source", "scope"]) el("internet-" + key).textContent = gate(request[key]) || t("Not declared. Block unless you expected it.");
     el("internet-error").textContent = "";
     deadline = Date.now() + value.remaining_seconds * 1000;
     if (timer !== null) window.clearInterval?.(timer);
@@ -41,7 +42,7 @@ window.securityui = (() => {
   function renderLog() {
     el("connection-log").replaceChildren(...logs.slice(-100).reverse().map(entry => {
       const item = document.createElement("li");
-      item.textContent = [entry.time, entry.decision, entry.kind, entry.target, entry.purpose, entry.sends].filter(Boolean).join(" · ");
+      item.textContent = [entry.time, gate(entry.decision), gate(entry.kind), gate(entry.target), gate(entry.purpose), gate(entry.sends)].filter(Boolean).join(" · ");
       return item;
     }));
   }

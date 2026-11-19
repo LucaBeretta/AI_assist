@@ -11,7 +11,7 @@ window.workspaceui = (() => {
   };
   const call = async (method, ...args) => {
     const value = await window.pywebview.api[method](...args);
-    if (!value || value.ok === false) throw new Error(value?.error || t("Invalid API response"));
+    if (!value || value.ok === false) throw new Error(window.i18n?.gate?.(value?.error) || value?.error || t("Invalid API response"));
     return value;
   };
   const show = id => { const dialog = el(id); if (dialog.showModal) dialog.showModal(); else dialog.open = true; };

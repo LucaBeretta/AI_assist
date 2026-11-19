@@ -4,7 +4,7 @@ window.parityui = (() => {
   const el = id => document.getElementById(id);
   const t = (key, vars = {}) => window.i18n ? window.i18n.t(key, vars) : key.replace(/\{(\w+)\}/g, (_, name) => String(vars[name] ?? ""));
   const node = (tag, text, cls = "") => { const item = document.createElement(tag); item.className = cls; if (text != null) item.textContent = text; return item; };
-  const call = async (name, ...args) => { const result = await window.pywebview.api[name](...args); if (!result || result.ok === false) throw new Error(result?.error || t("Invalid API response")); return result; };
+  const call = async (name, ...args) => { const result = await window.pywebview.api[name](...args); if (!result || result.ok === false) throw new Error(window.i18n?.gate?.(result?.error) || result?.error || t("Invalid API response")); return result; };
   const show = id => { const dialog = el(id); if (dialog.showModal) dialog.showModal(); else dialog.open = true; };
   const close = id => { const dialog = el(id); if (dialog.close) dialog.close(); else dialog.open = false; };
   const jobs = new Map(), terminal = new Set();

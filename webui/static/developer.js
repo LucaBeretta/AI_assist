@@ -10,7 +10,7 @@ window.devui = (() => {
 
   async function call(method, ...args) {
     const result = await window.pywebview.api[method](...args);
-    if (!result || result.ok === false) throw new Error(result?.error || t("Invalid API response"));
+    if (!result || result.ok === false) throw new Error(window.i18n?.gate?.(result?.error) || result?.error || t("Invalid API response"));
     return result;
   }
 

@@ -24,7 +24,7 @@ window.app = (() => {
 
   async function call(method, ...args) {
     const result = await window.pywebview.api[method](...args);
-    if (!result || result.ok === false) throw new Error(result?.error || t("Invalid API response"));
+    if (!result || result.ok === false) throw new Error(window.i18n?.gate?.(result?.error) || result?.error || t("Invalid API response"));
     return result;
   }
 
@@ -676,7 +676,7 @@ window.app = (() => {
       if (appEvent(event)) continue;
       if (window.modelsui?.onEvent(event)) continue;  // downloads and model list changes
       if (event.task_id) { window.devui?.onEvent(event); continue; }  // Developer task events
-      if (!event.stream_id) { if (event.type === "error") showError(new Error(event.error)); continue; }
+      if (!event.stream_id) { if (event.type === "error") showError(new Error(window.i18n?.gate?.(event.error) || event.error)); continue; }
       const stream = streams.get(event.stream_id) || {id: event.stream_id, chat_id: event.chat_id, text: "", active: true, operation:event.operation || "chat"};
       streams.set(event.stream_id, stream);
       if (event.type === "token" && stream.active) stream.text += event.text;
