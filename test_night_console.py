@@ -13,6 +13,7 @@ import unittest
 from unittest.mock import patch
 
 import AIassist
+import ollama_engine
 from appearance import DARK_THEMES, toggled_theme
 from status_bar import generation_rate, is_cloud_model, is_local, placement, short_tokens
 from test_colibri_launcher import join_workers
@@ -52,12 +53,12 @@ class HelperTests(unittest.TestCase):
 
     def test_running_details_reads_api_ps(self):
         reply = {"models": [{"name": "alpha:8b", "size": 8, "size_vram": 6, "context_length": 8192}, "junk"]}
-        with patch("AIassist.ollama_api", return_value=reply):
-            self.assertEqual(AIassist.running_details(),
+        with patch("ollama_engine.ollama_api", return_value=reply):
+            self.assertEqual(ollama_engine.running_details(),
                              {"alpha:8b": {"size": 8, "size_vram": 6, "context_length": 8192}})
-        with patch("AIassist.ollama_api", return_value={}):
+        with patch("ollama_engine.ollama_api", return_value={}):
             with self.assertRaises(RuntimeError):
-                AIassist.running_details()
+                ollama_engine.running_details()
 
 
 class NightConsoleUITests(unittest.TestCase):
@@ -72,11 +73,11 @@ class NightConsoleUITests(unittest.TestCase):
         self.addCleanup(self.mocks.close)
         self.mocks.enter_context(patch.dict(os.environ, {"AI_ASSIST_DATA_DIR": str(self.history), "OLLAMA_MODEL": "alpha:8b"}))
         self.mocks.enter_context(patch("update_checker.UpdateChecker.check", lambda self: None))
-        self.mocks.enter_context(patch("AIassist.ensure_ollama"))
-        self.mocks.enter_context(patch("AIassist.list_ollama_models", return_value=["alpha:8b"]))
-        self.mocks.enter_context(patch("AIassist.running_models", return_value={"alpha:8b"}))
-        self.mocks.enter_context(patch("AIassist.set_model_running"))
-        self.mocks.enter_context(patch("AIassist.running_details", return_value={
+        self.mocks.enter_context(patch("ollama_engine.ensure_ollama"))
+        self.mocks.enter_context(patch("ollama_engine.list_ollama_models", return_value=["alpha:8b"]))
+        self.mocks.enter_context(patch("ollama_engine.running_models", return_value={"alpha:8b"}))
+        self.mocks.enter_context(patch("ollama_engine.set_model_running"))
+        self.mocks.enter_context(patch("ollama_engine.running_details", return_value={
             "alpha:8b": {"size": 8 * 1024 ** 3, "size_vram": 8 * 1024 ** 3, "context_length": 8192}}))
         self.mocks.enter_context(patch("capabilities_view.fetch_model_capabilities",
                                        return_value={"name": "alpha:8b", "capabilities": ["completion"]}))

@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from AIassist import StreamStopped, run_stoppable
+from ollama_engine import StreamStopped, run_stoppable
 from chat_store import ChatStore
 from webui.app import Api
 

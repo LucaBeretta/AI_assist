@@ -49,13 +49,13 @@ class WorkspaceIntegrationTests(unittest.TestCase):
             "AI_ASSIST_DATA_DIR": str(self.history_folder), "OLLAMA_MODEL": "alpha:8b",
             "OLLAMA_HOST": "http://localhost:11434",
         }))
-        self.ensure_ollama = self.mocks.enter_context(patch("AIassist.ensure_ollama"))
-        self.list_models = self.mocks.enter_context(patch("AIassist.list_ollama_models",
+        self.ensure_ollama = self.mocks.enter_context(patch("ollama_engine.ensure_ollama"))
+        self.list_models = self.mocks.enter_context(patch("ollama_engine.list_ollama_models",
                                                         return_value=["alpha:8b", "beta:3b"]))
-        self.running_models = self.mocks.enter_context(patch("AIassist.running_models",
+        self.running_models = self.mocks.enter_context(patch("ollama_engine.running_models",
                                                            return_value={"alpha:8b", "beta:3b"}))
-        self.set_running = self.mocks.enter_context(patch("AIassist.set_model_running"))
-        self.request = self.mocks.enter_context(patch("AIassist.request_ollama", return_value="A local answer."))
+        self.set_running = self.mocks.enter_context(patch("ollama_engine.set_model_running"))
+        self.request = self.mocks.enter_context(patch("ollama_engine.request_ollama", return_value="A local answer."))
         self.mocks.enter_context(patch("capabilities_view.fetch_model_capabilities", side_effect=model_metadata))
         self.agent_metadata = self.mocks.enter_context(patch("workspace_ui.fetch_model_capabilities",
                                                            side_effect=model_metadata))

@@ -288,7 +288,7 @@ class BackendMixin:
     def fetch_response(self, messages, user_input, model, context_length=None, cancel_event=None):
         if self.backend != "Colibri":
             return super().fetch_response(messages, user_input, model, context_length, cancel_event)
-        from AIassist import run_stoppable
+        from ollama_engine import run_stoppable
         chunk, metrics, flush, parts = self.stream_callbacks(cancel_event)
 
         def request():

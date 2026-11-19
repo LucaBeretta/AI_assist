@@ -73,11 +73,11 @@ class ColibriWorkspaceTests(unittest.TestCase):
             "AI_ASSIST_DATA_DIR": str(self.folder / "history"), "OLLAMA_MODEL": "alpha:8b",
             "COLIBRI_DIR": str(self.colibri), "COLIBRI_URL": "", "COLI_API_KEY": ""}))
         self.mocks.enter_context(patch("update_checker.UpdateChecker.check", lambda self: None))
-        self.mocks.enter_context(patch("AIassist.ensure_ollama"))
-        self.mocks.enter_context(patch("AIassist.list_ollama_models", return_value=["alpha:8b"]))
-        self.mocks.enter_context(patch("AIassist.running_models", return_value={"alpha:8b"}))
-        self.mocks.enter_context(patch("AIassist.set_model_running"))
-        self.ollama_request = self.mocks.enter_context(patch("AIassist.request_ollama", return_value="Ollama answer."))
+        self.mocks.enter_context(patch("ollama_engine.ensure_ollama"))
+        self.mocks.enter_context(patch("ollama_engine.list_ollama_models", return_value=["alpha:8b"]))
+        self.mocks.enter_context(patch("ollama_engine.running_models", return_value={"alpha:8b"}))
+        self.mocks.enter_context(patch("ollama_engine.set_model_running"))
+        self.ollama_request = self.mocks.enter_context(patch("ollama_engine.request_ollama", return_value="Ollama answer."))
         self.mocks.enter_context(patch("capabilities_view.fetch_model_capabilities", side_effect=ollama_metadata))
         self.mocks.enter_context(patch("workspace_ui.fetch_model_capabilities", side_effect=ollama_metadata))
         try:

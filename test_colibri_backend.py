@@ -253,9 +253,9 @@ class BackendGuiTests(unittest.TestCase):
             Path(directory, "backend.settings").write_text(json.dumps({"backend": "Colibri", "url": "http://localhost:8000/v1"}))
             mocks.enter_context(patch.dict(os.environ, {"AI_ASSIST_DATA_DIR": directory, "COLIBRI_URL": "", "COLI_API_KEY": ""}))
             mocks.enter_context(patch("update_checker.UpdateChecker.check"))
-            ensure = mocks.enter_context(patch("AIassist.ensure_ollama"))
-            mocks.enter_context(patch("AIassist.list_ollama_models", return_value=["glm"]))
-            mocks.enter_context(patch("AIassist.running_models", return_value={"glm"}))
+            ensure = mocks.enter_context(patch("ollama_engine.ensure_ollama"))
+            mocks.enter_context(patch("ollama_engine.list_ollama_models", return_value=["glm"]))
+            mocks.enter_context(patch("ollama_engine.running_models", return_value={"glm"}))
             mocks.enter_context(patch("colibri_backend.ColibriClient.models", return_value=["glm"]))
             # No colibri folder: the server is used as it runs (no launcher control).
             mocks.enter_context(patch("colibri_launcher.find_directory", return_value=None))

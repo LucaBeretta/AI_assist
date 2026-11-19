@@ -12,6 +12,7 @@ import unittest
 from unittest.mock import patch
 
 import AIassist
+import ollama_engine
 from model_library import DownloadCancelled
 
 
@@ -63,10 +64,10 @@ class DownloadUITests(unittest.TestCase):
         self.patches = [
             patch.dict(os.environ, {"AI_ASSIST_DATA_DIR": self.chat_directory.name}),
             patch("capabilities_view.fetch_model_capabilities", return_value={"name": "existing:8b", "capabilities": ["completion", "tools"], "context_length": 32768, "family": "test", "parameter_size": "8B", "quantization": "Q4"}),
-            patch("AIassist.list_ollama_models", side_effect=lambda: list(self.installed)),
-            patch("AIassist.ensure_ollama", create=True),
-            patch("AIassist.running_models", side_effect=lambda: set(self.loaded), create=True),
-            patch("AIassist.set_model_running", side_effect=set_running, create=True),
+            patch("ollama_engine.list_ollama_models", side_effect=lambda: list(self.installed)),
+            patch("ollama_engine.ensure_ollama", create=True),
+            patch("ollama_engine.running_models", side_effect=lambda: set(self.loaded), create=True),
+            patch("ollama_engine.set_model_running", side_effect=set_running, create=True),
             patch("model_downloads.fetch_popular_models", return_value=CATALOGUE),
             patch("model_downloads.fetch_model_variants", side_effect=variants),
             patch("hardware_panel.detect_hardware", return_value=HARDWARE),
@@ -211,7 +212,7 @@ class DownloadUITests(unittest.TestCase):
             release.wait(4)
             return snapshot
         try:
-            with patch("AIassist.list_ollama_models", side_effect=old_snapshot):
+            with patch("ollama_engine.list_ollama_models", side_effect=old_snapshot):
                 self.app.refresh_models()
                 self.wait(started.is_set)
                 self.installed.append("alpha:1b")
@@ -260,7 +261,7 @@ class DownloadUITests(unittest.TestCase):
         self.assertEqual(self.app.model_contexts["alpha:1b"], 4096)
         self.assertIn(("alpha:1b", True, 4096), self.load_requests)
         self.app.input_box.insert("1.0", "Hello")
-        with patch("AIassist.request_ollama", return_value="Hello back") as request:
+        with patch("ollama_engine.request_ollama", return_value="Hello back") as request:
             self.app.send_prompt()
             self.wait(lambda: not self.app.is_waiting)
             self.assertEqual(request.call_args.kwargs["context_length"], 4096)
@@ -301,9 +302,9 @@ class DownloadUITests(unittest.TestCase):
 class ContextContractTests(unittest.TestCase):
     def test_recommended_context_is_sent_to_chat_and_default_context_is_preserved(self):
         for context in (None, 4096):
-            with self.subTest(context=context), patch("AIassist.urllib.request.urlopen", return_value=io.BytesIO(
+            with self.subTest(context=context), patch("ollama_engine.urllib.request.urlopen", return_value=io.BytesIO(
                     b'{"message":{"content":"Hello"},"done":true}\n')) as opened:
-                self.assertEqual(AIassist.request_ollama([], "test:1b", context), "Hello")
+                self.assertEqual(ollama_engine.request_ollama([], "test:1b", context), "Hello")
                 payload = json.loads(opened.call_args.args[0].data)
                 if context is None:
                     self.assertNotIn("options", payload)
@@ -311,12 +312,12 @@ class ContextContractTests(unittest.TestCase):
                     self.assertEqual(payload["options"]["num_ctx"], 4096)
 
     def test_preloading_uses_recommended_context_and_unloading_keeps_its_original_behavior(self):
-        with patch("AIassist.ollama_api") as api:
-            AIassist.set_model_running("test:1b", True, 4096)
+        with patch("ollama_engine.ollama_api") as api:
+            ollama_engine.set_model_running("test:1b", True, 4096)
             payload = api.call_args.args[1]
             self.assertEqual(payload["options"]["num_ctx"], 4096)
             self.assertEqual(payload["keep_alive"], -1)
-            AIassist.set_model_running("test:1b", False, 4096)
+            ollama_engine.set_model_running("test:1b", False, 4096)
             payload = api.call_args.args[1]
             self.assertEqual(payload["keep_alive"], 0)
             self.assertNotIn("options", payload)

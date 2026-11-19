@@ -10,7 +10,7 @@ import threading
 import unittest
 from unittest.mock import Mock, patch
 
-import AIassist
+import ollama_engine
 import test_webui_app as fixtures
 from webui.app import Api
 from webui.colibri import ColibriService
@@ -168,7 +168,7 @@ class ColibriSocketTests(unittest.TestCase):
         (store.directory / "backend.settings").write_text(json.dumps({"url": f"http://127.0.0.1:{server.server_port}/v1"}), encoding="utf-8")
         with patch.dict(os.environ, {"COLIBRI_URL": "", "COLI_API_KEY": ""}):
             service = ColibriService(store.directory)
-        api = Api(events, store, AIassist, colibri=service)
+        api = Api(events, store, ollama_engine, colibri=service)
         self.addCleanup(api._close)
         with patch("webui.colibri.launcher.find_directory", return_value=None):
             chat = api.new_chat()["chat"]["id"]

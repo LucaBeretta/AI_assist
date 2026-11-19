@@ -5,7 +5,7 @@ import threading
 import unittest
 from unittest.mock import Mock, patch
 
-import AIassist
+import ollama_engine
 import test_webui_app as fixtures
 
 
@@ -72,8 +72,8 @@ class ModelApiTests(unittest.TestCase):
         self.events.wait("done", identity)
 
     def test_delete_transport_accepts_empty_success_body(self):
-        with patch("AIassist.urllib.request.urlopen", return_value=io.BytesIO(b"")) as opened:
-            self.assertEqual(AIassist.ollama_api("/api/delete", {"model": "cold"}, method="DELETE"), {})
+        with patch("ollama_engine.urllib.request.urlopen", return_value=io.BytesIO(b"")) as opened:
+            self.assertEqual(ollama_engine.ollama_api("/api/delete", {"model": "cold"}, method="DELETE"), {})
         self.assertEqual(opened.call_args.args[0].get_method(), "DELETE")
 
 

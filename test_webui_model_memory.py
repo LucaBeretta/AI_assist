@@ -6,7 +6,7 @@ import threading
 import unittest
 from unittest.mock import Mock, patch
 
-import AIassist
+import ollama_engine
 import test_webui_app as fixtures
 from webui.app import Api
 
@@ -81,8 +81,8 @@ class ModelMemoryTests(unittest.TestCase):
 
     def test_real_transport_serializes_keep_alive(self):
         frame = {"done": True, "message": {"content": "ok"}}
-        with patch("AIassist.urllib.request.urlopen", return_value=io.BytesIO(json.dumps(frame).encode())) as opened:
-            AIassist.request_ollama([], model="m", keep_alive="7m")
+        with patch("ollama_engine.urllib.request.urlopen", return_value=io.BytesIO(json.dumps(frame).encode())) as opened:
+            ollama_engine.request_ollama([], model="m", keep_alive="7m")
         self.assertEqual(json.loads(opened.call_args.args[0].data)["keep_alive"], "7m")
 
 

@@ -15,6 +15,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import AIassist
+import ollama_engine
 from coding_agent import FILE_LIMIT_CHOICES, run_agent
 from test_agent_support import isolate_agent_data
 from test_colibri_launcher import join_workers
@@ -128,10 +129,10 @@ class StopAndLimitUITests(unittest.TestCase):
         self.addCleanup(self.mocks.close)
         self.mocks.enter_context(patch.dict(os.environ, {"AI_ASSIST_DATA_DIR": str(self.history), "OLLAMA_MODEL": "alpha:8b"}))
         self.mocks.enter_context(patch("update_checker.UpdateChecker.check", lambda self: None))
-        self.mocks.enter_context(patch("AIassist.ensure_ollama"))
-        self.mocks.enter_context(patch("AIassist.list_ollama_models", return_value=["alpha:8b"]))
-        self.mocks.enter_context(patch("AIassist.running_models", return_value={"alpha:8b"}))
-        self.mocks.enter_context(patch("AIassist.set_model_running"))
+        self.mocks.enter_context(patch("ollama_engine.ensure_ollama"))
+        self.mocks.enter_context(patch("ollama_engine.list_ollama_models", return_value=["alpha:8b"]))
+        self.mocks.enter_context(patch("ollama_engine.running_models", return_value={"alpha:8b"}))
+        self.mocks.enter_context(patch("ollama_engine.set_model_running"))
         self.mocks.enter_context(patch("capabilities_view.fetch_model_capabilities",
                                        return_value={"name": "alpha:8b", "capabilities": ["completion"]}))
         self.release = threading.Event()
@@ -143,12 +144,12 @@ class StopAndLimitUITests(unittest.TestCase):
                     self.release.wait(5)
                     self.release.clear()
                     on_chunk(word)
-            except AIassist.StreamStopped:
+            except ollama_engine.StreamStopped:
                 self.disconnected.set()  # the stream callback stopped the read: the connection closes
                 raise
             return "Prima parte della risposta"
 
-        self.mocks.enter_context(patch("AIassist.request_ollama", side_effect=slow_answer))
+        self.mocks.enter_context(patch("ollama_engine.request_ollama", side_effect=slow_answer))
         try:
             self.root = tk.Tk()
         except tk.TclError as error:
