@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>AI Assist</title>
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to the conversation</a>
+  <div class="app" id="app">
+    <header class="topbar" id="topbar">
+      <button class="icon-button nav-toggle" id="nav-toggle" type="button" aria-label="Open navigation"
+              aria-controls="sidebar" aria-expanded="false"></button>
+      <div class="brand"><span class="brand-mark" aria-hidden="true">&#9671;</span> ai-assist <span class="brand-tag">local</span></div>
+      <div class="status-chips" id="status-chips" aria-label="Connection status"></div>
+      <div class="topbar-actions">
+        <button class="icon-button" id="theme-toggle" type="button" aria-label="Switch theme"></button>
+        <button class="icon-button" id="inspector-toggle" type="button" aria-label="Show details panel"
+                aria-controls="inspector" aria-expanded="false"></button>
+      </div>
+    </header>
+    <nav class="sidebar" id="sidebar" aria-label="Workspace"></nav>
+    <main class="main" id="main" tabindex="-1"></main>
+    <aside class="inspector" id="inspector" aria-label="Details"></aside>
+    <div class="scrim" id="scrim" hidden></div>
+  </div>
+  <div class="sign-in" id="sign-in" hidden>
+    <div class="sign-in-card">
+      <h1>Sign in to this workspace</h1>
+      <p id="sign-in-message">This page needs the single-use link printed in the window where you started
+        <code>web_workspace.py</code>.</p>
+      <p class="muted">Press Enter in that window for a new link. Links work once, for five minutes, on this computer only.</p>
+    </div>
+  </div>
+  <div class="sr-only" id="announcer" role="status" aria-live="polite"></div>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+  <dialog class="dialog" id="dialog" aria-labelledby="dialog-title"></dialog>
+</body>
+</html>

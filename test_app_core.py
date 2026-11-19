@@ -291,7 +291,7 @@ class InstanceLockTests(unittest.TestCase):
 
 class BoundaryTests(unittest.TestCase):
     def test_the_core_and_the_web_server_load_no_ui_toolkit(self):
-        code = ("import sys; import app_core.providers, app_core.privacy, app_core.settings, app_core.instance_lock; "
+        code = ("import sys; import app_core.chat_service, app_core.providers, app_core.privacy, webui.server, web_workspace; "
                 "print(sorted(name for name in sys.modules if name.split('.')[0] in ('tkinter', '_tkinter')))")
         completed = subprocess.run([sys.executable, "-c", code], cwd=HERE, capture_output=True, text=True, timeout=60)
         self.assertEqual(completed.returncode, 0, completed.stderr)
