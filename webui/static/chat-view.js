@@ -171,16 +171,20 @@ export function createChatView(ctx) {
     const edit = !assistant && options.editable && typeof options.index === "number"
       ? h("button", { class: "button button-ghost button-small", type: "button", title: "Change this message and send it again (↑)",
         onClick: () => startEdit(/** @type {number} */ (options.index), content) }, "Edit") : null;
+    // Regenerate sits under the answer, where the eye ends after reading it, not in the small top line.
     const regenerate = assistant && options.editable && options.last
-      ? h("button", { class: "button button-ghost button-small", type: "button", title: "Answer your last message again (Alt+R)",
-        onClick: () => ctx.regenerate() }, "Regenerate") : null;
+      ? h("div", { class: "message-footer" },
+        h("button", { class: "button button-small", type: "button", title: "Answer your last message again (Alt+R)",
+          onClick: () => ctx.regenerate() }, icon("refresh"), "Regenerate"),
+        h("span", { class: "muted" }, "Not happy with this answer? Get a new one."))
+      : null;
     return h("article", { class: `message is-${assistant ? "assistant" : "user"}${options.editing ? " is-editing" : ""}`,
       "aria-label": assistant ? "AI Assist" : "You" },
       h("div", { class: "message-header" }, h("span", { class: "message-role" }, assistant ? "◇ ai-assist" : "> you"),
-        h("div", { class: "message-actions" }, edit, regenerate, copy,
+        h("div", { class: "message-actions" }, edit, copy,
           h("button", { class: "button button-ghost button-small", type: "button", onClick: () => ctx.addToMemory(content),
             title: "Save this message as a shared note for every chat" }, "Add to memory"))),
-      bodyNode);
+      bodyNode, regenerate);
   }
 
   /**

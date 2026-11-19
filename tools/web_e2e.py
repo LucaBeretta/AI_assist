@@ -242,7 +242,10 @@ try:
     check("the stopped answer is saved", saved and saved.startswith("user,assistant,user,assistant|"), saved)
 
     # Regenerate replaces the last answer; Edit (↑ in the empty composer) replaces the last message and its answer.
-    cdp.js("[...document.querySelectorAll('.message.is-assistant button')].find(b => b.textContent === 'Regenerate').click()")
+    footer = cdp.js("(() => { const f = document.querySelectorAll('.message-footer'); const last = [...document.querySelectorAll('.message.is-assistant')].pop();"
+                    " return f.length + '|' + (f.length === 1 && last.contains(f[0]) && f[0].querySelector('button').textContent); })()")
+    check("Regenerate is a button under the last answer only", footer == "1|Regenerate", footer)
+    cdp.js("document.querySelector('.message-footer button').click()")
     regenerated = cdp.wait("!document.querySelector('.message[aria-busy=true]') && document.getElementById('announcer').textContent === 'Answer complete.'"
                            " && document.querySelectorAll('.message').length === 4", 120)
     check("Regenerate answers the last message again in place", regenerated,

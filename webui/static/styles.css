@@ -197,6 +197,9 @@ button.chip { cursor: pointer; }
 .message.is-assistant .message-role { color: var(--accent); }
 .message-actions { margin-left: auto; display: flex; gap: var(--space-1); opacity: 0.85; }
 .message-body { overflow-wrap: anywhere; min-width: 0; }
+.message-footer { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding-top: var(--space-2);
+  border-top: 1px solid var(--border); font-size: var(--text-xs); }
+.message-footer .icon { width: 14px; height: 14px; }
 .message-body > :last-child { margin-bottom: 0; }
 .message-body.is-plain { white-space: pre-wrap; }
 .message.is-editing { outline: 2px dashed var(--accent); outline-offset: 2px; }
