@@ -7,10 +7,10 @@
 | Configuration | Desktop app (Tk) | Web workspace (preview) | Firewall lock | Evidence |
 | --- | --- | --- | --- | --- |
 | Windows 11 x64, Python 3.14.10 and 3.9.25 | **Tested** | **Tested** (Edge 157 headless, real Ollama 0.40.16) | Read path tested; admin (UAC) path untested | 585 unit tests (7 skipped) on both Pythons, also with a short 8.3 temp folder; `tools/web_e2e.py` 43/43 |
-| GitHub `windows-latest` x64, Python 3.13 and 3.14 | **Tested in CI** (full suite) | Unit and API tests only (no browser run) | Mocked only | `.github/workflows/tests.yml`, run 44613399296 (`f608dec`) |
+| GitHub `windows-latest` x64, Python 3.13 and 3.14 | **Tested in CI** (full suite) | Unit and API tests only (no browser run) | Mocked only | `.github/workflows/tests.yml`, run 44620618926 (`6591f80`), all jobs green |
 | Windows 11 ARM64 | Untested; launcher and private-runtime entry exist | Untested; no platform-specific code | Same code as x64 | `install_runtime.ps1`, `python-runtime.txt` |
 | macOS Apple silicon / Intel | Partially tested earlier (Apple-silicon memory logic has unit tests with mocks); **not run**: the CI job exists (`tests-macos.yml`, started by hand) but on 2026-11-19 GitHub gave this project no Mac machine for 14+ hours | Untested; standard library only | Not available (Windows only) | `test_apple_silicon.py`, `Start AI Assist.command` |
-| Linux x86_64: Ubuntu 26.04 (Python 3.13), Ubuntu 24.04 (Python 3.9) | **Tested in CI** (full suite, Tk under Xvfb) | Unit and API tests only | Not available | `.github/workflows/tests.yml`, run 44613399296; WSL Ubuntu (Python 3.14, no Tk): the 408 tests that load without Tk |
+| Linux x86_64: Ubuntu 26.04 (Python 3.13), Ubuntu 24.04 (Python 3.9) | **Tested in CI** (full suite, Tk under Xvfb) | Unit and API tests only | Not available | `.github/workflows/tests.yml`, run 44620618926; WSL Ubuntu (Python 3.14, no Tk): the 408 tests that load without Tk |
 | Linux ARM64 | Untested; launcher exists | Untested | Not available | `Start AI Assist.sh`, `test_launchers.py` (static checks) |
 | Python 3.10–3.12 | Expected to work (3.9, 3.13 and 3.14 are tested; minimum 3.9: `str.removeprefix`, `Path.is_relative_to`); not run | same | — | audit §1 |
 | Android, iOS | **Unsupported** | Not offered (loopback only; LAN pairing not built) | — | section 4 |
