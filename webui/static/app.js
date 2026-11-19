@@ -12,6 +12,7 @@ import { createProjectsSidebar, createProjectsView } from "./projects-view.js";
 import { createModelsSidebar, createModelsView } from "./models-view.js";
 import { createSettingsSidebar, createSettingsView } from "./settings-view.js";
 import { createInspector } from "./inspector.js";
+import { createComputeSidebar, createComputeView } from "./compute-view.js";
 
 /** @param {Record<string, any>} initial */
 function createStore(initial) {
@@ -44,7 +45,7 @@ const store = createStore({
   chats: [], chatsLoading: true, chatsError: null, chatQuery: "",
   chat: null, chatLoading: false, chatError: null,
   streaming: null, sendError: null, lastMetrics: null,
-  details: {}, hardware: null, memory: null, log: null,
+  details: {}, hardware: null, memory: null, log: null, compute: null,
   projects: null, projectsError: null, project: null,
 });
 
@@ -127,6 +128,7 @@ const ctx = {
   navigate(view) {
     store.set({ view, navOpen: false });
     if (view === "projects") ctx.loadProjects();
+    if (view === "compute") ctx.loadCompute();
     if (view === "models") ctx.loadModels();
     if (view === "settings") { ctx.loadMemory(); ctx.loadLog(); }
     /** @type {HTMLElement} */ (document.getElementById("main")).focus();
@@ -172,6 +174,12 @@ const ctx = {
     } catch (error) {
       store.set({ details: { ...store.get().details, [name]: { error: error instanceof Error ? error.message : String(error) } } });
     }
+  },
+
+  async loadCompute() {
+    if (store.get().view !== "compute") return;
+    try { store.set({ compute: await api.get("/api/compute") }); }
+    catch (error) { store.set({ compute: { error: error instanceof Error ? error.message : String(error) } }); }
   },
 
   async loadHardware() {
@@ -420,7 +428,7 @@ const themeToggle = /** @type {HTMLButtonElement} */ (document.getElementById("t
 const inspectorToggle = /** @type {HTMLButtonElement} */ (document.getElementById("inspector-toggle"));
 const scrim = /** @type {HTMLElement} */ (document.getElementById("scrim"));
 
-const SECTIONS = [["chats", "Chats", "chat"], ["projects", "Projects", "folder"], ["models", "Models", "cube"], ["settings", "Settings", "gear"]];
+const SECTIONS = [["chats", "Chats", "chat"], ["projects", "Projects", "folder"], ["models", "Models", "cube"], ["compute", "Compute", "cpu"], ["settings", "Settings", "gear"]];
 const sectionButtons = SECTIONS.map(([view, label, glyph]) =>
   h("button", { class: "nav-section", type: "button", "data-view": view, onClick: () => ctx.navigate(view) },
     icon(/** @type {any} */ (glyph)), label));
@@ -433,12 +441,14 @@ const projectsSidebar = createProjectsSidebar(ctx);
 const projectsView = createProjectsView(ctx);
 const modelsSidebar = createModelsSidebar(ctx);
 const modelsView = createModelsView(ctx);
+const computeSidebar = createComputeSidebar(ctx);
+const computeView = createComputeView(ctx);
 const settingsSidebar = createSettingsSidebar(ctx);
 const settingsView = createSettingsView(ctx);
 const inspector = createInspector(ctx);
 const views = {
   chats: [chatSidebar, chatView], projects: [projectsSidebar, projectsView],
-  models: [modelsSidebar, modelsView], settings: [settingsSidebar, settingsView],
+  models: [modelsSidebar, modelsView], compute: [computeSidebar, computeView], settings: [settingsSidebar, settingsView],
 };
 replace(navToggle, icon("menu"));
 replace(inspectorToggle, icon("panel"));
@@ -549,6 +559,7 @@ async function start() {
   await Promise.all([ctx.loadStatus(), ctx.loadChats(""), ctx.loadModels()]);
   if (store.get().inspectorOpen) ctx.loadDetails(store.get().selectedModel);
   window.setInterval(() => { if (!document.hidden) ctx.loadStatus(); }, 15000);
+  window.setInterval(() => { if (!document.hidden && store.get().view === "compute") ctx.loadCompute(); }, 5000);
 }
 
 start();
