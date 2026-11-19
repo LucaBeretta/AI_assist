@@ -48,3 +48,17 @@ In AI Assist, click **Compute dashboard...** and use `F11` to view it on the sec
 - Hardware-specific fullscreen checks, readable text at 480 × 320 on HiDPI scaled displays, and deployment/testing on the actual second screen.
 
 The graphical view deliberately avoids fake readings and remains useful while the network features are unfinished.
+
+## Remember the external monitor automatically
+
+The compute window now saves its **normal-window** size and position to a small per-user JSON file (macOS/Linux: `~/.aiassist/dashboard-placement.json`; Windows: `%LOCALAPPDATA%/AI Assist/dashboard-placement.json`). This does not store any hardware ID outside your computer or transmit it.
+
+- Move the window to the external screen, resize it, then leave it there or close it. Changes are saved after a short debounce, and also on closing.
+- On the next launch, the app looks for the same connected display and restores that location. If a display identifier changed, it tries a unique geometry/resolution match.
+- If the external screen is disconnected or its identity cannot be matched unambiguously, the app centers itself on the primary display instead of intentionally restoring the old off-screen position.
+- Fullscreen stays manual (`F11`); its dimensions are **not** written over the normal window geometry. Sharing remains off by default.
+- Delete the JSON file to reset the remembered window placement.
+
+The implementation lives in `dashboard_placement.py`, with regression tests in `test_dashboard_placement.py`. Run `python -m unittest -v test_dashboard_placement test_compute_dashboard_layout test_standalone_dashboard`.
+
+**Known limit:** Actual placement depends on the window-manager and display scaling (including macOS Retina and external displays positioned to the left of the main screen). The logic has headless regression tests but has **not been visually validated on your particular Mac**.
