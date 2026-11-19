@@ -321,8 +321,8 @@ class Api:
         return self._developer.approve_plan(task_id, decision, text)
 
     @_json_method
-    def approve_action(self, task_id, approval_id, approved):
-        return self._developer.approve_action(task_id, approval_id, approved)
+    def approve_action(self, task_id, approval_id, approved, hunks=None):
+        return self._developer.approve_action(task_id, approval_id, approved, hunks)
 
     @_json_method
     def stop_task(self, task_id):

@@ -55,6 +55,8 @@ class DeveloperTasks:
     def _wait(self, identity, task, kind, value):
         approval_id = str(uuid.uuid4())
         pending = {"kind": kind, "event": threading.Event()}
+        if kind == "action":
+            pending["action"] = deepcopy(value["action"])
         with self.lock:
             task["pending"][approval_id] = pending
         self.bridge.emit("plan_approval" if kind == "plan" else "approval", task_id=identity,
@@ -86,7 +88,7 @@ class DeveloperTasks:
             match["event"].set()
         return {"ok": True}
 
-    def approve_action(self, identity, approval_id, approved):
+    def approve_action(self, identity, approval_id, approved, hunks=None):
         if type(approved) is not bool:
             raise ValueError("Action approval must be true or false.")
         with self.lock:
@@ -94,7 +96,12 @@ class DeveloperTasks:
             pending = task["pending"].get(approval_id) if task else None
             if pending is None or pending["kind"] != "action" or pending["event"].is_set():
                 raise ValueError("This action approval is no longer pending.")
-            pending["decision"] = approved
+            if hunks is not None:
+                import diff_hunks
+                if pending["action"]["kind"] != "write_file":
+                    raise ValueError("Hunk selection is available only for file writes.")
+                diff_hunks.validate_selection(pending["action"]["hunks"], hunks)
+            pending["decision"] = {"approved": True, "hunks": hunks} if approved and hunks is not None else approved
             pending["event"].set()
         return {"ok": True}
 

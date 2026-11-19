@@ -27,6 +27,7 @@ import urllib.request
 import uuid
 
 import developer_tools as projects
+import diff_hunks
 from task_checkpoints import CheckpointStore
 from response_metrics import metrics_summary
 
@@ -272,6 +273,11 @@ def _approved(approve_action, action, allow_destination=False):
     if (allow_destination and isinstance(approved, dict) and approved.get("approved") is True
             and isinstance(approved.get("destination"), str) and approved["destination"]):
         return approved["destination"]
+    if isinstance(approved, dict) and approved.get("approved") is True and "hunks" in approved:
+        if action["kind"] != "write_file":
+            raise ValueError("Hunks can be selected only for file writes.")
+        diff_hunks.validate_selection(action["hunks"], approved["hunks"])
+        return approved
     if approved is not True:
         raise ValueError("The user declined this action. No action was taken; do not repeat it.")
     return True
@@ -306,7 +312,7 @@ def _edit_file(project, arguments, approve_action, cancel_event, on_event):
     updated = current.replace(old_text, new_text) if replace_all else current.replace(old_text, new_text, 1)
     result = _write_file(project, {"path": path, "content": updated}, approve_action, cancel_event, on_event,
                          expected_old=old_bytes)
-    return result if count == 1 else f"{result} Replaced {count} occurrences."
+    return result if count == 1 or "Rejected blocks:" in result else f"{result} Replaced {count} occurrences."
 
 
 def _read_file(project, arguments, on_event):
@@ -365,7 +371,7 @@ def _write_file(project, arguments, approve_action, cancel_event, on_event, dest
                    for line in diff_lines)
     _check_cancelled(cancel_event)
     approved = _approved(approve_action, {"kind": "write_file", "path": path, "content": content,
-                             "diff": diff, "exists": old_bytes is not None, "destination": str(target),
+                             "diff": diff, "hunks": diff_hunks.hunks(diff), "exists": old_bytes is not None, "destination": str(target),
                              "destination_selected": destination_selected},
                          allow_destination=old_bytes is None and not destination_selected)
     _check_cancelled(cancel_event)
@@ -388,6 +394,23 @@ def _write_file(project, arguments, approve_action, cancel_event, on_event, dest
             raise ValueError("The file changed after its diff was prepared. Read it again and request a new approval.")
 
     recheck()
+    selection = ""
+    if isinstance(approved, dict):
+        selected = approved["hunks"]
+        rejected = [item["id"] for item in diff_hunks.hunks(diff) if item["id"] not in selected]
+        selection = (f" Applied blocks: {', '.join(selected) or 'none'}; Rejected blocks: {', '.join(rejected) or 'none'}."
+                     " Do not reapply rejected blocks without a new user request.")
+        if not selected:
+            return "No file changes were applied." + selection
+        content = diff_hunks.apply_selected(old_text, content, selected)
+        new_bytes = content.encode("utf-8")
+        if rejected and old_bytes and old_bytes.startswith(codecs.BOM_UTF8):
+            new_bytes = codecs.BOM_UTF8 + new_bytes
+        if len(new_bytes) > _file_limit():
+            raise ValueError("The selected blocks exceed the editing limit.")
+        projects._decode_text(new_bytes)
+        diff = "".join(line if line.endswith("\n") else line + "\n\\ No newline at end of file\n" for line in
+            difflib.unified_diff(old_text.splitlines(keepends=True), content.splitlines(keepends=True), fromfile=path, tofile=path))
     checkpoint = getattr(_run, "checkpoint", None)
     if checkpoint is not None:
         if checkpoint.capture(_run.task_id, _run.project, target, old_bytes):
@@ -414,7 +437,7 @@ def _write_file(project, arguments, approve_action, cancel_event, on_event, dest
             temporary_path.unlink(missing_ok=True)
     _emit(on_event, "changed", f"Updated {path}" if old_bytes is not None else f"Created {path}",
           path=path, diff=diff, destination=str(target))
-    return f"Successfully {'updated' if old_bytes is not None else 'created'} {path} ({len(new_bytes):,} bytes)."
+    return f"Successfully {'updated' if old_bytes is not None else 'created'} {path} ({len(new_bytes):,} bytes)." + selection
 
 
 def _terminate_process_tree(process):
