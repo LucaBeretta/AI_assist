@@ -31,6 +31,8 @@ from webui import settings
 from webui.desktop import Desktop
 from webui.preview import HtmlPreview
 from webui.memories import Memories, revision as memory_revision
+from webui.instance import SingleInstance
+from webui.window_state import rectangle, visible_rectangle, saved_theme
 
 
 log = logging.getLogger(__name__)
@@ -106,6 +108,15 @@ class Api:
         self._preview = HtmlPreview(self._store.directory, self._desktop)
         self._pulls = {}
         self._memories = Memories(self._store.directory)
+
+    @_json_method
+    def set_window_state(self, value):
+        value = rectangle(value)
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("The web UI is closing.")
+            self._settings = settings.save(self._store.directory, {**self._settings, "window": value})
+            return {"ok": True, "window": value}
 
     @_json_method
     def list_memories(self):
@@ -1084,17 +1095,42 @@ def main():
         return 1
     bridge = None
     api = None
+    instance = None
     try:
+        store = ChatStore()
+        instance = SingleInstance(store.directory)
+        if not instance.acquire():
+            return 0
         # An absolute file URI does not enable pywebview's internal HTTP server.
         page = Path(__file__).resolve().parent / "static" / "index.html"
-        bridge = Bridge(lambda script: window.evaluate_js(script), autostart=False)
         desktop = Desktop()
-        api = Api(bridge, desktop=desktop)
-        window = webview.create_window("AI Assist — Web", page.as_uri(), js_api=api, text_select=True)
+        bridge = Bridge(desktop.evaluate, autostart=False, on_flush=desktop.flush)
+        api = Api(bridge, store=store, desktop=desktop)
+        preferences = settings.load(store.directory)
+        geometry = visible_rectangle(preferences.get("window"), getattr(webview, "screens", []))
+        window = webview.create_window("AI Assist — Web", page.as_uri(), js_api=api, text_select=True, **geometry)
         desktop.main_window = window
         def loaded():
+            desktop.set_theme(saved_theme(store.directory))
             bridge.start()
+            instance.start(desktop.request_activation)
+        def remember(*args):
+            try:
+                api.set_window_state({key: getattr(window, key) for key in ("x", "y", "width", "height")})
+            except Exception:
+                log.exception("Could not remember the window rectangle")
         window.events.loaded += loaded
+        def closing():
+            remember()
+            # A preview must not keep the native event loop alive after the
+            # main window closes. Stop workers in finally, outside native callbacks.
+            desktop.close()
+        for event in ("moved", "resized"):
+            hook = getattr(window.events, event, None)
+            if hook is not None:
+                hook += remember
+        if hasattr(window.events, "closing"):
+            window.events.closing += closing
         webview.start(api._ensure_engine, http_server=False)
         return 0
     except Exception as error:
@@ -1102,6 +1138,8 @@ def main():
         print(f"Could not start the web UI: {error}", file=sys.stderr)
         return 1
     finally:
+        if instance is not None:
+            instance.close()
         if api is not None:
             api._close()
         if bridge is not None:

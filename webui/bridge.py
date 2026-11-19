@@ -11,7 +11,7 @@ log = logging.getLogger(__name__)
 
 
 class Bridge:
-    def __init__(self, evaluate, interval=0.03, autostart=True):
+    def __init__(self, evaluate, interval=0.03, autostart=True, on_flush=None):
         self._evaluate = evaluate
         self._interval = interval
         self._events = deque()
@@ -19,6 +19,7 @@ class Bridge:
         self._delivery = threading.Lock()
         self._closed = threading.Event()
         self._thread = None
+        self._on_flush = on_flush
         if autostart:
             self.start()
 
@@ -52,6 +53,11 @@ class Bridge:
                     return
                 pending = list(self._events)
                 self._events.clear()
+            if self._on_flush is not None:
+                try:
+                    self._on_flush()
+                except Exception:
+                    log.exception("Could not deliver a desktop action")
             if not pending:
                 return
             batch = []

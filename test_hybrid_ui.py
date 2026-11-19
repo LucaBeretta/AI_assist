@@ -162,7 +162,9 @@ class HybridWorkspaceTests(unittest.TestCase):
                 patch("hybrid_ui.ColibriClient.review", side_effect=review) as advise:
             self.case.set_input("Make this professional with useful comments")
             self.app.send_button.invoke()
-            self.case.wait_for(lambda: not self.app.is_waiting, "cooperative result")
+            # Changed files trigger a project rescan after the reply finishes.
+            # Feedback actions become usable only once that scan finishes too.
+            self.case.wait_for(lambda: not self.app.busy(), "cooperative result and project rescan")
         self.assertEqual(run.call_count, 1)
         self.assertEqual(advise.call_count, 1)
         self.assertEqual(len(snapshots), 1)
