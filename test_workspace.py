@@ -955,6 +955,28 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         native_tool = next(item for item in saved["agent_history"] if item["role"] == "tool")
         self.assertEqual(native_tool, {"role": "tool", "tool_name": "read_file", "content": self.original_code})
 
+    def test_back_up_now_and_restore_a_deleted_chat_from_the_window(self):
+        self.set_input("A chat worth keeping")
+        self.app.conversation.append(dict(role="user", content="A chat worth keeping"))
+        self.app.persist_current()
+        identity = self.app.current_chat["id"]
+        self.load_saved(identity)
+        self.app.chat_menu.invoke("Restore chats from a backup...")
+        window = self.app.backup_window
+        self.assertTrue(window.window.winfo_exists())
+        window.backup_button.invoke()
+        self.wait_for(lambda: not self.app.backup_running and window.items, "backup written")
+        self.assertIn("Backed up", self.app.status_label.cget("text"))
+        with patch("workspace_ui.messagebox.askyesno", return_value=True):
+            self.app.delete_chat()
+        self.wait_for(lambda: not (self.app.chat_store.directory / f"{identity}.json").exists(), "chat deleted")
+        with patch("backup_ui.messagebox.askyesno", return_value=True):
+            window.restore_button.invoke()
+        self.wait_for(lambda: not self.app.backup_running, "restore finished")
+        self.assertIn("1 chat added", self.app.status_label.cget("text"))
+        self.assertTrue(any(record["id"] == identity for record in self.app.history_records))
+        self.assertIn("Restore finished", window.status.cget("text"))
+
     def test_undo_puts_back_the_ais_last_task_after_confirmation(self):
         self.enter_project()
         target = (self.project / "main.py").resolve()

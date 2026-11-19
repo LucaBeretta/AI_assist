@@ -5,6 +5,11 @@ import queue
 import threading
 
 
+class _Call:
+    def __init__(self, function, on_done):
+        self.function, self.on_done = function, on_done
+
+
 class BackgroundSaves:
     def __init__(self, store):
         self.store = store
@@ -16,6 +21,12 @@ class BackgroundSaves:
     def submit(self, version, record, delete=False):
         self.jobs.put((version, deepcopy(record), delete))
 
+    def call(self, function, on_done):
+        """Run ``function()`` in order with the queued writes, then ``on_done(result, error)``
+        on this worker thread. Backups and restores use it, so they never read or replace a
+        chat file while it is being saved (Windows cannot replace a file that is open)."""
+        self.jobs.put(_Call(function, on_done))
+
     def _run(self):
         timestamps = {}
         while True:
@@ -23,6 +34,16 @@ class BackgroundSaves:
             try:
                 if job is None:
                     return
+                if isinstance(job, _Call):
+                    try:
+                        result, error = job.function(), None
+                    except Exception as failure:
+                        result, error = None, failure
+                    try:
+                        job.on_done(result, error)
+                    except Exception:
+                        pass
+                    continue
                 version, record, delete = job
                 try:
                     if record["id"] in timestamps and record["updated_at"] <= timestamps[record["id"]]:

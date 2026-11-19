@@ -44,7 +44,7 @@ const store = createStore({
   chats: [], chatsLoading: true, chatsError: null, chatQuery: "",
   chat: null, chatLoading: false, chatError: null,
   streaming: null, sendError: null, lastMetrics: null,
-  details: {}, hardware: null, memory: null, log: null,
+  details: {}, hardware: null, memory: null, log: null, backups: null,
   projects: null, projectsError: null, project: null,
 });
 
@@ -128,7 +128,7 @@ const ctx = {
     store.set({ view, navOpen: false });
     if (view === "projects") ctx.loadProjects();
     if (view === "models") ctx.loadModels();
-    if (view === "settings") { ctx.loadMemory(); ctx.loadLog(); }
+    if (view === "settings") { ctx.loadMemory(); ctx.loadLog(); ctx.loadBackups(); }
     /** @type {HTMLElement} */ (document.getElementById("main")).focus();
   },
 
@@ -338,6 +338,35 @@ const ctx = {
       toast("Shared memory saved. It applies to the next message in any chat.");
       ctx.loadStatus();
     } catch (error) { failed(error, "Could not save shared memory"); }
+  },
+
+  async loadBackups() {
+    try { store.set({ backups: await api.get("/api/backups") }); }
+    catch (error) { store.set({ backups: { error: error instanceof Error ? error.message : String(error) } }); }
+  },
+
+  async backupNow() {
+    try {
+      const result = await api.request("POST", "/api/backups", {});
+      store.set({ backups: result });
+      toast(result.message);
+      announce(result.message);
+    } catch (error) { failed(error, "Could not back up"); }
+  },
+
+  /** @param {string} name @param {string} label */
+  async restoreBackup(name, label) {
+    const sure = await openDialog({ title: "Restore chats from this backup?",
+      body: `From ${label}: chats that are missing here are added, and damaged ones are replaced. Chats you still have are not changed.`,
+      confirm: "Restore" });
+    if (sure !== true) return;
+    try {
+      const result = await api.request("POST", "/api/backups/restore", { name });
+      store.set({ backups: result });
+      toast(result.message);
+      announce(result.message);
+      ctx.loadChats();
+    } catch (error) { failed(error, "Could not restore"); }
   },
 
   async loadLog() {

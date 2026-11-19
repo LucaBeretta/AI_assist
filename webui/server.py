@@ -20,6 +20,8 @@ Endpoints (all JSON, all under /api, all needing a session except /api/session):
     GET    /api/projects/<chat id>/file?path= one file, read-only
     GET    /api/log                           the internet gate's recent decisions
     PUT    /api/settings/engine               Ollama or Colibri
+    GET    /api/backups, POST /api/backups    automatic backups; back up now
+    POST   /api/backups/restore {name}        restore one of them (adds missing chats only)
 
 Nothing here runs commands, writes project files or approves internet access:
 those stay in the desktop window, behind its reviewed, two-step confirmations.
@@ -38,7 +40,7 @@ import threading
 import time
 import urllib.parse
 
-from app_core import ollama, settings
+from app_core import backups, ollama, settings
 from app_core.chat_service import ChatService, ServiceError
 from app_core.privacy import is_cloud_model, privacy_status
 from app_core.providers import configured_provider
@@ -232,6 +234,34 @@ class WebWorkspace:
                                 ("time", "decision", "kind", "target", "purpose", "source", "scope")})
         return {"entries": entries, "path": str(path)}
 
+    # ------------------------------------------------------------ backups (only the data folder's own)
+
+    def backups_view(self):
+        items = backups.list_backups(self.store)
+        return {"backups": [{"name": item["name"], "created": item["created"].isoformat().replace("+00:00", "Z"),
+                             "size": item["size"]} for item in items],
+                "folder": str(backups.folder_for(self.store))}
+
+    def backup_now(self):
+        with self.service.lock:
+            path, count = backups.create(self.store, self.directory / "shared.memory")
+        return dict(self.backups_view(), message=f"Backed up {count} chat{'s' if count != 1 else ''} to {path.name}.")
+
+    def backup_if_due(self):
+        with self.service.lock:
+            return backups.create_if_due(self.store, self.directory / "shared.memory")
+
+    def restore_backup(self, name):
+        item = next((item for item in backups.list_backups(self.store) if item["name"] == name), None)
+        if not isinstance(name, str) or item is None:
+            raise HttpError(404, "That backup is not in this computer's backups folder.")
+        with self.service.lock:
+            if self.service.active:
+                raise HttpError(409, "Wait for the answer in progress before restoring.")
+            report = backups.restore(self.store, item["path"], self.shared_memory)
+            self.service.reload()
+        return dict(self.backups_view(), report=report, message=backups.describe(report))
+
     def set_engine(self, body):
         backend = body.get("backend")
         if backend not in settings.BACKENDS:
@@ -305,6 +335,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ("GET", rf"/api/projects/{_CHAT}/file", "project_file", True),
         ("GET", r"/api/log", "gate_log", True),
         ("PUT", r"/api/settings/engine", "set_engine", True),
+        ("GET", r"/api/backups", "list_backups", True),
+        ("POST", r"/api/backups", "backup_now", True),
+        ("POST", r"/api/backups/restore", "restore_backup", True),
     ]
 
     # Paths, queries and bodies can hold file names and search text: never logged.
@@ -507,6 +540,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def api_set_engine(self, body):
         return self.workspace.set_engine(body)
+
+    def api_list_backups(self, body):
+        return self.workspace.backups_view()
+
+    def api_backup_now(self, body):
+        return self.workspace.backup_now()
+
+    def api_restore_backup(self, body):
+        return self.workspace.restore_backup(body.get("name"))
 
     def api_send_message(self, body, chat):
         """Stream one answer as newline-delimited JSON. This handler thread is the

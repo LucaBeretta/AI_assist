@@ -286,7 +286,8 @@ class SecurityTests(ServerCase):
             ("DELETE", r"/api/chats/(?P<chat>[0-9a-f-]{36})"), ("POST", r"/api/chats/(?P<chat>[0-9a-f-]{36})/messages"),
             ("POST", r"/api/requests/(?P<request>[0-9a-f]{16})/cancel"), ("GET", r"/api/memory"), ("PUT", r"/api/memory"),
             ("POST", r"/api/memory/notes"), ("GET", r"/api/projects"), ("GET", r"/api/projects/(?P<chat>[0-9a-f-]{36})/files"),
-            ("GET", r"/api/projects/(?P<chat>[0-9a-f-]{36})/file"), ("GET", r"/api/log"), ("PUT", r"/api/settings/engine")]))
+            ("GET", r"/api/projects/(?P<chat>[0-9a-f-]{36})/file"), ("GET", r"/api/log"), ("PUT", r"/api/settings/engine"),
+            ("GET", r"/api/backups"), ("POST", r"/api/backups"), ("POST", r"/api/backups/restore")]))
         self.assertEqual([name for _, _, name, public in Handler.ROUTES if not public], ["session"])
 
     def test_unexpected_errors_reveal_no_details(self):
@@ -412,6 +413,23 @@ class ApiTests(ServerCase):
         self.assertEqual(saved["backend"], "Colibri")
         response, _ = self.call("PUT", "/api/settings/engine", {"backend": "Cloud"})
         self.assertEqual(response.status, 400)
+
+    def test_backups_can_be_made_and_restored_from_the_data_folder_only(self):
+        _, created = self.call("POST", "/api/chats", {"model": "alpha:8b"})
+        self.call("POST", f"/api/chats/{created['chat']['id']}/messages", {"content": "Keep me", "model": "alpha:8b"})
+        response, body = self.call("POST", "/api/backups", {})
+        self.assertEqual(response.status, 200)
+        self.assertIn("Backed up 1 chat", body["message"])
+        name = body["backups"][0]["name"]
+        self.call("DELETE", f"/api/chats/{created['chat']['id']}")
+        response, body = self.call("POST", "/api/backups/restore", {"name": name})
+        self.assertEqual((response.status, body["report"]["added"]), (200, 1))
+        _, listed = self.call("GET", "/api/chats")
+        self.assertEqual([chat["title"] for chat in listed["chats"]], ["Keep me"])
+        for bad in ("../chats-20260101-000000.zip", "C:/Windows/win.ini", "chats-x.zip", None, 7):
+            with self.subTest(bad=bad):
+                response, _ = self.call("POST", "/api/backups/restore", {"name": bad})
+                self.assertEqual(response.status, 404)
 
     def test_gate_log_shows_recent_decisions(self):
         log = self.store.directory / "network.log"

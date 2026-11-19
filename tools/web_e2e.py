@@ -262,6 +262,13 @@ try:
     cdp.js("document.querySelector('.view-header .button').click()")
     check("the developer conversation is read-only", cdp.wait("document.querySelector('.composer').hidden && document.querySelector('.composer-notice').textContent.includes('Read-only here')", 10))
 
+    # Backups: the daily one at start, and Back up now.
+    cdp.js("document.querySelector('.nav-section[data-view=settings]').click()")
+    check("the daily backup is listed", cdp.wait("document.querySelectorAll('#settings-backups .backup-row').length >= 1", 15))
+    cdp.js("[...document.querySelectorAll('#settings-backups button')].find(b => b.textContent === 'Back up now').click()")
+    check("Back up now reports the backup", cdp.wait("document.getElementById('toasts').textContent.includes('Backed up 2 chats')", 15),
+          cdp.js("document.getElementById('toasts').textContent"))
+
     # Light theme, then a phone-sized screen.
     cdp.js("document.getElementById('theme-toggle').click()")
     check("the theme switches to Day", cdp.js("document.documentElement.dataset.theme === 'light' && getComputedStyle(document.body).backgroundColor === 'rgb(247, 248, 250)'"),

@@ -13,6 +13,9 @@ Sizes: S (≤1 day), M (2–4 days), L (1–2 weeks). Each item names its eviden
 - Tests: core, API contract and security, frontend unit tests (Node), page rules, and a browser end-to-end tool.
 - **P0-1, approvals as a core service** (`app_core/approvals.py`). The rules are now kept in the core: actions are declined unless approved, each is answered once, and a command needs its second check plus the full wait, so an early approval is refused even if a button skips the dialog. Every approved command is logged. The desktop window, for both Ollama and Colibri, uses it. Still to do for the web workspace: a registry of pending decisions that a page can list and answer (part of P1-1).
 
+- **Undo for the agent's file changes** (`app_core/checkpoints.py`): originals saved per task outside the project; undo restores them and leaves files you edited afterwards alone.
+- **Automatic daily backups with restore** (`app_core/backups.py`): 14 kept; restore adds missing chats, replaces damaged ones, never changes a chat you still have.
+
 ## P0
 
 | # | Item | Size | Depends on | Done when |

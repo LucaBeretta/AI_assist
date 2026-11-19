@@ -9,8 +9,9 @@ import time
 import tkinter as tk
 from tkinter import END, filedialog, messagebox, scrolledtext, simpledialog, ttk
 
-from app_core import approvals
+from app_core import approvals, backups
 from app_core.checkpoints import CheckpointError, CheckpointStore
+from backup_ui import BackupWindow
 from app_core import conversation as conversation_rules
 from app_core import settings as app_settings
 from app_core.settings import load_file_limit  # noqa: F401  (long-standing name)
@@ -152,6 +153,9 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         # Originals of files the agent changes, per task, so a task can be undone.
         self.checkpoints = CheckpointStore(self.chat_store.directory / "checkpoints") if self.chat_store else None
         self.agent_checkpoint = None
+        self.backup_running = False
+        self.backup_job = None
+        self.backup_window = None
         self.initialize_backend()
         self.initialize_hybrid()
         self.agent_settings = self.chat_store.directory / "agent.settings" if self.chat_store else None
@@ -175,6 +179,9 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         self.root.bind("<Control-Shift-l>", lambda event: self.appearance.toggle())
         self.refresh_theme_controls()
         self.update_checker = UpdateChecker(self)
+        if self.saver:
+            # The daily backup check runs a little after start, then every hour.
+            self.backup_job = self.root.after(5000, self.backup_if_due)
         self.hourly_status = HourlyStatusReport(self)
 
     def configure_styles(self):
@@ -347,6 +354,7 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         self.chat_menu.add_command(label="Rename chat", command=self.rename_chat)
         self.chat_menu.add_command(label="Export chat...", command=self.export_chat)
         self.chat_menu.add_command(label="Back up all chats...", command=self.backup_chats)
+        self.chat_menu.add_command(label="Restore chats from a backup...", command=self.open_backups)
         self.chat_menu.add_separator()
         self.chat_menu.add_command(label="Delete chat", command=self.delete_chat)
         self.chat_actions = self.button(header, "Chat options", lambda: self.chat_menu.tk_popup(self.chat_actions.winfo_rootx(), self.chat_actions.winfo_rooty() + self.chat_actions.winfo_height()),
@@ -1472,7 +1480,9 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
                 kind, request, data, error = self.workspace_events.get_nowait()
             except queue.Empty:
                 break
-            if kind == "chat_chunk" and request == self.request_serial and self.is_waiting and not self.agent_active:
+            if kind in ("backup", "restore"):
+                self.finish_backup_work(kind, data, error)
+            elif kind == "chat_chunk" and request == self.request_serial and self.is_waiting and not self.agent_active:
                 self.append_stream(data)
             elif kind == "chat_metrics" and request == self.request_serial:
                 self.last_metrics = response_metrics(data)
@@ -1680,6 +1690,64 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         self.set_status(f"Backed up {count} chat{'s' if count != 1 else ''} to {Path(destination).name}."
                         + (f" {skipped} damaged file{'s were' if skipped != 1 else ' was'} left out." if skipped else ""))
 
+    # ------------------------------------------------------------ automatic backups
+
+    def backup_if_due(self):
+        self.backup_job = None
+        if self.closed or self.closing or self.saver is None:
+            return
+        if not self.backup_running:
+            self.start_backup(manual=False)
+        self.backup_job = self.root.after(3600 * 1000, self.backup_if_due)
+
+    def start_backup(self, manual=False):
+        """Back up on the chat-saving worker, after any queued saves."""
+        if self.saver is None or self.backup_running:
+            return
+        self.backup_running = True
+        store, memory = self.chat_store, self.chat_store.directory / "shared.memory"
+        work = (lambda: backups.create(store, memory)) if manual else (lambda: backups.create_if_due(store, memory))
+        self.saver.call(work, lambda result, error: self.workspace_events.put(
+            ("backup", 0, (manual, result), str(error) if error else None)))
+
+    def start_restore(self, path):
+        if self.saver is None or self.backup_running:
+            return
+        self.persist_current()
+        self.backup_running = True
+        store, memory = self.chat_store, self.shared_memory
+        self.saver.call(lambda: backups.restore(store, path, memory), lambda result, error: self.workspace_events.put(
+            ("restore", 0, result, str(error) if error else None)))
+
+    def open_backups(self):
+        if self.chat_store is None:
+            self.set_status("Saved chats are unavailable, so there is nothing to back up or restore.", error=True)
+            return
+        if self.backup_window is not None and self.backup_window.window.winfo_exists():
+            self.backup_window.window.lift()
+            return
+        self.backup_window = BackupWindow(self)
+
+    def finish_backup_work(self, kind, data, error):
+        self.backup_running = False
+        if kind == "backup":
+            manual, result = data
+            if error:
+                text = f"The chat backup failed: {error}"
+                self.set_status(text, error=True)
+            elif result:
+                text = f"Backed up {result[1]} chat{'s' if result[1] != 1 else ''} to {result[0].name}."
+                if manual:
+                    self.set_status(text)
+            else:
+                text = "Today's backup already exists."
+        else:
+            text = f"Could not restore: {error}" if error else backups.describe(data)
+            self.set_status(text, error=bool(error))
+            self.refresh_history()
+        if self.backup_window is not None:
+            self.backup_window.finished(text)
+
     def show_runtime_status(self, event=None):
         detail = metrics_summary(self.last_metrics)
         messagebox.showinfo("Model runtime status", self.model_status["text"] + ("\n\nLast response: " + detail if detail else ""), parent=self.root)
@@ -1725,10 +1793,12 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         self.agent_cancel.set()
         for decision, window in list(self.approvals):
             self.resolve_approval(decision, window, False)
-        for job in (self.draft_job, self.search_job):
+        for job in (self.draft_job, self.search_job, self.backup_job):
             if job:
                 self.root.after_cancel(job)
-        self.draft_job = self.search_job = None
+        self.draft_job = self.search_job = self.backup_job = None
+        if self.backup_window is not None and self.backup_window.window.winfo_exists():
+            self.backup_window.window.destroy()
         self.finish_close()
 
     def finish_close(self):

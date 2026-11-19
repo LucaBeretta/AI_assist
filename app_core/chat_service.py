@@ -71,6 +71,11 @@ class ChatService:
                 self._records = self.store.list_chats()
             return list(self._records)
 
+    def reload(self):
+        """Forget the cached list, after files changed outside the service (a restore)."""
+        with self.lock:
+            self._records = None
+
     def _remember(self, record):
         with self.lock:
             if self._records is not None:
