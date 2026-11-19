@@ -1236,11 +1236,14 @@ def main():
         bridge = Bridge(desktop.evaluate, autostart=False, on_flush=desktop.flush)
         api = Api(bridge, store=store, desktop=desktop)
         preferences = settings.load(store.directory)
-        # A saved on-screen rectangle wins; otherwise open wide enough for the sidebar and composer.
-        geometry = visible_rectangle(preferences.get("window"), getattr(webview, "screens", [])) or {"width": 1280, "height": 840}
+        screens = getattr(webview, "screens", [])
+        default = {"x": 0, "y": 0, "width": 1280, "height": 840}
+        geometry = (visible_rectangle(preferences.get("window"), screens)
+                    or visible_rectangle(default, screens) or {"width": 1280, "height": 840})
         # Night background avoids a white flash before the page paints.
         window = webview.create_window("AI Assist", page.as_uri(), js_api=api, text_select=True,
-                                       min_size=(720, 520), background_color="#0D0F12", **geometry)
+                                       min_size=(min(720, geometry["width"]), min(520, geometry["height"])),
+                                       background_color="#0D0F12", **geometry)
         desktop.main_window = window
         def loaded():
             desktop.set_theme(saved_theme(store.directory))

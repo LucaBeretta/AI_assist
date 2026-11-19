@@ -29,10 +29,20 @@ class WindowTests(unittest.TestCase):
                    SimpleNamespace(x=-1280, y=0, width=1280, height=1024)]
         value = dict(x=-1200, y=20, width=1000, height=800)
         self.assertEqual(visible_rectangle(value, screens), value)
-        self.assertEqual(visible_rectangle(value, screens[:1]), {})
-        for invalid in (None, {}, {**value, "x": True}, {**value, "width": 10000}, {**value, "y": -50}):
+        self.assertEqual(visible_rectangle(value, screens[:1]), {**value, "x": 0})
+        for invalid in (None, {}, {**value, "x": True}):
             self.assertEqual(visible_rectangle(invalid, screens), {})
         self.assertEqual(visible_rectangle(value, []), {})
+
+    def test_real_laptop_rectangle_is_clamped_to_the_work_area(self):
+        screen = SimpleNamespace(x=0, y=0, width=1536, height=960,
+            frame=SimpleNamespace(X=0, Y=0, Width=1536, Height=920))
+        value = dict(x=455, y=160, width=1280, height=840)
+        self.assertEqual(visible_rectangle(value, [screen]), dict(x=256, y=80, width=1280, height=840))
+        self.assertEqual(visible_rectangle(dict(x=455, y=160, width=2000, height=1200), [screen]),
+                         dict(x=0, y=0, width=1536, height=920))
+        self.assertEqual(visible_rectangle(dict(x=-4000, y=-2000, width=800, height=600), [screen]),
+                         dict(x=0, y=0, width=800, height=600))
 
     def test_second_process_signals_owner_and_lock_survives_owner_exit(self):
         owner = SingleInstance(self.directory, interval=0.01)
