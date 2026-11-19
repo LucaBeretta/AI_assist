@@ -12,6 +12,7 @@ import io
 import json
 import os
 import platform
+import plistlib
 import re
 import shutil
 import socket
@@ -110,6 +111,58 @@ def _memory():
     except (OSError, ValueError, TypeError):
         pass
     return None, None
+
+
+def _parse_mac_gpu_ioreg(raw):
+    """Extract GPU busy time from macOS IOKit performance data.
+
+    Device utilization is driver-reported GPU scheduling activity, not
+    compute capacity. Unsupported adapters must remain unknown, not 0%.
+    """
+    try:
+        data = plistlib.loads(raw)
+    except (ValueError, TypeError, plistlib.InvalidFileException):
+        return []
+    if isinstance(data, dict):
+        data = [data]
+    if not isinstance(data, list):
+        return []
+    result = []
+    for entry in data[:MAX_GPU * 2]:
+        if not isinstance(entry, dict):
+            continue
+        stats = entry.get("PerformanceStatistics")
+        if not isinstance(stats, dict):
+            continue
+        percent = _finite_percent(stats.get("Device Utilization %"))
+        if percent is None:
+            percent = _finite_percent(stats.get("GPU Core Utilization"))
+        if percent is None:
+            continue
+        name = entry.get("IOClass") or entry.get("IOName") or "Mac GPU"
+        result.append({"name": str(name)[:96], "percent": percent,
+                       "total_bytes": None, "used_bytes": None})
+        if len(result) >= MAX_GPU:
+            break
+    return result
+
+
+def _mac_gpu_usage():
+    """Read local IORegistry only; no sudo, remote calls, or third-party libs."""
+    executable = shutil.which("ioreg") or "/usr/sbin/ioreg"
+    for gpu_class in ("IOAccelerator", "AGXAccelerator"):
+        try:
+            proc = subprocess.run(
+                [executable, "-a", "-r", "-d", "1", "-c", gpu_class],
+                capture_output=True, timeout=4, check=False)
+            if proc.returncode != 0 or not 0 < len(proc.stdout) <= 1024 * 1024:
+                continue
+            measured = _parse_mac_gpu_ioreg(proc.stdout)
+            if measured:
+                return measured
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+    return []
 
 
 def _gpu_usage():
@@ -227,7 +280,19 @@ class TelemetrySampler:
                     not isinstance(ram_free, int) or ram_free < 0):
                 ram_total, ram_free = None, None
 
-            gpus = _gpu_usage()
+            gpus = _mac_gpu_usage() if platform.system() == "Darwin" else _gpu_usage()
+            # Preserve the system_profiler GPU name and memory details when
+            # one adapter is detected by both the hardware and IOKit probes.
+            known = [g for g in hardware.get("gpus", [])[:MAX_GPU] if isinstance(g, dict)]
+            if gpus and len(gpus) == len(known) == 1:
+                adapter = known[0]
+                total, free = adapter.get("total_bytes"), adapter.get("free_bytes")
+                gpus[0]["name"] = str(adapter.get("name") or gpus[0]["name"])[:96]
+                gpus[0]["total_bytes"] = total if type(total) is int and total > 0 else None
+                gpus[0]["used_bytes"] = (
+                    total - free if type(total) is int and type(free) is int
+                    and 0 <= free <= total else None)
+                gpus[0]["unified"] = bool(adapter.get("unified"))
             if not gpus:
                 for info in hardware.get("gpus", [])[:MAX_GPU]:
                     if not isinstance(info, dict):
