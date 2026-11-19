@@ -23,16 +23,29 @@ class ModelApiTests(unittest.TestCase):
         self.assertEqual(result["recommendations"], [{"name": "recommended"}])
         recommend.assert_called_once_with(hardware, [{"name": "family"}])
 
-    def test_blocked_catalog_still_returns_hardware(self):
-        import network_gate
+    def test_blocked_catalog_still_returns_hardware_and_is_not_asked_again(self):
         hardware = {"server_local": True, "gpus": []}
         self.api._hardware = hardware
-        blocked = network_gate.InternetBlocked("Internet access was not approved.")
-        with patch("model_library.fetch_popular_models", side_effect=blocked):
-            result = self.api.recommend_models()
-        self.assertTrue(result["ok"])
-        self.assertEqual(result["hardware"], hardware)
-        self.assertIn("not approved", result["catalog_error"])
+        # model_library turns the gate's refusal into RuntimeError.
+        blocked = RuntimeError("Internet access was not approved, so it was blocked (Internet connection: ollama.com).")
+        with patch("model_library.fetch_popular_models", side_effect=blocked) as fetch:
+            first = self.api.recommend_models()
+            second = self.api.recommend_models()
+        self.assertTrue(first["ok"])
+        self.assertEqual(first["hardware"], hardware)
+        self.assertIn("not approved", first["catalog_error"])
+        self.assertEqual(second["catalog_error"], first["catalog_error"])
+        self.assertEqual(fetch.call_count, 1)
+
+    def test_catalog_is_read_once_per_session_until_refresh(self):
+        self.api._hardware = {"server_local": True, "gpus": []}
+        with patch("model_library.fetch_popular_models", return_value=[{"name": "family"}]) as fetch,              patch("model_advisor.recommend_models", return_value=[]):
+            self.api.recommend_models()
+            self.api.recommend_models()
+            self.assertEqual(fetch.call_count, 1)
+            self.api.recommend_models(True)
+            self.assertEqual(fetch.call_count, 2)
+        self.assertFalse(self.api.recommend_models("yes")["ok"])
 
     def test_pull_progress_success_stop_and_failure(self):
         def pull(host, name, emit, cancel):

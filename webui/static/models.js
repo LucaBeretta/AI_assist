@@ -180,11 +180,11 @@ window.modelsui = (() => {
     } catch (error) { note(error.message); }
   }
 
-  async function loadAdvice() {
+  async function loadAdvice(refresh = false) {
     renderHardware(advice?.hardware);
     renderRecommendations();
     try {
-      advice = await call("recommend_models");
+      advice = await call("recommend_models", refresh);
       renderHardware(advice.hardware);
       renderRecommendations();
     } catch (error) { note(error.message); element("models-recommended").replaceChildren(node("p", "dev-hint", error.message)); }
@@ -197,7 +197,7 @@ window.modelsui = (() => {
     const name = element("pull-other-name").value.trim();
     if (name) start(name);
   });
-  element("models-refresh").addEventListener("click", () => { advice = null; refresh(); loadAdvice(); });
+  element("models-refresh").addEventListener("click", () => { advice = null; refresh(); loadAdvice(true); });
   window.addEventListener("languagechange", () => { if (!element("models-view").hidden) { renderHardware(advice?.hardware); renderAll(); } });
   return {onEvent, onShow};
 })();

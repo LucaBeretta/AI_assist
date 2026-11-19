@@ -24,11 +24,11 @@ window.welcomeui = (() => {
     const card = (advice?.recommendations || []).find(item => item.name === name);
     el("welcome-reason").textContent = card ? [card.purpose, card.fit, card.reason, card.size_bytes ? gb(card.size_bytes) + t(" download") : ""].filter(Boolean).join(" · ") : t("Already installed on this computer.");
   }
-  async function load() {
+  async function load(retry = false) {
     el("welcome-status").textContent = t("Reading hardware and recommendations…");
     el("welcome-retry").hidden = true;
     try {
-      advice = await call("recommend_models");
+      advice = await call("recommend_models", retry === true);
       const hw = advice.hardware, gpu = (hw.gpus || []).find(item => item.supported !== false);
       el("welcome-hardware").textContent = [gpu?.name || "CPU", gpu?.total_bytes ? gb(gpu.total_bytes) + " VRAM" : "", hw.ram_total_bytes ? gb(hw.ram_total_bytes) + " RAM" : "", hw.cpu].filter(Boolean).join(" · ");
       const names = [...new Set([...installed(), ...(advice.recommendations || []).map(item => item.name)])];
@@ -83,7 +83,7 @@ window.welcomeui = (() => {
   }
   el("welcome-model").addEventListener("change", render);
   el("welcome-start").addEventListener("click", start);
-  el("welcome-retry").addEventListener("click", load);
+  el("welcome-retry").addEventListener("click", () => load(true));
   el("welcome-stop").addEventListener("click", async () => { cancelRequested = true; if (pull) await call("stop_pull", pull).catch(failure => { el("welcome-status").textContent = failure.message; }); });
   el("welcome-skip").addEventListener("click", () => complete(false));
   el("welcome-open").addEventListener("click", () => complete(true));

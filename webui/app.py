@@ -100,6 +100,10 @@ class Api(SharingApi, PrivacyApi, ParityApi):
         self._incognito = {}
         self._incognito_ids = set()
         self._hardware = hardware
+        # The online catalog is read once per session: every read is an internet request the gate asks about.
+        self._catalog_lock = threading.Lock()
+        self._catalog = None
+        self._catalog_error = None
         self._settings = settings.load(self._store.directory)
         self._unloading = set()
         self._developer = DeveloperTasks(bridge, self._save_agent_result, self._engine.running_details)
@@ -333,15 +337,21 @@ class Api(SharingApi, PrivacyApi, ParityApi):
         return {"ok": True}
 
     @_json_method
-    def recommend_models(self):
+    def recommend_models(self, refresh=False):
+        if type(refresh) is not bool:
+            raise ValueError("refresh must be true or false.")
         hardware = self._hardware if self._hardware is not None else detect_hardware(self._engine.ollama_url())
         catalog, catalog_error = [], None
         if hardware.get("server_local", True):
-            try:
-                catalog = model_library.fetch_popular_models()
-            except (OSError, ValueError) as error:
-                # Blocked by the internet gate or offline: this computer's hardware is still worth showing.
-                catalog_error = str(error)
+            # One read per session, shared by every screen; a refusal is remembered until the person asks again.
+            with self._catalog_lock:
+                if refresh or (self._catalog is None and self._catalog_error is None):
+                    try:
+                        self._catalog, self._catalog_error = model_library.fetch_popular_models(), None
+                    except (OSError, ValueError, RuntimeError) as error:
+                        # Blocked by the internet gate or offline: this computer's hardware is still worth showing.
+                        self._catalog, self._catalog_error = None, str(error)
+                catalog, catalog_error = list(self._catalog or []), self._catalog_error
         return {"ok": True, "hardware": hardware, "recommendations": model_advisor.recommend_models(hardware, catalog),
                 "catalog_error": catalog_error}
 
