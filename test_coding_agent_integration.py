@@ -18,6 +18,7 @@ import unittest
 from unittest.mock import patch
 
 from coding_agent import run_agent
+from test_agent_support import isolate_agent_data
 
 
 def _tool_response(name, arguments):
@@ -88,6 +89,7 @@ def _stop_test_child(pid):
 
 class CodingAgentIntegrationTests(unittest.TestCase):
     def setUp(self):
+        isolate_agent_data(self)
         self.temporary = tempfile.TemporaryDirectory(prefix="aiassist-agent-test-")
         self.addCleanup(self.temporary.cleanup)
         self.project = Path(self.temporary.name) / "project"

@@ -16,6 +16,7 @@ from unittest.mock import Mock, patch
 
 import AIassist
 from coding_agent import FILE_LIMIT_CHOICES, run_agent
+from test_agent_support import isolate_agent_data
 from test_colibri_launcher import join_workers
 from workspace_ui import WorkspaceMixin, file_limit_label, file_limit_value, file_limit_warning, load_file_limit
 
@@ -49,6 +50,7 @@ class FileLimitAgentTests(unittest.TestCase):
         self.assertIsNone(app.workspace_events.get_nowait()[-1])
 
     def setUp(self):
+        isolate_agent_data(self)
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)

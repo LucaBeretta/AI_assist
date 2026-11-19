@@ -490,12 +490,6 @@ window.app = (() => {
         status(`${event.model} unloaded from memory.`);
         element("banner").hidden = true;
         return true;
-      case "model_loading":
-        status(`Loading ${event.model || "model"} into memory… ${Math.round(event.elapsed || 0)} s`);
-        return true;
-      case "model_loaded":
-        status(`${event.model || "Model"} loaded in ${Math.round(event.seconds ?? event.elapsed ?? 0)} s`);
-        return true;
       case "attached":
         if (event.chat_id === selected) reloadChat(event.chat_id).then(renderMessages).catch(showError);
         return true;
@@ -515,6 +509,14 @@ window.app = (() => {
     for (const event of Array.isArray(batch) ? batch : [batch]) {
       if (event.type === "ready") { refreshModels().catch(showError); continue; }
       if (event.type === "status") { status(event.text); continue; }
+      if (event.type === "model_loading" || event.type === "model_loaded") {
+        const text = event.type === "model_loading"
+          ? `Loading ${event.model}… ${Math.floor(event.elapsed_seconds)} s`
+          : `${event.model} ready in ${event.load_seconds.toFixed(1)} s`;
+        if (event.chat_id === selected) status(text);
+        if (event.task_id) window.devui?.onEvent({...event, type: "loading", text});
+        continue;
+      }
       if (appEvent(event)) continue;
       if (event.task_id) { window.devui?.onEvent(event); continue; }  // Developer task events
       if (!event.stream_id) { if (event.type === "error") showError(new Error(event.error)); continue; }

@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 import coding_agent
 from coding_agent import AgentCancelled, run_agent
+from test_agent_support import isolate_agent_data
 
 
 def tool_response(name, arguments, content=""):
@@ -42,6 +43,7 @@ class FakeProcess:
 
 class AgentTests(unittest.TestCase):
     def setUp(self):
+        self.data_directory = isolate_agent_data(self)
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name) / "project"
@@ -178,7 +180,7 @@ class AgentTests(unittest.TestCase):
             ])
         self.assertEqual(target.read_text(encoding="utf-8"), "external\n")
         self.assertIn("changed after its diff", self.tool_results(result)[0])
-        self.assertEqual({path.name for path in self.root.iterdir()}, {"main.py", ".aiassist-checkpoints"})
+        self.assertEqual([path.name for path in self.root.iterdir()], ["main.py"])
 
     def test_traversals_secrets_and_binary_targets_fail_before_approval(self):
         outside = Path(self.temporary.name) / "outside.py"

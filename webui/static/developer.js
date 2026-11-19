@@ -170,6 +170,7 @@ window.devui = (() => {
     if (!task || event.task_id !== task.id) return;
     switch (event.type) {
       case "status": status(event.text); activityLine("info", event.text); break;
+      case "loading": status(event.text); break;
       case "metrics": status(event.text); element("dev-step").textContent = (event.text.match(/Step \d+\/\d+/) || [""])[0]; break;
       case "tool_start": {
         const a = ensureActivity();

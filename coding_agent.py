@@ -597,6 +597,19 @@ def _request_messages(history, context_length):
     return [{"role": "system", "content": system}] + systems + memory + [user] + kept, prediction
 
 
+def request_context_usage(history, context_length, planning=False):
+    """Estimate the structured prompt actually prepared for the next agent call.
+
+    This includes the engine system prompt, bounded native/tool history and tool
+    schemas. Pinned files, notes and summaries count when included in that history,
+    rather than treating saved paths or memory IDs as already-read content.
+    """
+    messages, _ = _request_messages(history, context_length)
+    fields = {"messages": messages, "tools": _READ_TOOLS if planning else TOOLS}
+    characters = len(json.dumps(fields, ensure_ascii=False))
+    return {"used": (characters * 2 + 6) // 7, "total": context_length}
+
+
 def _chat(host, model, messages, context_length, cancel_event):
     request_messages, prediction = _request_messages(messages, context_length)
     payload = {"model": model, "messages": request_messages, "tools": _READ_TOOLS if getattr(_run, "planning", False) else TOOLS, "stream": False,
@@ -641,7 +654,8 @@ def _chat(host, model, messages, context_length, cancel_event):
 
 def run_agent(host, model, project_root, messages, on_event, approve_action,
               cancel_event=None, context_length=4096, max_steps=DEFAULT_MAX_STEPS, chat_fn=None, file_limit=None,
-              plan_first=False, approve_plan=None, task_id=None, checkpoint_store=None, keep_alive=-1):
+              plan_first=False, approve_plan=None, task_id=None, checkpoint_store=None, keep_alive=-1,
+              on_context=None):
     """Run the agent with ``file_limit`` bytes as the largest file it may read or
     edit (default 64,000; FILE_LIMIT_CHOICES lists what the app offers)."""
     if file_limit is None:
@@ -657,8 +671,13 @@ def run_agent(host, model, project_root, messages, on_event, approve_action,
     _run.file_limit, _run.context_length = file_limit, context_length
     _run.planning = plan_first
     _run.keep_alive = keep_alive
+    _run.on_context = on_context
     _run.task_id, _run.project = task_id, project
-    _run.checkpoint = checkpoint_store if checkpoint_store is not None else CheckpointStore(project / ".aiassist-checkpoints")
+    if checkpoint_store is None:
+        # Import lazily: chat attachments also depend on this module's file limits.
+        from chat_store import default_directory
+        checkpoint_store = CheckpointStore(default_directory() / "checkpoints")
+    _run.checkpoint = checkpoint_store
     try:
         result = _run_agent(host, model, project, messages, on_event, approve_action,
                             cancel_event, context_length, max_steps, chat_fn, plan_first, approve_plan)
@@ -668,6 +687,7 @@ def run_agent(host, model, project_root, messages, on_event, approve_action,
         _run.file_limit, _run.context_length = _MAX_FILE_BYTES, None
         _run.planning = False
         _run.keep_alive = -1
+        _run.on_context = None
         _run.checkpoint = None
         _run.task_id, _run.project = None, None
 
@@ -709,6 +729,8 @@ def _run_agent(host, model, project_root, messages, on_event, approve_action,
     _emit(on_event, "status", "Developer agent is inspecting the project.")
     for step in range(max_steps):
         _check_cancelled(cancel_event)
+        if callable(getattr(_run, "on_context", None)):
+            _run.on_context(request_context_usage(history, context_length, _run.planning))
         response = (chat_fn or _chat)(host, model, history, context_length, cancel_event)
         _check_cancelled(cancel_event)
         summary = metrics_summary(response)

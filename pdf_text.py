@@ -45,7 +45,7 @@ def _extract(data, limit):
         from pypdf import PdfReader, apply_configuration
         from pypdf.errors import PyPdfError
     except ImportError as error:
-        raise ValueError("PDF attachments need pypdf. Run: python -m pip install -r requirements.txt") from error
+        raise ValueError("PDF support needs pypdf. Run: python -m pip install -r requirements.txt") from error
     stream_limit = min(4_000_000, max(64000, limit * 8))
     pieces, used = [], 0
 

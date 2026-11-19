@@ -9,9 +9,14 @@ import unittest
 from unittest.mock import patch
 import zipfile
 
-from pypdf import PdfWriter
-from pypdf.actions import JavaScript
-from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
+try:
+    from pypdf import PdfWriter
+    from pypdf.actions import JavaScript
+    from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
+except ModuleNotFoundError as error:
+    if error.name != "pypdf":
+        raise
+    PdfWriter = None
 
 import pdf_text
 import test_webui_app as fixtures
@@ -38,6 +43,7 @@ def document(texts, *, encrypted=False, compressed=False, padding=0):
     return output.getvalue()
 
 
+@unittest.skipIf(PdfWriter is None, "Optional PDF support needs pypdf")
 class PdfAttachmentTests(unittest.TestCase):
     def setUp(self):
         fixtures.ApiTests.setUp(self)
@@ -107,6 +113,23 @@ class PdfAttachmentTests(unittest.TestCase):
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("pip install -r requirements.txt", json.loads(result.stdout)["error"])
+
+
+class OptionalPdfTests(unittest.TestCase):
+    def setUp(self):
+        fixtures.ApiTests.setUp(self)
+
+    def test_missing_reader_returns_a_clear_api_error_without_saving_an_attachment(self):
+        chat = self.api.new_chat()["chat"]["id"]
+        original_run = subprocess.run
+        def without_site_packages(args, **options):
+            return original_run([args[0], "-S", *args[1:]], **options)
+        with patch("pdf_text.subprocess.run", side_effect=without_site_packages):
+            result = self.api.attach(chat, "document.pdf", encoded(b"%PDF-1.4\n%%EOF"))
+        self.assertFalse(result["ok"])
+        self.assertIn("PDF support needs pypdf", result["error"])
+        self.assertFalse((self.store.directory / chat).exists())
+        self.assertNotIn("attachments", self.store.load(chat))
 
 
 if __name__ == "__main__":
