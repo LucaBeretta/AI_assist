@@ -23,6 +23,7 @@ _SKIP_DIRECTORIES = frozenset({
     ".mypy_cache", ".ruff_cache", ".tox", ".nox", ".cache", ".next",
     ".nuxt", ".turbo", ".idea", ".vscode", "build", "dist", "target",
     "coverage", "htmlcov", ".eggs", ".ssh", ".aws", ".azure", ".secrets",
+    ".aiassist-checkpoints",
     "secrets", "credentials",
 })
 _BINARY_SUFFIXES = frozenset({

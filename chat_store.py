@@ -10,6 +10,7 @@ import re
 import tempfile
 import uuid
 import zipfile
+import chat_attachments
 
 
 NEW_CHAT_TITLE = "New chat"
@@ -183,6 +184,12 @@ class ChatStore:
                     or message["role"] not in _ROLES
                     or not isinstance(message.get("content"), str)):
                 raise ChatStoreError("Each chat message needs a user, assistant, or system role and text content.")
+            if "partial" in message and (type(message["partial"]) is not bool or message["role"] != "assistant"):
+                raise ChatStoreError("Only assistant messages can have a boolean partial flag.")
+            try:
+                chat_attachments.validate(message.get("attachments", []))
+            except ValueError as error:
+                raise ChatStoreError(str(error)) from error
         context_length = chat.get("context_length")
         if context_length is not None and (type(context_length) is not int or context_length < 1):
             raise ChatStoreError("Chat context_length must be a positive integer or null.")
@@ -191,6 +198,43 @@ class ChatStore:
         if "_manual_title" in chat and type(chat["_manual_title"]) is not bool:
             raise ChatStoreError("Chat _manual_title must be true or false.")
         record = deepcopy(chat)
+        if record.get("project_id") is not None and (not isinstance(record["project_id"], str) or not _CHAT_ID.fullmatch(record["project_id"])):
+            raise ChatStoreError("Chat project_id must be a canonical UUID or null.")
+        try:
+            chat_attachments.validate(record.get("attachments", []))
+        except ValueError as error:
+            raise ChatStoreError(str(error)) from error
+        branches = record.setdefault("branches", {})
+        if not isinstance(branches, dict):
+            raise ChatStoreError("Chat branches must be an object of message tails.")
+        for key, tails in branches.items():
+            if not isinstance(key, str) or not re.fullmatch(r"-1|0|[1-9][0-9]*", key):
+                raise ChatStoreError("Branch anchors must be message indices or -1.")
+            if not isinstance(tails, list) or not tails:
+                raise ChatStoreError("A branch must contain at least one alternative tail.")
+            for tail in tails:
+                if not isinstance(tail, list) or any(not isinstance(item, dict)
+                        or not isinstance(item.get("role"), str) or item["role"] not in _ROLES
+                        or not isinstance(item.get("content"), str) for item in tail):
+                    raise ChatStoreError("Branch tails must contain valid chat messages.")
+                for message in tail:
+                    try:
+                        chat_attachments.validate(message.get("attachments", []))
+                    except ValueError as error:
+                        raise ChatStoreError(str(error)) from error
+        prefixes = record.get("_branch_prefixes", {})
+        active = record.get("_branch_active", {})
+        if not isinstance(prefixes, dict) or not isinstance(active, dict):
+            raise ChatStoreError("Branch metadata must be objects.")
+        for key, hashes in prefixes.items():
+            if key not in branches or not isinstance(hashes, list) or len(hashes) != len(branches[key]) or any(
+                    not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value) for value in hashes):
+                raise ChatStoreError("Branch prefix metadata must match its tails.")
+        for key, choice in active.items():
+            if key not in branches or type(choice) is not int or not 0 <= choice < len(branches[key]):
+                raise ChatStoreError("Invalid active branch choice.")
+        if "incognito" in record and type(record["incognito"]) is not bool:
+            raise ChatStoreError("Chat incognito must be true or false.")
         record.setdefault("project_files", [])
         record.setdefault("activity", [])
         record.setdefault("agent_history", [])
@@ -212,7 +256,7 @@ class ChatStore:
             _timestamp(summary["created_at"], "summary created_at")
         return record
 
-    def list_chats(self, query="", mode=None):
+    def list_chats(self, query="", mode=None, project_id=None):
         """Return matching records, most recently updated first.
 
         Search covers the title, model, project path, draft, and message text.
@@ -222,6 +266,8 @@ class ChatStore:
             raise ChatStoreError("The chat search query must be text.")
         if mode is not None and (not isinstance(mode, str) or mode not in _MODES):
             raise ChatStoreError("Chat mode must be 'chat' or 'dev'.")
+        if project_id is not None and (not isinstance(project_id, str) or not _CHAT_ID.fullmatch(project_id)):
+            raise ChatStoreError("Project filter must be a canonical UUID or null.")
         self.errors.clear()
         try:
             paths = sorted(path for path in self.directory.iterdir()
@@ -241,6 +287,8 @@ class ChatStore:
                     self._note_error(f"Skipped {path.name}: {error}")
                 continue
             if mode is not None and chat["mode"] != mode:
+                continue
+            if project_id is not None and chat.get("project_id") != project_id:
                 continue
             if query:
                 searchable = [chat["title"], chat["model"], chat["project_path"], chat["draft"]]
@@ -290,8 +338,10 @@ class ChatStore:
         deleted = set(deleted)
         chats = {chat["id"]: chat for chat in self.list_chats()}
         for identity, record in unsaved.items():
+            if record.get("incognito"):
+                continue
             chats[identity] = self._validate(record, expected_id=identity)
-        chats = [chat for identity, chat in chats.items() if identity not in deleted]
+        chats = [chat for identity, chat in chats.items() if identity not in deleted and not chat.get("incognito")]
         chats.sort(key=lambda chat: (chat["updated_at"], chat["id"]), reverse=True)
         used_names = set()
         temporary = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.tmp")
@@ -301,7 +351,16 @@ class ChatStore:
                     "AI Assist chat backup\n\n"
                     "chats/ holds the saved chats. To restore, copy those .json files into the AI Assist\n"
                     "chats folder (on Windows %LOCALAPPDATA%\\AI Assist\\chats, elsewhere ~/.aiassist/chats)\n"
-                    "while AI Assist is closed.\n\nreadable/ holds the same conversations as Markdown.\n"))
+                    "while AI Assist is closed. Restore projects/ into the projects subfolder of the chats folder,\n"
+                    "and each chat's attachments/ into its UUID subfolder.\n\nreadable/ holds the same conversations as Markdown.\n"))
+                project_directory = self.directory / "projects"
+                if project_directory.exists():
+                    from project_store import ProjectStore
+                    project_store = ProjectStore(project_directory)
+                    for project in project_store.list():
+                        archive.writestr(f"projects/{project['id']}.json", json.dumps(project, ensure_ascii=False, indent=2))
+                    for error in project_store.errors:
+                        self._note_error(error)
                 for chat in chats:
                     if chat["id"] in unsaved:
                         archive.writestr(f"chats/{chat['id']}.json", json.dumps(chat, ensure_ascii=False, indent=2))
@@ -320,8 +379,29 @@ class ChatStore:
                         speaker = {"user": "You", "assistant": "AI Assist"}.get(message["role"], message["role"].title())
                         lines += [f"## {speaker}", "", message["content"], ""]
                     archive.writestr(f"readable/{name}.md", "\n".join(lines))
+                    attachments = list(chat.get("attachments", []))
+                    messages = list(chat["messages"])
+                    for tails in chat.get("branches", {}).values():
+                        for tail in tails:
+                            messages.extend(tail)
+                    for message in messages:
+                        attachments.extend(message.get("attachments", []))
+                    seen = set()
+                    for item in attachments:
+                        if item["id"] in seen:
+                            continue
+                        seen.add(item["id"])
+                        source = chat_attachments.folder(self.directory, chat["id"]) / item["id"]
+                        if source.is_symlink() or getattr(source, "is_junction", lambda: False)():
+                            raise ChatStoreError("Attachment links cannot be exported.")
+                        if source.exists():
+                            with source.open("rb") as attachment_file:
+                                data = attachment_file.read(4000001)
+                            if len(data) != item["size"]:
+                                raise ChatStoreError("Attachment size changed before export.")
+                            archive.writestr(f"chats/{chat['id']}/attachments/{item['id']}", data)
             os.replace(temporary, destination)
-        except (OSError, zipfile.BadZipFile) as error:
+        except (OSError, ValueError, zipfile.BadZipFile) as error:
             temporary.unlink(missing_ok=True)
             raise ChatStoreError(f"Could not write the backup: {error}") from error
         return len(chats)
@@ -349,6 +429,8 @@ class ChatStore:
         An existing record is read first to protect damaged files and retain its
         original creation timestamp. Independent chats never rewrite each other.
         """
+        if isinstance(chat, dict) and chat.get("incognito"):
+            raise ChatStoreError("Incognito chats must never be saved to disk.")
         record = self._validate(chat)
         path = self._path(record["id"])
         if path.exists():

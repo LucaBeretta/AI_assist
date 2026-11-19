@@ -178,7 +178,7 @@ class AgentTests(unittest.TestCase):
             ])
         self.assertEqual(target.read_text(encoding="utf-8"), "external\n")
         self.assertIn("changed after its diff", self.tool_results(result)[0])
-        self.assertEqual([path.name for path in self.root.iterdir()], ["main.py"])
+        self.assertEqual({path.name for path in self.root.iterdir()}, {"main.py", ".aiassist-checkpoints"})
 
     def test_traversals_secrets_and_binary_targets_fail_before_approval(self):
         outside = Path(self.temporary.name) / "outside.py"
