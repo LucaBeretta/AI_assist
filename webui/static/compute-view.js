@@ -41,7 +41,8 @@ export function createComputeSidebar(ctx) {
   const element = h("div", { class: "sidebar-body" },
     h("div", { class: "sidebar-heading" }, "Compute network"),
     h("p", { class: "muted" }, "Live hardware readings from this computer only."),
-    h("button", { type: "button", class: "button", onClick: () => ctx.loadCompute() }, "Refresh local metrics"));
+    h("button", { type: "button", class: "button", onClick: () => ctx.loadCompute() }, "Refresh local metrics"),
+    ctx.openComputeMonitor ? h("button", { type: "button", class: "button button-primary", onClick: () => ctx.openComputeMonitor() }, "Open separate monitor") : null);
   return { element, render: () => {} };
 }
 
@@ -56,6 +57,8 @@ export function createComputeView(ctx) {
       h("div", null, h("h1", null, "Compute monitor"),
         h("p", null, "AI Assist / local telemetry · 5-second refresh")),
       notice,
+      ctx.openComputeMonitor ? h("button", { class: "button button-small", type: "button", onClick: () => ctx.openComputeMonitor() }, "Open window") : null,
+      ctx.toggleFullscreen ? h("button", { class: "button button-small", type: "button", id: "monitor-fullscreen", onClick: () => ctx.toggleFullscreen() }, "Fullscreen") : null,
       h("button", { class: "button button-small", type: "button", onClick: () => ctx.loadCompute() }, "Refresh")),
     h("div", { class: "compute-grid" },
       cpu.el, gpu.el, ram.el,
