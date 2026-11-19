@@ -124,6 +124,38 @@ function failed(error, what) {
 const ctx = {
   api, store, announce, toast, copy, failed, dialog: openDialog,
 
+  /** Pop out the monitor while keeping the full workspace token in this tab only. */
+  async openComputeMonitor() {
+    // Open synchronously from a click to avoid popup blockers. Browsers copy
+    // sessionStorage to a new tab with an opener: delete the privileged token
+    // before navigation, and sever the opener relationship.
+    const popup = window.open("about:blank", "_blank", "width=900,height=540");
+    if (!popup) { toast("Allow popups for this local AI Assist page to open the monitor.", "danger"); return; }
+    try {
+      popup.sessionStorage.removeItem("aiassist.session");
+      popup.sessionStorage.removeItem("aiassist.monitor.session");
+      popup.opener = null;
+    } catch (error) {
+      popup.close();
+      toast("Could not isolate the monitor window. Nothing was opened.", "danger");
+      return;
+    }
+    try {
+      const result = await api.request("POST", "/api/monitor-launch", {});
+      popup.location.replace("/monitor.html#code=" + encodeURIComponent(result.code));
+    } catch (error) {
+      popup.close();
+      failed(error, "Could not launch monitor");
+    }
+  },
+
+  async toggleFullscreen() {
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await document.documentElement.requestFullscreen();
+    } catch (error) { toast("Fullscreen is unavailable in this browser.", "danger"); }
+  },
+
   /** @param {string} view */
   navigate(view) {
     store.set({ view, navOpen: false });
