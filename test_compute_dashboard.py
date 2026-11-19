@@ -76,6 +76,57 @@ class TelemetryTests(unittest.TestCase):
         with patch("compute_telemetry.subprocess.run", side_effect=subprocess.TimeoutExpired("top", 8)):
             self.assertIsNone(compute_telemetry._mac_cpu_percent())
 
+    def test_mac_ioreg_gpu_percentage_is_parsed_without_inventing_memory(self):
+        import plistlib
+        raw = plistlib.dumps([{
+            "IOClass": "IntelAccelerator",
+            "PerformanceStatistics": {"Device Utilization %": 38},
+        }])
+        self.assertEqual(compute_telemetry._parse_mac_gpu_ioreg(raw), [{
+            "name": "IntelAccelerator", "percent": 38.0,
+            "total_bytes": None, "used_bytes": None,
+        }])
+
+    def test_mac_ioreg_unknown_statistics_remain_unknown(self):
+        import plistlib
+        self.assertEqual(compute_telemetry._parse_mac_gpu_ioreg(b"garbled"), [])
+        self.assertEqual(compute_telemetry._parse_mac_gpu_ioreg(plistlib.dumps([
+            {"IOClass": "NoStats", "PerformanceStatistics": {"Other": 52}},
+            {"IOClass": "Invalid", "PerformanceStatistics": {"Device Utilization %": 175}},
+        ])), [])
+
+    def test_mac_gpu_probe_only_reads_local_ioreg(self):
+        import plistlib
+        from types import SimpleNamespace
+        raw = plistlib.dumps([{
+            "IOClass": "AMDAccelerator",
+            "PerformanceStatistics": {"Device Utilization %": 17.2},
+        }])
+        with patch("compute_telemetry.shutil.which", return_value="/usr/sbin/ioreg"), patch(
+            "compute_telemetry.subprocess.run",
+            return_value=SimpleNamespace(returncode=0, stdout=raw),
+        ) as run:
+            readings = compute_telemetry._mac_gpu_usage()
+        self.assertEqual(readings[0]["percent"], 17.2)
+        self.assertEqual(run.call_args.args[0], [
+            "/usr/sbin/ioreg", "-a", "-r", "-d", "1", "-c", "IOAccelerator",
+        ])
+
+    def test_mac_gpu_sampler_reports_real_usage_without_gpu_fabrication(self):
+        with patch("compute_telemetry.platform.system", return_value="Darwin"), patch(
+            "compute_telemetry.detect_hardware", return_value={"gpus": []},
+        ), patch("compute_telemetry._mac_cpu_percent", return_value=24.8), patch(
+            "compute_telemetry._memory", return_value=(100, 53)
+        ), patch("compute_telemetry._mac_gpu_usage", return_value=[
+            {"name": "IntelAccelerator", "percent": 38.0,
+             "total_bytes": None, "used_bytes": None}
+        ]), patch("compute_telemetry._installed_models", return_value={
+            "available": False, "installed": [], "loaded": []
+        }):
+            data = compute_telemetry.TelemetrySampler().sample()
+        self.assertEqual(data["gpus"][0]["percent"], 38.0)
+        self.assertIsNone(data["gpus"][0]["used_bytes"])
+
     def test_remote_ollama_is_not_queried(self):
         with patch("compute_telemetry.urllib.request.urlopen") as opener:
             result = compute_telemetry._installed_models("http://192.168.1.21:11434")
