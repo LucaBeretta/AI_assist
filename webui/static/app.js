@@ -653,6 +653,8 @@ window.app = (() => {
   function onEvent(batch) {
     for (const event of Array.isArray(batch) ? batch : [batch]) {
       if (event.type === "ready") { refreshModels().catch(showError); continue; }
+      // Agent progress belongs to the Developer panel, not to the engine label in the status bar.
+      if (event.type === "status" && event.task_id && !event.engine) { window.devui?.onEvent(event); continue; }
       if (event.type === "status") {
         if (event.engine && (!event.chat_id || event.chat_id === selected)) window.workspaceui?.renderStatus(event);
         else if (event.text) status(event.text);

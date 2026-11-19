@@ -427,6 +427,18 @@ class StaticTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_agent_progress_does_not_replace_the_engine_status(self):
+        self.run_scenario(r'''
+        await window.listeners.pywebviewready();
+        elements.get('status').textContent = 'ollama ready';
+        const seen = [];
+        window.devui = {onEvent: event => seen.push(event)};
+        window.app.onEvent([{type:'status',task_id:'t1',text:'Developer agent is inspecting the project.'}]);
+        assert.equal(elements.get('status').textContent,'ollama ready');
+        assert.equal(seen.length, 1);
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
     def test_loading_feedback_is_visible_only_for_the_selected_chat(self):
         self.run_scenario(r'''
         await window.listeners.pywebviewready();

@@ -502,6 +502,7 @@ window.i18n = (() => {
   "Pairing was blocked.": "L'abbinamento è stato bloccato.",
   "The deployment was blocked before starting the Vercel CLI.": "La pubblicazione è stata bloccata prima di avviare la CLI di Vercel.",
   "colibri setup was not started: internet access for this download was not approved.": "L'installazione di colibri non è partita: l'accesso a internet per questo download non è stato approvato.",
+  "Developer agent is inspecting the project.": "L'agente Developer sta esaminando il progetto.",
   "{v0} downloaded.": "{v0} scaricato."
 };
   const en = Object.fromEntries(Object.keys(it).map(key => [key, key]));
@@ -514,6 +515,9 @@ window.i18n = (() => {
     [/^Download (.+) through Ollama$/, "Scaricare $1 tramite Ollama"],
     [/^Install the colibri model (.+)$/, "Installare il modello colibri $1"],
     [/^for (\d+) seconds$/, "per $1 secondi"],
+    [/^Step (\d+): output was cut off; no tools executed, asking for a shorter retry\.$/, "Passo $1: risposta troncata; nessuno strumento eseguito, chiedo un nuovo tentativo più breve."],
+    [/^Step (\d+): the model wrote an unreadable tool call; asking it to retry\.$/, "Passo $1: il modello ha scritto una chiamata a strumento illeggibile; chiedo di riprovare."],
+    [/^Step (\d+): recovered a tool call the model wrote as text\.$/, "Passo $1: recuperata una chiamata a strumento scritta come testo."],
     [/^(.+) \(Ollama contacts its online registry\)$/, "$1 (Ollama contatta il suo registro online)"],
     [/^(.+) \(runs on Ollama's servers\)$/, "$1 (gira sui server di Ollama)"],
     [/^Ollama did not answer, so AI Assist could not confirm that (.+) runs on this computer\. Start Ollama and try again\.$/,

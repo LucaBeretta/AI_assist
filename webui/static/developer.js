@@ -200,7 +200,7 @@ window.devui = (() => {
   function onEvent(event) {
     if (!task || event.task_id !== task.id) return;
     switch (event.type) {
-      case "status": status(event.text); activityLine("info", event.text); break;
+      case "status": { const text = window.i18n?.gate?.(event.text) || event.text; status(text); activityLine("info", text); break; }
       case "hybrid_stage": case "hybrid_warning": status(event.text); activityLine("info", event.text); break;
       case "hybrid_review": activityLine("info", event.text); break;
       case "loading": status(event.text); break;
