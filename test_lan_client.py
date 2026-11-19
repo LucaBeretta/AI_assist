@@ -124,6 +124,33 @@ class EncryptedInferenceTests(unittest.TestCase):
         self.assertEqual(pieces, ["Hello ", "from Windows"])
         self.assertEqual(metrics[0]["eval_count"], 2)
 
+    def test_web_chat_service_routes_to_windows_provider_and_saves_on_mac(self):
+        from chat_store import ChatStore
+        from webui.server import WebWorkspace
+        with tempfile.TemporaryDirectory() as folder:
+            store = ChatStore(Path(folder) / "mac-chats")
+            workspace = WebWorkspace(store, provider_factory=lambda: self.client)
+            response = [
+                {"message": {"role": "assistant", "content": "RTX says READY"}, "done": False},
+                {"done": True, "eval_count": 4, "eval_duration": 1000000000},
+            ]
+            raw = b"".join(json.dumps(item).encode() + b"\\n" for item in response)
+            with patch("lan_inference.local_models", return_value=["qwen3-coder:30b"]), patch(
+                "lan_inference.ollama.api_json", return_value={"models": []}
+            ), patch("lan_inference.model_is_local", return_value=True), patch(
+                "lan_inference.urllib.request.urlopen", return_value=io.BytesIO(raw)
+            ):
+                self.assertEqual(workspace.models()["engine"], "Paired LAN")
+                chat = workspace.service.create("qwen3-coder:30b", backend="Paired LAN")
+                events = []
+                stop = threading.Event()
+                workspace.service.prepare(chat["id"], "Say READY", "qwen3-coder:30b", "Paired LAN")
+                workspace.service.send(chat["id"], "Say READY", "qwen3-coder:30b",
+                                       "Paired LAN", events.append, stop)
+            saved = store.load(chat["id"])
+            self.assertEqual(saved["messages"][-1]["content"], "RTX says READY")
+            self.assertEqual(events[-1]["type"], "done")
+
     def test_cancel_before_chat_sends_no_prompt(self):
         cancelled = threading.Event()
         cancelled.set()
