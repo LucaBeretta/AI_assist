@@ -339,7 +339,83 @@ class LinkAndProgramTests(GateTestCase):
         self.assertEqual(environment["AI_ASSIST_NOTICE_BODY"], "Body $(evil)")
 
 
+class ListeningTests(GateTestCase):
+    """AI Assist itself only accepts connections from this computer."""
+
+    def test_loopback_and_local_sockets_may_listen(self):
+        gate._hook("socket.bind", (INET, ("127.0.0.1", 0)))
+        gate._hook("socket.bind", (INET, ("127.5.6.7", 8080)))
+        gate._hook("socket.bind", (INET6, ("::1", 0, 0, 0)))
+        gate._hook("socket.bind", (INET, ("localhost", 0)))
+        if hasattr(socket, "AF_UNIX"):
+            gate._hook("socket.bind", (SimpleNamespace(family=socket.AF_UNIX), "/tmp/x.sock"))
+        self.assertEqual(gate.recent(), [])
+
+    def test_every_interface_and_network_addresses_are_refused_and_logged(self):
+        for sock, address, shown in ((INET, ("0.0.0.0", 8765), "0.0.0.0"), (INET, ("", 8765), "every network interface"),
+                                     (INET6, ("::", 0, 0, 0), "::"), (INET, ("192.168.1.20", 80), "192.168.1.20"),
+                                     (INET, ("example.com", 80), "example.com"),
+                                     (SimpleNamespace(family=-1), ("x",), "an address the gate cannot check")):
+            with self.subTest(address=address):
+                message = self.blocked("socket.bind", sock, address)
+                self.assertIn("only accepts connections from this computer", message)
+                self.assertEqual(gate.recent()[-1]["decision"], "blocked: listening beyond this computer")
+                self.assertEqual(gate.recent()[-1]["target"], shown)
+        self.assertEqual(self.asked, [])
+
+    def test_programs_ai_assist_starts_keep_their_own_settings(self):
+        with patch.object(gate, "_parent", (1, "token", "colibri")):
+            gate._hook("socket.bind", (INET, ("0.0.0.0", 8000)))
+
+    def test_requests_from_the_apps_packages_name_their_module(self):
+        namespace = {"gate": gate}
+        exec(compile("result = gate._source()", str(HERE / "app_core" / "probe.py"), "exec"), namespace)
+        self.assertEqual(namespace["result"], "app_core/probe.py line 1")
+        # The private Python in runtime/ is inside the app folder but is not AI Assist's code:
+        # its frame is skipped and the app code that called it is named instead.
+        exec(compile("result = gate._source()", str(HERE / "runtime" / "python" / "Lib" / "http.py"), "exec"), namespace)
+        self.assertTrue(namespace["result"].startswith("test_network_gate.py line "), namespace["result"])
+
+    @unittest.skipIf(os.name == "nt", "POSIX permissions")
+    def test_a_new_connection_log_is_private(self):
+        gate._record("blocked", gate.Request("k", "t", "", "", "", ""))
+        self.assertEqual((self.folder / "network.log").stat().st_mode & 0o777, 0o600)
+
+    def test_the_log_keeps_one_line_ending_per_entry(self):
+        gate._record("blocked", gate.Request("k", "a", "", "", "", ""))
+        gate._record("blocked", gate.Request("k", "b", "", "", "", ""))
+        raw = (self.folder / "network.log").read_bytes()
+        self.assertNotIn(b"\r\r\n", raw)
+        self.assertEqual(len(raw.splitlines()), 2)
+
+
 class InstalledGateTests(unittest.TestCase):
+    def test_the_app_process_cannot_listen_beyond_this_computer(self):
+        script = r"""
+import json, socket
+import network_gate
+network_gate._notice = lambda *args: None
+network_gate.install()
+result = {}
+with socket.socket() as local:
+    local.bind(("127.0.0.1", 0))
+    result["loopback"] = "listening"
+for name, host in (("all", "0.0.0.0"), ("empty", "")):
+    try:
+        with socket.socket() as wide:
+            wide.bind((host, 0))
+            result[name] = "listening"
+    except network_gate.InternetBlocked:
+        result[name] = "refused"
+print(json.dumps(result))
+"""
+        with tempfile.TemporaryDirectory() as folder:
+            completed = subprocess.run([sys.executable, "-c", script], cwd=HERE, env=dict(os.environ, AI_ASSIST_DATA_DIR=folder),
+                                       capture_output=True, text=True, timeout=60)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(json.loads(completed.stdout.strip().splitlines()[-1]),
+                         {"loopback": "listening", "all": "refused", "empty": "refused"})
+
     def test_a_process_with_the_gate_reaches_this_computer_but_not_the_internet(self):
         script = r"""
 import http.server, json, socket, threading, urllib.request
