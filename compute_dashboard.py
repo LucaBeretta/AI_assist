@@ -13,6 +13,7 @@ import tkinter as tk
 from collections import deque
 
 from compute_telemetry import TelemetrySampler
+from dashboard_placement import DashboardPlacement, geometry_string
 
 
 POLL_MS = 5000
@@ -153,12 +154,19 @@ class ComputeDashboard:
         self.history = {key: deque(maxlen=30) for key in ("cpu", "gpu", "ram")}
         self._after_id = None
         self.fullscreen = False
+        self.placement = DashboardPlacement()
+        self._placement_after = None
+        self._restoring = True
         p = DASHBOARD_COLORS
 
         self.window = tk.Toplevel(self.root)
         self.window.title("AI Assist | Compute monitor")
         self.window.geometry("800x480")
         self.window.minsize(480, 320)
+        # Best-effort restore; never use an off-screen coordinate.
+        saved_geometry = self.placement.restore(self.root)
+        if saved_geometry:
+            self.window.geometry(geometry_string(saved_geometry))
         self.window.configure(bg=p["background"])
         self.window.protocol("WM_DELETE_WINDOW", self.close)
         self.window.bind("<F11>", self.toggle_fullscreen)
@@ -166,6 +174,7 @@ class ComputeDashboard:
         self.window.bind("<Control-w>", lambda _event: self.close())
         self.window.bind("<Control-r>", lambda _event: self.refresh())
         self.window.bind("<Command-r>", lambda _event: self.refresh())
+        self.window.bind("<Configure>", self._on_window_move)
 
         header = tk.Frame(self.window, bg=p["background"], height=48)
         header.pack(side="top", fill="x", padx=12, pady=(6, 0))
@@ -202,8 +211,26 @@ class ComputeDashboard:
         self.canvas.bind("<Configure>", lambda _event: self.redraw())
 
         # All Tk work happens on the UI thread. The worker communicates via Queue.
+        self.window.after_idle(self._finish_restore)
         self.refresh()
         self._tick()
+
+    def _finish_restore(self):
+        # Ignore the initial geometry events while the window manager places us.
+        if not self.closed:
+            self._restoring = False
+
+    def _on_window_move(self, event):
+        if self.closed or self.fullscreen or self._restoring or event.widget is not self.window:
+            return
+        if self._placement_after is not None:
+            self.window.after_cancel(self._placement_after)
+        self._placement_after = self.window.after(650, self._save_placement)
+
+    def _save_placement(self):
+        self._placement_after = None
+        if not self.closed and not self.fullscreen:
+            self.placement.save(self.window, self.root)
 
     def _txt(self, x, y, text, color=None, size=10, bold=False, anchor="nw"):
         self.canvas.create_text(x, y, text=text, fill=color or DASHBOARD_COLORS["ink"],
@@ -434,6 +461,9 @@ class ComputeDashboard:
         if self.closed:
             return
         try:
+            if not self.fullscreen:
+                # Never overwrite the remembered normal window with fullscreen.
+                self.placement.save(self.window, self.root)
             self.fullscreen = not self.fullscreen
             self.window.attributes("-fullscreen", self.fullscreen)
             self.fullscreen_button.configure(
@@ -456,6 +486,14 @@ class ComputeDashboard:
     def close(self):
         if self.closed:
             return
+        if self._placement_after is not None:
+            try:
+                self.window.after_cancel(self._placement_after)
+            except tk.TclError:
+                pass
+            self._placement_after = None
+        if not self.fullscreen:
+            self.placement.save(self.window, self.root)
         self.closed = True
         if self._after_id is not None:
             try:
