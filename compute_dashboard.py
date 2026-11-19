@@ -193,6 +193,7 @@ class ComputeDashboard:
                 self.working = False
                 self.refresh_button.config(state="normal")
                 if error:
+                    self.last_at = time.monotonic()  # Throttle retries when a probe fails.
                     self.status.config(text="Metrics unavailable: " + error)
                 else:
                     self._render(data)
