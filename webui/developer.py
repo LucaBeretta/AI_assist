@@ -165,7 +165,7 @@ class DeveloperTasks:
                     **{**options, "messages": messages})
             if hybrid:
                 from hybrid_engine import run_hybrid
-                from hybrid_ui import memory_callbacks
+                from hybrid_memory import memory_callbacks
                 from colibri_backend import ColibriClient
                 state, before, prepare, cleanup = memory_callbacks(hybrid, options["host"], options["model"], task["cancel"])
                 result = run_hybrid(worker,

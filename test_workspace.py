@@ -60,7 +60,7 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         self.agent_metadata = self.mocks.enter_context(patch("workspace_ui.fetch_model_capabilities",
                                                            side_effect=model_metadata))
         # This is a tripwire for any code path accidentally bypassing the fake APIs.
-        self.mocks.enter_context(patch("update_checker.UpdateChecker.check", lambda self: None))
+        self.mocks.enter_context(patch("update_ui.UpdateChecker.check", lambda self: None))
         self.mocks.enter_context(patch("urllib.request.urlopen", side_effect=AssertionError("Network access in workspace test")))
         try:
             self.root = tk.Tk()

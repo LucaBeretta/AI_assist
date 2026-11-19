@@ -149,7 +149,7 @@ class ParityTests(unittest.TestCase):
             entered.set(); release.wait(3)
             return "Checked source only."
         callbacks = ({"url": self.service.url}, Mock(), Mock(), Mock())
-        with patch("hybrid_ui.memory_callbacks", return_value=callbacks), \
+        with patch("hybrid_memory.memory_callbacks", return_value=callbacks), \
                 patch("coding_agent._chat", return_value=final_response()), \
                 patch("colibri_backend.ColibriClient.review", side_effect=review):
             self.assertTrue(self.api.run_agent(chat, "Inspect", str(self.project))["ok"])

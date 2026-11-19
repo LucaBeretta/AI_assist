@@ -32,7 +32,7 @@ from webui.memories import Memories, revision as memory_revision
 from webui.instance import SingleInstance
 from webui.window_state import rectangle, visible_rectangle, saved_theme
 from webui.status import StatusPush
-from status_bar import snapshot_values, generation_rate, is_cloud_model, is_local
+from status_values import snapshot_values, generation_rate, is_cloud_model, is_local
 from webui.local_files import write_utf8
 from webui.prompts import PromptStore
 from webui.colibri import ColibriService

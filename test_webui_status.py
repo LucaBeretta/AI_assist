@@ -4,7 +4,7 @@ import threading
 import unittest
 from unittest.mock import patch
 
-from status_bar import snapshot_values
+from status_values import snapshot_values
 import test_webui_app as fixtures
 from webui.status import StatusPush
 

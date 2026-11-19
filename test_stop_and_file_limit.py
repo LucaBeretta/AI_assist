@@ -128,7 +128,7 @@ class StopAndLimitUITests(unittest.TestCase):
         self.mocks = ExitStack()
         self.addCleanup(self.mocks.close)
         self.mocks.enter_context(patch.dict(os.environ, {"AI_ASSIST_DATA_DIR": str(self.history), "OLLAMA_MODEL": "alpha:8b"}))
-        self.mocks.enter_context(patch("update_checker.UpdateChecker.check", lambda self: None))
+        self.mocks.enter_context(patch("update_ui.UpdateChecker.check", lambda self: None))
         self.mocks.enter_context(patch("ollama_engine.ensure_ollama"))
         self.mocks.enter_context(patch("ollama_engine.list_ollama_models", return_value=["alpha:8b"]))
         self.mocks.enter_context(patch("ollama_engine.running_models", return_value={"alpha:8b"}))

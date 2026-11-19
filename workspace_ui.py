@@ -24,7 +24,7 @@ from status_bar import StatusBar, mono_family
 from developer_panel import DeveloperPanelMixin
 from feedback_ui import FeedbackMixin
 from hybrid_ui import HybridMixin, QUALITY_GUIDANCE
-from update_checker import UpdateChecker
+from update_ui import UpdateChecker
 
 
 POLL_ACTIVE_INTERVAL_MS = 100

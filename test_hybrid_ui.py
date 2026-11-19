@@ -39,9 +39,9 @@ class MemoryHandoffTests(unittest.TestCase):
         order = []
         state, before, prepare, cleanup = memory_callbacks(self.snapshot(), "http://localhost:11434", "selected-worker", threading.Event())
         report = {"server": {"urls": {"openai_base_url": "http://localhost:8123/v1"}}}
-        with patch("hybrid_ui.launcher.stop_server", side_effect=lambda path: order.append(("stop", path))), \
-                patch("hybrid_ui.unload_worker", side_effect=lambda host, model: order.append(("unload", host, model))), \
-                patch("hybrid_ui.launcher.start_server", side_effect=lambda *args, **kwargs: (order.append(("start", args[0])), report)[1]):
+        with patch("hybrid_memory.launcher.stop_server", side_effect=lambda path: order.append(("stop", path))), \
+                patch("hybrid_memory.unload_worker", side_effect=lambda host, model: order.append(("unload", host, model))), \
+                patch("hybrid_memory.launcher.start_server", side_effect=lambda *args, **kwargs: (order.append(("start", args[0])), report)[1]):
             before()
             prepare()
             cleanup()
@@ -54,8 +54,8 @@ class MemoryHandoffTests(unittest.TestCase):
         for snapshot, host in ((self.snapshot("https://reviewer.example/v1"), "http://localhost:11434"),
                                (self.snapshot(), "https://worker.example")):
             _, before, prepare, cleanup = memory_callbacks(snapshot, host, "worker", threading.Event())
-            with patch("hybrid_ui.launcher.stop_server") as stop, patch("hybrid_ui.unload_worker") as unload, \
-                    patch("hybrid_ui.launcher.start_server", return_value={}) as start:
+            with patch("hybrid_memory.launcher.stop_server") as stop, patch("hybrid_memory.unload_worker") as unload, \
+                    patch("hybrid_memory.launcher.start_server", return_value={}) as start:
                 before()
                 prepare()
                 cleanup()
@@ -66,8 +66,8 @@ class MemoryHandoffTests(unittest.TestCase):
     def test_cancelled_handoff_does_not_start_the_reviewer(self):
         cancel = threading.Event()
         _, _, prepare, cleanup = memory_callbacks(self.snapshot(), "http://localhost:11434", "worker", cancel)
-        with patch("hybrid_ui.unload_worker", side_effect=lambda *args: cancel.set()), \
-                patch("hybrid_ui.launcher.start_server") as start, patch("hybrid_ui.launcher.stop_server") as stop:
+        with patch("hybrid_memory.unload_worker", side_effect=lambda *args: cancel.set()), \
+                patch("hybrid_memory.launcher.start_server") as start, patch("hybrid_memory.launcher.stop_server") as stop:
             with self.assertRaises(AgentCancelled):
                 prepare()
             cleanup()
@@ -79,7 +79,7 @@ class MemoryHandoffTests(unittest.TestCase):
             def __enter__(self): return self
             def __exit__(self, *args): pass
             def read(self, maximum): return b'{"done": true}'
-        with patch("hybrid_ui.urllib.request.urlopen", return_value=Response()) as request:
+        with patch("hybrid_memory.urllib.request.urlopen", return_value=Response()) as request:
             unload_worker("http://localhost:11434", "one-model")
         payload = json.loads(request.call_args.args[0].data)
         self.assertEqual(payload, {"model": "one-model", "stream": False, "keep_alive": 0})

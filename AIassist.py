@@ -493,7 +493,8 @@ class AIAssistantGUI(BackendMixin, WorkspaceMixin, OllamaAssistantBase):
 
 
 if __name__ == "__main__":
-    from gui_runtime import GUIRuntimeError, create_root, redirect_missing_streams
+    from gui_runtime import redirect_missing_streams
+    from tk_runtime import GUIRuntimeError, create_root
     redirect_missing_streams()
     if "--web" in sys.argv[1:]:
         from webui.app import main

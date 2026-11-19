@@ -5,7 +5,8 @@ from pathlib import Path
 import unittest
 from unittest.mock import patch, Mock
 
-from update_checker import UpdateChecker, blob_hash, check_update, github_json
+from update_ui import UpdateChecker
+from update_checker import blob_hash, check_update, github_json
 import urllib.error
 
 
@@ -22,8 +23,8 @@ class UpdateTests(unittest.TestCase):
         checker = UpdateChecker(SimpleNamespace(root=Mock(), closed=False, closing=False))
         def immediate_thread(*, target, daemon):
             return SimpleNamespace(start=target)
-        with patch("update_checker.threading.Thread", side_effect=immediate_thread), patch(
-                "update_checker.check_update", side_effect=http.client.IncompleteRead(b"partial")):
+        with patch("update_ui.threading.Thread", side_effect=immediate_thread), patch(
+                "update_ui.check_update", side_effect=http.client.IncompleteRead(b"partial")):
             checker.check()
             checker.poll()
         self.assertFalse(checker.busy)
