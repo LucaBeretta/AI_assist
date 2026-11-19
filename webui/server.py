@@ -39,6 +39,7 @@ import time
 import urllib.parse
 
 from app_core import ollama, settings
+from compute_telemetry import TelemetrySampler
 from app_core.chat_service import ChatService, ServiceError
 from app_core.privacy import is_cloud_model, privacy_status
 from app_core.providers import configured_provider
@@ -90,6 +91,8 @@ class WebWorkspace:
         self.requests = {}
         self.lock = threading.Lock()
         self.hardware = None
+        self.compute_sampler = TelemetrySampler()
+        self.compute_snapshot = None
 
     def provider(self):
         return self.provider_factory()
@@ -147,6 +150,32 @@ class WebWorkspace:
         report = model_advisor.detect_hardware(self.provider().info().endpoint)
         with self.lock:
             self.hardware = (time.monotonic(), report)
+        return report
+
+    def compute_report(self):
+        """Read-only local telemetry, authenticated by the existing web session.
+
+        No remote device contact or LAN listeners. Cache bounds repeated browser
+        refreshes; the sampler serializes its own native hardware probes.
+        """
+        with self.lock:
+            cached = self.compute_snapshot
+        if cached is not None and time.monotonic() - cached[0] < 4.0:
+            return cached[1]
+        local = self.compute_sampler.sample()
+        peers = []
+        try:
+            from peer_pairing import TrustStore
+            records = TrustStore(self.directory.parent / "pairing")._read("paired_servers.json")
+            for peer_id in sorted(records)[:32]:
+                if isinstance(peer_id, str) and isinstance(records[peer_id], dict):
+                    peers.append({"id": peer_id[:32], "status": "paired; telemetry unavailable"})
+        except (OSError, ValueError, TypeError):
+            pass
+        report = {"local": local, "peers": peers, "network": "Local only; LAN sharing off by default",
+                  "remote_telemetry": False}
+        with self.lock:
+            self.compute_snapshot = (time.monotonic(), report)
         return report
 
     def memory_view(self):
@@ -290,6 +319,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ("GET", r"/api/models", "models", True),
         ("GET", r"/api/models/details", "model_details", True),
         ("GET", r"/api/hardware", "hardware", True),
+        ("GET", r"/api/compute", "compute", True),
         ("GET", r"/api/chats", "list_chats", True),
         ("POST", r"/api/chats", "create_chat", True),
         ("GET", rf"/api/chats/{_CHAT}", "get_chat", True),
@@ -455,6 +485,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def api_hardware(self, body):
         return self.workspace.hardware_report()
+
+    def api_compute(self, body):
+        return self.workspace.compute_report()
 
     def api_list_chats(self, body):
         mode = self.param("mode") or None
