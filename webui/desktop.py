@@ -27,11 +27,12 @@ def native_titlebar(window, theme):
 
 
 class Desktop:
-    def __init__(self, create_window=None, folder_dialog=None, titlebar=None):
+    def __init__(self, create_window=None, folder_dialog=None, titlebar=None, save_dialog=None):
         self._create_window = create_window
         self._preview = None
         self._lock = threading.RLock()
         self._folder_dialog = folder_dialog
+        self._save_dialog = save_dialog
         self.main_window = None
         self._activation = threading.Event()
         self._theme = None
@@ -74,6 +75,14 @@ class Desktop:
             raise RuntimeError("The main window is not ready for a folder dialog.")
         webview = importlib.import_module("webview")
         return self.main_window.create_file_dialog(webview.FOLDER_DIALOG)
+
+    def save_file(self, suggested_name):
+        if self._save_dialog is not None:
+            return self._save_dialog(suggested_name)
+        if self.main_window is None:
+            raise RuntimeError("The main window is not ready for a save dialog.")
+        webview = importlib.import_module("webview")
+        return self.main_window.create_file_dialog(webview.SAVE_DIALOG, save_filename=suggested_name)
 
     def open_preview(self, uri):
         with self._lock:

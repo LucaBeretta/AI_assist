@@ -35,6 +35,7 @@ from webui.instance import SingleInstance
 from webui.window_state import rectangle, visible_rectangle, saved_theme
 from webui.status import StatusPush
 from status_bar import snapshot_values, generation_rate, is_cloud_model, is_local
+from webui.local_files import write_utf8
 
 
 log = logging.getLogger(__name__)
@@ -304,6 +305,26 @@ class Api:
                 self._unloading.discard(name)
         self._bridge.emit("models_changed")
         return {"ok": True, "model": name}
+
+    @_json_method
+    def save_code(self, text, suggested_name):
+        if not isinstance(text, str) or not text.strip() or len(text.encode("utf-8")) > 4000000:
+            raise ValueError("Code must be nonempty text up to 4 MB.")
+        if (not isinstance(suggested_name, str) or not suggested_name.strip() or len(suggested_name) > 255
+                or suggested_name in {".", ".."} or re.search(r'[<>:"/\\|?*\x00-\x1f]', suggested_name)):
+            raise ValueError("Choose a file name without a directory or special characters.")
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("The web UI is closing.")
+        selection = self._desktop.save_file(suggested_name)
+        if not selection:
+            return {"ok": True, "cancelled": True}
+        path = Path(selection[0] if isinstance(selection, (tuple, list)) else selection).expanduser().absolute()
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("The web UI is closing.")
+            write_utf8(path, text)
+        return {"ok": True, "path": str(path)}
 
     @_json_method
     def preview_file(self, project, path):
