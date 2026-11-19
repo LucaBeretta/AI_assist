@@ -55,15 +55,17 @@ def list_ollama_models():
     })
 
 
-def ollama_api(path, payload=None, timeout=10):
+def ollama_api(path, payload=None, timeout=10, method=None):
     request = urllib.request.Request(
         ollama_url() + path,
         data=json.dumps(payload).encode("utf-8") if payload is not None else None,
         headers={"Content-Type": "application/json"},
+        method=method,
     )
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            result = json.load(response)
+            data = response.read()
+            result = {} if not data and method == "DELETE" else json.loads(data)
         if not isinstance(result, dict) or result.get("error"):
             raise RuntimeError(str(result))
         return result

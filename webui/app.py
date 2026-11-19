@@ -5,6 +5,7 @@ from functools import wraps
 import importlib
 import inspect
 import logging
+import re
 from pathlib import Path
 import sys
 import threading
@@ -17,6 +18,8 @@ import chat_attachments
 import coding_agent
 from developer_tools import fetch_model_capabilities
 from model_advisor import detect_hardware
+import model_advisor
+import model_library
 from webui.bridge import Bridge
 from webui.developer import DeveloperTasks
 from webui.model_loading import ModelLoadProgress
@@ -97,6 +100,89 @@ class Api:
         self._projects = ProjectStore(self._store.directory / "projects")
         self._desktop = desktop if desktop is not None else Desktop()
         self._preview = HtmlPreview(self._store.directory, self._desktop)
+        self._pulls = {}
+
+    @_json_method
+    def recommend_models(self):
+        hardware = self._hardware if self._hardware is not None else detect_hardware(self._engine.ollama_url())
+        catalog = model_library.fetch_popular_models() if hardware.get("server_local", True) else []
+        return {"ok": True, "hardware": hardware, "recommendations": model_advisor.recommend_models(hardware, catalog)}
+
+    @staticmethod
+    def _model_name(name):
+        if not isinstance(name, str) or len(name) > 300 or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:/-]*", name):
+            raise ValueError("Choose a valid model tag.")
+
+    @_json_method
+    def pull_model(self, name):
+        self._model_name(name)
+        with self._lock:
+            if self._closed or name in self._unloading:
+                raise ValueError("The app is closing or this model is being changed.")
+            if self._pulls:
+                raise ValueError("A model download is already active.")
+            identity = str(uuid.uuid4())
+            job = {"model": name, "cancel": threading.Event(), "finished": threading.Event()}
+            self._pulls[identity] = job
+            try:
+                threading.Thread(target=self._pull_model, args=(identity, job), daemon=True, name="webui-model-pull").start()
+            except Exception:
+                del self._pulls[identity]
+                raise
+        return {"ok": True, "pull_id": identity}
+
+    def _pull_model(self, identity, job):
+        last = {}
+        def progress(value):
+            if job["cancel"].is_set():
+                raise model_library.DownloadCancelled("Download stopped.")
+            last.update(value)
+            self._bridge.emit("pull_progress", pull_id=identity, model=job["model"],
+                status=value["status"], completed=value.get("completed", last.get("completed", 0)), total=value.get("total", last.get("total")))
+        try:
+            model_library.pull_model(self._engine.ollama_url(), job["model"], progress, job["cancel"])
+            if job["cancel"].is_set():
+                raise model_library.DownloadCancelled("Download stopped.")
+            if last.get("status") != "success":
+                raise RuntimeError("Ollama did not confirm download success.")
+            kind, extra = "pull_done", {}
+        except model_library.DownloadCancelled:
+            kind, extra = "pull_stopped", {}
+        except Exception as error:
+            kind, extra = "pull_error", {"error": str(error)}
+        with self._lock:
+            self._pulls.pop(identity, None)
+            job["finished"].set()
+        self._bridge.emit(kind, pull_id=identity, model=job["model"], **extra)
+        if kind == "pull_done":
+            self._bridge.emit("models_changed")
+
+    @_json_method
+    def stop_pull(self, pull_id=None):
+        with self._lock:
+            jobs = [job for identity, job in self._pulls.items() if pull_id is None or identity == pull_id]
+            for job in jobs:
+                job["cancel"].set()
+        return {"ok": True, "active": bool(jobs)}
+
+    @_json_method
+    def delete_model(self, name):
+        self._model_name(name)
+        with self._lock:
+            if (self._closed or name in self._unloading or self._developer.uses_model(name)
+                    or any(item["record"]["model"] == name for item in self._streams.values())
+                    or any(item["model"] == name for item in self._pulls.values())):
+                raise ValueError("This model is in use; stop its tasks, streams or download first.")
+            self._unloading.add(name)
+        try:
+            if name in self._engine.running_details():
+                raise ValueError("Unload this model before deleting it.")
+            self._engine.ollama_api("/api/delete", {"model": name}, method="DELETE")
+        finally:
+            with self._lock:
+                self._unloading.discard(name)
+        self._bridge.emit("models_changed")
+        return {"ok": True, "model": name}
 
     @_json_method
     def preview_file(self, project, path):
@@ -854,6 +940,9 @@ class Api:
             self._closed = True
             streams = list(self._streams.values())
             tasks = self._developer.close()
+            pulls = list(self._pulls.values())
+            for job in pulls:
+                job["cancel"].set()
             for stream in streams:
                 with stream["data_lock"]:
                     stream["cancel"].set()
@@ -869,6 +958,8 @@ class Api:
             stream["finished"].wait(max(0, deadline - time.monotonic()))
         for finished in tasks:
             finished.wait(max(0, deadline - time.monotonic()))
+        for job in pulls:
+            job["finished"].wait(max(0, deadline - time.monotonic()))
         with self._lock:
             self._incognito.clear()
             self._preview.close()
