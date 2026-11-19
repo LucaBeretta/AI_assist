@@ -48,7 +48,7 @@ Scope: the desktop app, the programs it starts, and the new web workspace (previ
 | T10 | Other local users read chats or the log (POSIX) | A data folder created by the app is 0700; the log 0600; settings via `app_core.settings` 0600. Existing folders are not changed. **Implemented, untested here** (the tests are POSIX-only and skipped on this Windows machine). | `test_app_core...is_private`, `test_network_gate...log_is_private` |
 | T11 | Something goes online silently | The gate, unchanged: audit hook, two confirmations, notifications, log; child gate for Python children; firewall lock for Ollama (Windows). | existing `test_network_gate.py`, `test_firewall_lock.py` |
 | T12 | The approval dialog misattributes the requester | "Asked by" now names `app_core/` and `webui/` modules; frames from the private `runtime/` Python are skipped. **Implemented.** | `test_requests_from_the_apps_packages_name_their_module` |
-| T13 | Prompt injection leads to a harmful agent command | Two confirmations with a 3-second second step, command and folder shown, logged and announced. **No OS sandbox yet** (section 5). | existing `test_workspace.py` approval tests |
+| T13 | Prompt injection leads to a harmful agent command | Two confirmations with a 3-second second step, command and folder shown, logged and announced. The rules are enforced in `app_core/approvals.py`, so an approval that skips the second check or the wait is refused whatever the interface does. **No OS sandbox yet** (section 5). | `test_approvals.py`, `test_workspace.py` (incl. `test_an_early_command_approval_is_refused_by_the_core_and_the_dialog_stays`) |
 
 ## 5. Residual risks (stated plainly)
 

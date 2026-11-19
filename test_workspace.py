@@ -511,6 +511,23 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         noted.assert_called_once_with("Developer agent command", "python -m pytest", "Run the tests")
         self.assertFalse(self.app.approvals)
 
+    def test_an_early_command_approval_is_refused_by_the_core_and_the_dialog_stays(self):
+        decision = dict(approved=False, event=threading.Event(), action=dict(
+            kind="run_command", command="rm -rf build", cwd=str(self.project), description="Clean"))
+        with patch("workspace_ui.network_gate.note_outside") as noted:
+            self.app.review_action(decision)
+            window = self.app.approvals[-1][1]
+            self.app.resolve_approval(decision, window, True)  # as if a button skipped both checks
+            self.assertFalse(decision["event"].is_set())
+            self.assertTrue(window.winfo_exists())
+            self.assertEqual(len(self.app.approvals), 1)
+            reject = next(widget for widget in descendants(window)
+                          if isinstance(widget, tk.Button) and widget.cget("text") == "Reject")
+            reject.invoke()
+        self.assertEqual((decision["event"].is_set(), decision["approved"]), (True, False))
+        noted.assert_not_called()
+        self.assertFalse(self.app.approvals)
+
     def test_picking_another_file_returns_destination_for_fresh_review(self):
         chosen = self.folder / "chosen.py"
         decision = dict(approved=False, event=threading.Event(), action=dict(kind="write_file",

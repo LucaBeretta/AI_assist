@@ -1,6 +1,7 @@
 """Conversation workspace and reviewed developer-agent interactions."""
 
 from copy import deepcopy
+import math
 from pathlib import Path
 import queue
 import threading
@@ -8,6 +9,7 @@ import time
 import tkinter as tk
 from tkinter import END, filedialog, messagebox, scrolledtext, simpledialog, ttk
 
+from app_core import approvals
 from app_core import conversation as conversation_rules
 from app_core import settings as app_settings
 from app_core.settings import load_file_limit  # noqa: F401  (long-standing name)
@@ -20,7 +22,7 @@ from hourly_status import HourlyStatusReport
 from coding_agent import FILE_LIMIT_CHOICES, estimate_tokens, run_agent
 from developer_tools import build_project_context, extract_code_blocks, fetch_model_capabilities, list_project_files, read_project_file
 from message_widgets import render_message
-import network_gate
+import network_gate  # noqa: F401  (patched through this module by tests; approvals log via app_core)
 from response_metrics import metrics_summary, response_metrics
 from shared_memory import MAX_NOTES, SharedMemory, memory_note
 from appearance import DARK_THEMES, Appearance
@@ -1278,17 +1280,7 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
     def agent_worker(self, request, host, model, root, messages, context, cancel):
         def event(item):
             self.workspace_events.put(("agent_event", request, item, None))
-        def approval(action):
-            decision = {"approved": False, "event": threading.Event(), "action": action}
-            self.workspace_events.put(("approval", request, decision, None))
-            while not decision["event"].wait(.1):
-                if cancel.is_set() or self.closed:
-                    return False
-            if decision["approved"] and not cancel.is_set():
-                if decision.get("destination"):
-                    return {"approved": True, "destination": decision["destination"]}
-                return True
-            return False
+        approval = self.agent_approver(request, cancel)
         try:
             metadata_result = queue.Queue()
             def inspect_model():
@@ -1325,6 +1317,12 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         except Exception as error:
             self.workspace_events.put(("agent_done", request, None, str(error)))
 
+    def agent_approver(self, request, cancel):
+        """The agent's approve_action: each decision is shown in this window, and
+        app_core.approvals enforces the rules (declined by default, two checks for commands)."""
+        return approvals.approver(lambda decision: self.workspace_events.put(("approval", request, decision, None)),
+                                  cancel, lambda: self.closed)
+
     def review_action(self, decision):
         action = decision["action"]
         if (action["kind"] == "write_file" and action.get("exists") is False
@@ -1336,12 +1334,11 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
             destination = filedialog.asksaveasfilename(parent=self.root, title="Where should this new file be saved?",
                 initialdir=str(directory), initialfile=proposed.name, defaultextension=proposed.suffix)
             if not destination or self.agent_cancel.is_set() or self.closing:
-                decision["event"].set()
+                approvals.resolve(decision, False)
                 return
             if Path(destination).resolve() != proposed.resolve():
-                decision["destination"] = str(Path(destination).resolve())
-                decision["approved"] = True
-                decision["event"].set()
+                # The agent proposes the change again at the chosen file, for a fresh review there.
+                approvals.resolve(decision, True, destination=str(Path(destination).resolve()))
                 return
         c = self.COLORS
         window = tk.Toplevel(self.root)
@@ -1380,7 +1377,7 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         body.config(state="disabled")
         window.protocol("WM_DELETE_WINDOW", lambda: self.resolve_approval(decision, window, False))
 
-    COMMAND_CONFIRM_SECONDS = 3
+    COMMAND_CONFIRM_SECONDS = approvals.COMMAND_CONFIRM_SECONDS
 
     def confirm_command(self, decision, window, heading, details, button):
         """The second check before a command runs: it is a separate program the internet gate cannot see."""
@@ -1388,27 +1385,29 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         details.configure(fg=self.COLORS["amber"], text=(
             "It runs as a separate program, outside the internet gate. If it uses the internet, AI Assist cannot "
             "see or stop it; only Python that it starts is still checked. Run it only if you expect what it does."))
+        # The wait is kept by app_core.approvals: an earlier approval would be refused there.
+        approvals.begin_second_check(decision, self.COMMAND_CONFIRM_SECONDS)
 
-        def tick(remaining):
+        def tick():
             if not window.winfo_exists() or decision["event"].is_set():
                 return
-            if remaining > 0:
-                button.configure(text=f"Run ({remaining})", state="disabled")
-                window.after(1000, tick, remaining - 1)
+            left = approvals.seconds_left(decision)
+            if left > 0:
+                button.configure(text=f"Run ({math.ceil(left)})", state="disabled")
+                window.after(min(250, int(left * 1000) + 10), tick)
             else:
                 button.configure(text="Run", state="normal", command=lambda: self.run_confirmed(decision, window))
 
-        tick(self.COMMAND_CONFIRM_SECONDS)
+        tick()
 
     def run_confirmed(self, decision, window):
-        action = decision["action"]
-        network_gate.note_outside("Developer agent command", action["command"], action.get("description", ""))
+        # app_core.approvals writes the command to the connection log and announces it.
         self.resolve_approval(decision, window, True)
 
     def resolve_approval(self, decision, window, approved):
+        approvals.resolve(decision, approved)
         if not decision["event"].is_set():
-            decision["approved"] = approved
-            decision["event"].set()
+            return  # A command approved before its second check finished: the dialog stays open.
         if window.winfo_exists():
             window.grab_release()
             window.destroy()
