@@ -287,6 +287,19 @@ try:
     cdp.key("Escape", "Escape", 27)
     check("Escape closes the drawer", cdp.wait("!document.getElementById('app').classList.contains('nav-open')", 3))
 
+    # Integrated compute monitor: real authenticated local metrics, no scrolling.
+    cdp.send("Emulation.setDeviceMetricsOverride", width=800, height=480, deviceScaleFactor=1, mobile=False)
+    cdp.js("document.querySelector('.nav-section[data-view=compute]').click()")
+    check("Compute view opens in the modern web workspace",
+          cdp.wait("!!document.querySelector('.compute-grid') && !!document.querySelector('.compute-reading')", 10))
+    check("Compute monitor renders all five fixed panels",
+          cdp.js("document.querySelectorAll('.compute-grid .compute-card').length === 5"))
+    check("Compute monitor shows local-only telemetry",
+          cdp.wait("document.querySelector('.compute-state')?.textContent?.includes('LOCAL')", 35))
+    check("Compute monitor has no internal scrollbars",
+          cdp.js("(() => { let el=document.querySelector('.compute-view'); return el && el.scrollHeight <= el.clientHeight + 1 && el.scrollWidth <= el.clientWidth + 1; })()"))
+    cdp.shot("07-compute-monitor.png")
+
     # Problems the page reported: exceptions, CSP violations, console errors.
     problems = [e for e in cdp.events if e.get("method") == "Runtime.exceptionThrown"
                 or (e.get("method") == "Log.entryAdded" and e["params"]["entry"]["level"] == "error")
