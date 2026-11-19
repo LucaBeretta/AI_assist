@@ -17,7 +17,7 @@ REQUEST = network_gate.Request(kind="Internet connection", target="api.github.co
                                source="update_checker.py line 24", scope="until this task finishes")
 
 
-class GateWindowTests(unittest.TestCase):
+class TkCase(unittest.TestCase):
     def setUp(self):
         try:
             self.root = tk.Tk()
@@ -28,7 +28,8 @@ class GateWindowTests(unittest.TestCase):
         self.app = SimpleNamespace(
             root=self.root, COLORS=OllamaAssistantBase.COLORS,
             button=lambda parent, text, command, *colors, **options: tk.Button(parent, text=text, command=command))
-        for name, value in (("_approver", None), ("_listeners", []), ("_recent", collections.deque(maxlen=300))):
+        for name, value in (("_approver", None), ("_listeners", []), ("_recent", collections.deque(maxlen=300)),
+                            ("_lock_check", None)):
             patcher = patch.object(network_gate, name, value)
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -41,6 +42,8 @@ class GateWindowTests(unittest.TestCase):
             self.root.update()
             time.sleep(0.02)
 
+
+class GateWindowTests(TkCase):
     def test_allowing_takes_two_steps_and_a_pause(self):
         answers = []
         dialog = gate_ui.ApprovalDialog(self.app, REQUEST, answers.append, confirm_seconds=1)
@@ -115,6 +118,73 @@ class GateWindowTests(unittest.TestCase):
         log.close()
         self.root.update()
         self.assertEqual(network_gate._listeners, [])
+
+
+class FakeLock:
+    def __init__(self, summary):
+        self.summary, self.busy, self.runs, self.refreshed = summary, None, [], 0
+
+    def refresh(self):
+        self.refreshed += 1
+
+    def run(self, action, minutes=None):
+        self.runs.append((action, minutes))
+        self.busy = action
+
+    def poll(self):
+        return []
+
+    def blocks(self, kind):
+        return None
+
+
+def lock_summary(state, has_rules=True, programs=(("C:\\Ollama\\ollama.exe", True),)):
+    return {"state": state, "detail": f"{state} detail", "has_rules": has_rules, "can_turn_on": True,
+            "lift_until": None, "ollama_locked": state == "on",
+            "programs": [{"path": path, "covered": active, "active": active} for path, active in programs]}
+
+
+class FirewallLockWindowTests(TkCase):
+    def open(self, summary):
+        fake = FakeLock(summary)
+        ui = gate_ui.FirewallLockUI(self.app, fake)
+        self.addCleanup(ui.close)
+        ui.open()
+        return ui, fake
+
+    def states(self, ui):
+        buttons = [ui.on_button, *ui.lift_buttons, ui.relock_button, ui.off_button]
+        return [str(button.cget("state")) for button in buttons]
+
+    def test_off_offers_turning_on_and_waits_for_approval(self):
+        ui, fake = self.open(lock_summary("off", has_rules=False, programs=(("C:\\Ollama\\ollama.exe", False),)))
+        self.assertEqual(fake.refreshed, 1)
+        self.assertEqual(network_gate._lock_check, fake.blocks)
+        self.assertEqual(self.states(ui), ["normal", "disabled", "disabled", "disabled", "disabled", "disabled"])
+        self.assertIn("open    C:\\Ollama\\ollama.exe", ui.programs_text.get("1.0", "end"))
+        ui.on_button.invoke()
+        self.assertEqual(fake.runs, [("on", None)])
+        self.assertIn("administrator approval", ui.state_label.cget("text"))
+        self.assertEqual(set(self.states(ui)), {"disabled"})
+
+    def test_on_offers_lifting_and_turning_off(self):
+        ui, fake = self.open(lock_summary("on"))
+        self.assertEqual(ui.state_label.cget("text"), "On")
+        self.assertEqual(self.states(ui), ["disabled", "normal", "normal", "normal", "disabled", "normal"])
+        self.assertIn("locked  C:\\Ollama\\ollama.exe", ui.programs_text.get("1.0", "end"))
+        ui.lift_buttons[1].invoke()
+        self.assertEqual(fake.runs, [("lift", 15)])
+
+    def test_lifted_offers_locking_again(self):
+        ui, fake = self.open(lock_summary("lifted"))
+        self.assertEqual(self.states(ui), ["disabled", "disabled", "disabled", "disabled", "normal", "normal"])
+        ui.relock_button.invoke()
+        self.assertEqual(fake.runs, [("relock", None)])
+
+    def test_a_firewall_that_is_off_offers_nothing_but_removal(self):
+        ui, _ = self.open(lock_summary("firewall off"))
+        self.assertEqual(self.states(ui), ["disabled", "disabled", "disabled", "disabled", "disabled", "normal"])
+        self.assertEqual(ui.state_label.cget("text"), "Windows Firewall is off")
 
 
 if __name__ == "__main__":

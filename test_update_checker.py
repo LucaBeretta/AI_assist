@@ -62,6 +62,15 @@ class UpdateTests(unittest.TestCase):
             result = self.check(folder, {"AIassist.py": b"new", "new_module.py": b"new"})
             self.assertEqual(result["differences"], ["AIassist.py", "new_module.py"])
 
+    def test_the_child_gate_loader_is_checked_but_other_subfolders_are_not(self):
+        with tempfile.TemporaryDirectory() as folder:
+            Path(folder, "AIassist.py").write_bytes(b"app")
+            Path(folder, "child_gate").mkdir()
+            Path(folder, "child_gate", "sitecustomize.py").write_bytes(b"old")
+            result = self.check(folder, {"AIassist.py": b"app", "child_gate/sitecustomize.py": b"new",
+                                         "docs/tool.py": b"not shipped"})
+        self.assertEqual(result["differences"], ["child_gate/sitecustomize.py"])
+
     def test_incomplete_tree_is_not_reported_as_current(self):
         with self.assertRaises(ValueError):
             self.check(".", {"AIassist.py": b"app"}, truncated=True)

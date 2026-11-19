@@ -115,12 +115,13 @@ def _process_options():
     return {"start_new_session": True}
 
 
-def _environment():
+def _environment(gated=True):
     env = dict(os.environ)
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONUNBUFFERED"] = "1"
     env.setdefault("NO_COLOR", "1")
-    return env
+    # colibri is Python, so its processes (and the server they start) load the internet gate.
+    return (network_gate.child_environment("colibri", env) if gated else None) or env
 
 
 def parse_json_output(text):
@@ -323,21 +324,26 @@ def set_context(directory, ctx):
 def install_model(directory, model_id, on_progress, cancel_event, poll_seconds=2.0, ctx=None):
     """``coli setup --model ID --yes --json --no-browser``: download (resumable),
     build or fetch the engine, configure, and start the server in the background.
+    With the internet gate on, setup runs with ``--no-start`` and the server is
+    then started separately, so that only the approved download runs ungated.
 
     Cancelling stops the whole process tree; the next run resumes the download."""
     if not isinstance(model_id, str) or not model_id or model_id.startswith("-"):
         raise ColibriError("Choose a colibri model to install.")
     _check_ctx(ctx)
     extra = ["--ctx", str(ctx)] if ctx is not None else []
+    # The approved download runs without the gate; the server it would start must not.
+    gated = network_gate.installed()
+    if gated:
+        extra.append("--no-start")
     command = coli_command(directory, "setup", "--model", model_id, "--yes", "--json", "--no-browser", *extra)
-    # colibri's setup runs as its own program, so the gate asks before starting it.
     if not network_gate.allow_external("colibri model download", model_id,
                                        "colibri downloads the model and its engine files from the internet.",
                                        purpose=f"Install the colibri model {model_id}"):
         raise ColibriError("colibri setup was not started: internet access for this download was not approved.")
     try:
         process = subprocess.Popen(command, cwd=str(Path(command[1]).parent), stdin=subprocess.DEVNULL,
-                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=_environment(),
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=_environment(gated=False),
                                    encoding="utf-8", errors="replace", **_process_options())
     except OSError as error:
         raise ColibriError(f"Could not run colibri setup: {error}") from error
@@ -377,6 +383,10 @@ def install_model(directory, model_id, on_progress, cancel_event, poll_seconds=2
     if process.returncode != 0:
         detail = (output["stderr"].strip() or output["stdout"].strip())[-800:]
         raise ColibriError(f"colibri setup stopped: {detail or 'exit code ' + str(process.returncode)}")
+    if gated:
+        code, stdout, stderr = run_coli(directory, ["start", "--json", "--no-browser"], timeout=120)
+        if code != 0:
+            raise ColibriError("colibri installed the model but could not start: " + (stderr.strip() or stdout.strip())[-600:])
     try:
         return parse_json_output(output["stdout"])
     except ColibriError:

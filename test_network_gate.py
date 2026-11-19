@@ -251,6 +251,33 @@ class OllamaTests(GateTestCase):
         gate._hook("urllib.Request", ("http://127.0.0.1:11434/api/chat", b"{}", {}, "POST"))
         self.assertEqual(self.asked, [])
 
+    def test_a_firewall_lock_refuses_ollama_internet_without_asking(self):
+        def locked(kind):
+            return "The firewall lock is on." if kind.startswith("Ollama") else None
+
+        with patch.object(gate, "_lock_check", locked):
+            with self.assertRaisesRegex(gate.InternetBlocked, "firewall lock is on"):
+                gate._hook("urllib.Request", ("http://127.0.0.1:11434/api/pull", b'{"model": "x"}', {}, "POST"))
+            with self.assertRaisesRegex(gate.InternetBlocked, "firewall lock is on"):
+                self.chat("gpt-oss:120b-cloud")
+            self.answer = True
+            gate._hook("urllib.Request", ("https://example.com/", None, {}, "GET"))
+        self.assertEqual([request.kind for request in self.asked], ["Internet connection"])
+        self.assertEqual([decision for decision, _ in self.decisions()],
+                         ["blocked: firewall lock", "blocked: firewall lock", "allowed"])
+
+    def test_commands_outside_the_gate_are_logged_and_announced(self):
+        with patch.object(gate, "_installed", False):
+            gate.note_outside("Developer agent command", "npm install")
+        self.assertEqual(gate.recent(), [])
+        with patch.object(gate, "_installed", True):
+            gate.note_outside("Developer agent command", "npm\ninstall", "Install packages")
+        entry = gate.recent()[0]
+        self.assertEqual((entry["decision"], entry["target"], entry["purpose"]),
+                         ("ran outside the gate", "npm install", "Install packages"))
+        self.mocks["_notice"].assert_called_once()
+        self.assertIn("cannot check", self.mocks["_notice"].call_args[0][0])
+
     def response(self, payload):
         response = MagicMock()
         response.__enter__.return_value.read.return_value = json.dumps(payload).encode("utf-8")
@@ -351,6 +378,112 @@ print(json.dumps(result))
         self.assertEqual(result["asyncio"], "blocked" if os.name == "nt" else "loaded")
         self.assertEqual([entry["target"] for entry in log][:2], ["example.com", "1.1.1.1 port 80"])
         self.assertTrue(all(entry["decision"] == "blocked: no approval window" for entry in log))
+
+
+CHILD = r"""
+import asyncio, http.server, json, sys, threading, urllib.request
+gate = sys.modules.get("_ai_assist_network_gate")
+if gate is not None:
+    gate._notice = lambda *args: None
+result = {"gate": gate is not None}
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"ok")
+    def log_message(self, *args):
+        pass
+
+server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+threading.Thread(target=server.serve_forever, daemon=True).start()
+result["local"] = urllib.request.urlopen(f"http://127.0.0.1:{server.server_port}/", timeout=5).read().decode()
+
+def outcome(error):
+    return "blocked" if "not approved" in str(error) else repr(error)
+
+try:
+    urllib.request.urlopen("http://gate-test.invalid/", timeout=5)
+    result["web"] = "reached"
+except OSError as error:
+    result["web"] = outcome(error)
+
+async def connect():
+    await asyncio.wait_for(asyncio.open_connection("192.0.2.1", 80), 5)
+
+try:
+    asyncio.run(connect())
+    result["asyncio"] = "reached"
+except OSError as error:
+    result["asyncio"] = outcome(error)
+try:
+    import hf_xet
+    result["native"] = "loaded"
+except ImportError:
+    result["native"] = "refused"
+print(json.dumps(result))
+"""
+
+PARENT = r"""
+import json, subprocess, sys
+import network_gate
+network_gate._notice = lambda *args: None
+network_gate.install()
+asked = []
+network_gate.set_approver(lambda request: asked.append([request.kind, request.target, request.source]) and False)
+done = subprocess.run([sys.executable, "-c", sys.argv[1]], env=network_gate.child_environment("test child"),
+                      capture_output=True, text=True, timeout=60)
+print(json.dumps({"child": done.stdout.strip(), "stderr": done.stderr[-800:], "asked": asked,
+                  "log": [[entry["decision"], entry["target"]] for entry in network_gate.recent()]}))
+"""
+
+
+class ChildProgramTests(unittest.TestCase):
+    """Python programs AI Assist starts send their internet requests back to the app.
+    Internet targets here can never resolve or route (.invalid, 192.0.2.0/24)."""
+
+    def run_python(self, code, *arguments, env=None):
+        completed = subprocess.run([sys.executable, "-c", code, *arguments], cwd=HERE, env=env,
+                                   capture_output=True, text=True, timeout=120)
+        return completed
+
+    def test_a_child_asks_the_app_and_is_blocked_when_refused(self):
+        with tempfile.TemporaryDirectory() as folder:
+            completed = self.run_python(PARENT, CHILD, env=dict(os.environ, AI_ASSIST_DATA_DIR=folder))
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        report = json.loads(completed.stdout.strip().splitlines()[-1])
+        child = json.loads(report["child"].splitlines()[-1]) if report["child"] else {}
+        self.assertEqual(child, {"gate": True, "local": "ok", "web": "blocked", "asyncio": "blocked", "native": "refused"},
+                         report["stderr"])
+        self.assertEqual([target for _, target, _ in report["asked"]], ["gate-test.invalid", "192.0.2.1 port 80"])
+        self.assertTrue(all(source.startswith("test child (process ") for _, _, source in report["asked"]))
+        self.assertEqual(report["log"], [["blocked", "gate-test.invalid"], ["blocked", "192.0.2.1 port 80"]])
+
+    def child_environment(self, folder, gate):
+        return dict(os.environ, PYTHONPATH=str(HERE / "child_gate"), AI_ASSIST_GATE=gate,
+                    AI_ASSIST_GATE_LABEL="orphan", AI_ASSIST_GATE_LOG=str(Path(folder, "network.log")))
+
+    def test_without_the_app_a_child_is_blocked_and_logs_it(self):
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        with tempfile.TemporaryDirectory() as folder:
+            completed = self.run_python(CHILD, env=self.child_environment(folder, f"{port}:token"))
+            log = [json.loads(line) for line in Path(folder, "network.log").read_text(encoding="utf-8").splitlines()]
+        result = json.loads(completed.stdout.strip().splitlines()[-1])
+        self.assertEqual((result["web"], result["asyncio"]), ("blocked", "blocked"), completed.stderr)
+        self.assertTrue(log and all(entry["decision"] == "blocked: AI Assist is not running to approve it" for entry in log))
+
+    def test_a_child_whose_gate_cannot_start_does_not_run(self):
+        with tempfile.TemporaryDirectory() as folder:
+            completed = self.run_python("print('ran')", env=self.child_environment(folder, "not-a-port"))
+        self.assertEqual(completed.returncode, 1)
+        self.assertNotIn("ran", completed.stdout)
+        self.assertIn("could not start", completed.stderr)
+
+    def test_no_child_environment_without_the_gate(self):
+        with patch.object(gate, "_installed", False):
+            self.assertIsNone(gate.child_environment("colibri"))
 
 
 if __name__ == "__main__":

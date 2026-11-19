@@ -8,24 +8,33 @@ registered, it is blocked.
 
 Requests that make another program go online are gated the same way: Ollama
 downloads and uploads, Ollama cloud models, internet links opened in the
-browser, and colibri model installs. Programs that run on their own, such as
-commands the developer agent runs, are separate processes the hook cannot see.
+browser, and colibri model installs. Python programs that AI Assist starts
+(colibri, and Python run by the developer agent's commands) load this gate
+through child_gate/sitecustomize.py and send their requests back here for the
+same approval (``child_environment``). Other programs run outside this
+process: firewall_lock.py covers the AI engines, and every agent command needs
+two confirmations.
 """
 
 import base64
 import collections
 import contextlib
 import dataclasses
+import hmac
+import importlib.machinery
 import ipaddress
 import json
 import os
 from pathlib import Path
 import queue
 import re
+import secrets
 import shutil
 import socket
+import socketserver
 import subprocess
 import sys
+import sysconfig
 import threading
 import time
 import urllib.error
@@ -57,10 +66,22 @@ _OLLAMA_REGISTRY = {
     "/api/create": ("Ollama model creation", "Ollama may download a base model from its online registry."),
 }
 _OLLAMA_MODEL_PATHS = frozenset({"/api/chat", "/api/generate", "/api/embed", "/api/embeddings"})
+# Extensions that open their own connections from native code, out of the hook's sight.
+_NATIVE_NETWORK_MODULES = frozenset({"hf_xet", "hf_transfer", "pycurl"})
+_MAX_MESSAGE_BYTES = 64 * 1024
 _SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]+:")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]+")
 _GATE_FILE = os.path.normcase(os.path.abspath(__file__))
 _APP_DIRECTORY = os.path.dirname(_GATE_FILE)
+_CHILD_GATE_DIRECTORY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "child_gate")
+_LIBRARIES = tuple({os.path.join(os.path.normcase(os.path.abspath(path)), "")
+                    for path in (sysconfig.get_paths().get(name) for name in ("stdlib", "platstdlib", "purelib", "platlib"))
+                    if path})
+_TITLES = {"allowed": "AI Assist went online",
+           "ran outside the gate": "AI Assist ran something the internet gate cannot check",
+           "firewall lock on": "The firewall lock is on",
+           "firewall lock off": "The firewall lock is off",
+           "firewall lock lifted": "The firewall lock is lifted"}
 _UNREADABLE = object()
 
 # Windows PowerShell 5.1 can show a toast through WinRT. The text arrives in
@@ -132,6 +153,11 @@ _last_allowed = None
 _log_directory = None
 _notices = queue.Queue()
 _notice_thread = None
+_lock_check = None
+_child_server = None
+# In a Python program AI Assist started: (port, token, label) of the app that approves.
+_parent = None
+_process_grants = {}
 
 
 # ---------------------------------------------------------------- public API
@@ -149,6 +175,63 @@ def install(log_directory=None):
             raise RuntimeError("asyncio was loaded before the internet gate, and its Windows connections cannot be checked.")
         sys.addaudithook(_hook)
         _installed = True
+
+
+def install_child():
+    """Turn the gate on in a Python program AI Assist started (child_gate/sitecustomize.py).
+    Its requests go to the app for approval; if the app does not answer, they are blocked."""
+    global _installed, _parent, _log_directory
+    port, _, token = os.environ.get("AI_ASSIST_GATE", "").partition(":")
+    with _lock:
+        if _installed:
+            return
+        _parent = (int(port), token, os.environ.get("AI_ASSIST_GATE_LABEL") or "a program AI Assist started")
+        if os.environ.get("AI_ASSIST_GATE_LOG"):
+            _log_directory = Path(os.environ["AI_ASSIST_GATE_LOG"]).parent
+        sys.meta_path.insert(0, _ProactorFinder())
+        sys.addaudithook(_hook)
+        _installed = True
+
+
+def child_environment(label, base=None):
+    """The environment for a Python program AI Assist starts, so that its internet
+    requests come back here for approval. None when the gate is off."""
+    global _child_server
+    if not _installed or _parent is not None:
+        return None
+    with _lock:
+        if _child_server is None:
+            server = _ChildServer(("127.0.0.1", 0), _ChildRequests)
+            server.token = secrets.token_hex(16)
+            threading.Thread(target=server.serve_forever, name="internet-gate-children", daemon=True).start()
+            _child_server = server
+        server = _child_server
+    environment = dict(os.environ if base is None else base)
+    paths = [_CHILD_GATE_DIRECTORY] + ([environment["PYTHONPATH"]] if environment.get("PYTHONPATH") else [])
+    environment.update(PYTHONPATH=os.pathsep.join(paths), AI_ASSIST_GATE_LABEL=label,
+                       AI_ASSIST_GATE=f"{server.server_address[1]}:{server.token}",
+                       AI_ASSIST_GATE_LOG=str(log_path()))
+    return environment
+
+
+def set_lock_check(check):
+    """``check(kind) -> str or None``: why another program cannot go online right now."""
+    global _lock_check
+    _lock_check = check
+
+
+def note(decision, kind, target, purpose="", notify=True):
+    """Log, and announce, an event the gate does not decide itself, such as a firewall lock change."""
+    if not _installed:
+        return
+    current = _current_task()
+    _record(decision, Request(kind, _CONTROL.sub(" ", str(target))[:300],
+                              purpose or (current.purpose if current else ""), "", _source(), ""), notify=notify)
+
+
+def note_outside(kind, target, purpose=""):
+    """Log and announce something that runs where the gate cannot see, such as an agent command."""
+    note("ran outside the gate", kind, target, purpose)
 
 
 def installed():
@@ -277,7 +360,7 @@ def _hook(event, args):
         return
     try:
         _check(event, args)
-    except InternetBlocked:
+    except (InternetBlocked, ImportError):
         raise
     except Exception as error:
         raise InternetBlocked(f"Internet access was blocked: the gate could not check {event} ({error}).") from None
@@ -285,7 +368,11 @@ def _hook(event, args):
 
 def _check(event, args):
     if event == "import":
-        if args and args[0] == "_overlapped":
+        name = args[0] if args else ""
+        if name in _NATIVE_NETWORK_MODULES:
+            raise ImportError(f"{name} goes online from native code the internet gate cannot check, so it is not loaded.")
+        # Programs AI Assist starts gate asyncio's Windows connections instead (_ProactorFinder).
+        if name == "_overlapped" and _parent is None:
             raise InternetBlocked("asyncio's Windows connections bypass the internet gate, so AI Assist does not load them.")
     elif event == "urllib.Request":
         _check_request(args[0], args[1] if len(args) > 1 else None)
@@ -340,7 +427,7 @@ def _address_granted(ip):
     grants = _grants()
     for key, grant in list(grants.items()):
         if not grant.valid():
-            del grants[key]
+            grants.pop(key, None)
         elif ip in grant.addresses:
             return True
     # DNS answers can rotate between the gate's lookup and the caller's.
@@ -378,6 +465,7 @@ def _check_request(url, data):
         kind, sends = _OLLAMA_REGISTRY[path]
         model = _body_model(data)
         name = model if isinstance(model, str) else "a model"
+        _refuse_if_locked(kind, f"{name} (Ollama contacts its online registry)", sends)
         _authorize(("ollama", path, name), kind, f"{name} (Ollama contacts its online registry)", sends)
     elif path in _OLLAMA_MODEL_PATHS:
         model = _body_model(data)
@@ -391,8 +479,9 @@ def _check_request(url, data):
                                   "this computer. Start Ollama and try again.")
         if remote:
             current = _current_task()
-            _authorize(("ollama cloud", model), "Ollama cloud model", f"{model} (runs on Ollama's servers)",
-                       current.sends if current and current.sends else "Your message and the conversation sent with it.")
+            sends = current.sends if current and current.sends else "Your message and the conversation sent with it."
+            _refuse_if_locked("Ollama cloud model", f"{model} (runs on Ollama's servers)", sends)
+            _authorize(("ollama cloud", model), "Ollama cloud model", f"{model} (runs on Ollama's servers)", sends)
 
 
 def _body_model(data):
@@ -463,6 +552,10 @@ def _check_link(target):
 
 
 def _grants():
+    # A program AI Assist started has no tasks, and asyncio looks names up on one
+    # thread and connects on another, so its approvals cover the whole process.
+    if _parent is not None:
+        return _process_grants
     grants = getattr(_local, "grants", None)
     if grants is None:
         grants = _local.grants = {}
@@ -492,7 +585,19 @@ def _authorize(key, kind, target, sends=""):
     return grant
 
 
+def _refuse_if_locked(kind, target, sends):
+    check = _lock_check
+    reason = check(kind) if check is not None else None
+    if reason:
+        current = _current_task()
+        _record("blocked: firewall lock", Request(kind, target, current.purpose if current else "", sends,
+                                                  _source(), "not started"), notify=True)
+        raise InternetBlocked(reason)
+
+
 def _ask(key, request):
+    if _parent is not None:
+        return _ask_parent(request)
     main = threading.current_thread() is threading.main_thread()
     with _lock:
         now = time.monotonic()
@@ -535,11 +640,108 @@ def _ask(key, request):
 def _source():
     frame = sys._getframe(1)
     while frame is not None:
-        path = os.path.normcase(os.path.abspath(frame.f_code.co_filename))
-        if path != _GATE_FILE and os.path.dirname(path) == _APP_DIRECTORY:
-            return f"{os.path.basename(frame.f_code.co_filename)} line {frame.f_lineno}"
+        filename = frame.f_code.co_filename
+        path = os.path.normcase(os.path.abspath(filename))
+        if path != _GATE_FILE:
+            if _parent is None and os.path.dirname(path) == _APP_DIRECTORY:
+                return f"{os.path.basename(filename)} line {frame.f_lineno}"
+            # In a program AI Assist started, name the program's own code, not its libraries.
+            if (_parent is not None and not filename.startswith("<") and not path.startswith(_LIBRARIES)
+                    and "site-packages" not in path):
+                folder = os.path.basename(os.path.dirname(filename))
+                return f"{folder}/{os.path.basename(filename)} line {frame.f_lineno}"
         frame = frame.f_back
-    return "code outside AI Assist's own files"
+    return "code outside AI Assist's own files" if _parent is None else "the program's Python libraries"
+
+
+# ---------------------------------------------------------------- Python programs AI Assist starts
+
+
+class _ChildServer(socketserver.ThreadingTCPServer):
+    daemon_threads = True
+
+
+class _ChildRequests(socketserver.StreamRequestHandler):
+    """One approval request from a program AI Assist started, answered after a person decides."""
+
+    def handle(self):
+        try:
+            self.connection.settimeout(30)
+            message = json.loads(self.rfile.readline(_MAX_MESSAGE_BYTES + 1))
+            token = str(message.get("token", "")).encode("utf-8") if isinstance(message, dict) else b""
+            if not hmac.compare_digest(token, self.server.token.encode("ascii")):
+                return
+            self.connection.settimeout(None)
+            approved = _ask_for_child(message)
+            self.wfile.write(json.dumps({"approved": approved}).encode("utf-8") + b"\n")
+        except (OSError, ValueError):
+            pass
+
+
+def _ask_for_child(message):
+    def text(key, limit=500):
+        return _CONTROL.sub(" ", str(message.get(key) or ""))[:limit]
+
+    label = text("label", 80) or "a program AI Assist started"
+    request = Request(kind=text("kind", 80), target=text("target", 300), purpose=text("purpose"),
+                      sends=text("sends"), scope=text("scope", 120),
+                      source=f"{label} (process {text('pid', 12)}): {text('source', 200)}")
+    return _ask(("child", label, request.kind, request.target), request)
+
+
+def _ask_parent(request):
+    port, token, label = _parent
+    message = dict(dataclasses.asdict(request), type="ask", token=token, label=label, pid=os.getpid())
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=10) as connection:
+            connection.sendall(json.dumps(message).encode("utf-8") + b"\n")
+            connection.settimeout(None)
+            with connection.makefile("rb") as reply:
+                answer = json.loads(reply.readline(_MAX_MESSAGE_BYTES + 1) or b"{}")
+    except (OSError, ValueError):
+        _record("blocked: AI Assist is not running to approve it", request, notify=True)
+        return False
+    return isinstance(answer, dict) and answer.get("approved") is True
+
+
+class _ProactorFinder:
+    """asyncio's Windows event loop connects through IOCP, which raises no audit
+    events. In programs AI Assist starts, its connect and sendto are gated instead."""
+
+    def find_spec(self, name, path=None, target=None):
+        if name != "asyncio.windows_events":
+            return None
+        spec = importlib.machinery.PathFinder.find_spec(name, path)
+        if spec is not None and spec.loader is not None:
+            spec.loader = _ProactorLoader(spec.loader)
+        return spec
+
+
+class _ProactorLoader:
+    def __init__(self, loader):
+        self._loader = loader
+
+    def __getattr__(self, name):
+        return getattr(self._loader, name)
+
+    def create_module(self, spec):
+        return self._loader.create_module(spec)
+
+    def exec_module(self, module):
+        self._loader.exec_module(module)
+        proactor = module.IocpProactor
+        connect, sendto = proactor.connect, proactor.sendto
+
+        def gated_connect(self, conn, address):
+            _hook("socket.connect", (conn, address))
+            return connect(self, conn, address)
+
+        def gated_sendto(self, conn, buf, flags=0, addr=None):
+            if addr is not None:
+                _hook("socket.sendto", (conn, addr))
+            return sendto(self, conn, buf, flags, addr)
+
+        proactor.connect, proactor.sendto = gated_connect, gated_sendto
 
 
 # ---------------------------------------------------------------- log and notifications
@@ -562,7 +764,8 @@ def _record(decision, request, notify=False):
         except Exception:
             pass
     if notify:
-        title = "AI Assist went online" if decision == "allowed" else "AI Assist blocked internet access"
+        title = _TITLES.get(decision) or ("AI Assist blocked internet access" if decision.startswith("blocked")
+                                          else "AI Assist internet gate")
         reason = f" ({request.purpose})" if request.purpose else ""
         _notice(title, f"{request.kind}: {request.target}{reason}", (decision, request.target))
 

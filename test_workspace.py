@@ -479,6 +479,28 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         self.assertFalse(self.app.approvals)
         self.assertFalse((self.project / "new.py").exists())
 
+    def test_commands_need_a_second_confirmation_after_a_pause(self):
+        decision = dict(approved=False, event=threading.Event(), action=dict(
+            kind="run_command", command="python -m pytest", cwd=str(self.project), description="Run the tests"))
+        with patch.object(type(self.app), "COMMAND_CONFIRM_SECONDS", 1), \
+                patch("workspace_ui.network_gate.note_outside") as noted:
+            self.app.review_action(decision)
+            window = self.app.approvals[-1][1]
+            run = next(widget for widget in descendants(window)
+                       if isinstance(widget, tk.Button) and widget.cget("text") == "Run command")
+            run.invoke()
+            labels = [widget.cget("text") for widget in descendants(window) if isinstance(widget, tk.Label)]
+            self.assertIn("Second check: run this command?", labels)
+            self.assertTrue(any("outside the internet gate" in text for text in labels))
+            self.assertEqual((run.cget("text"), str(run.cget("state"))), ("Run (1)", "disabled"))
+            run.invoke()
+            self.assertFalse(decision["event"].is_set())
+            self.wait_for(lambda: run.cget("text") == "Run", "unlocked Run button")
+            run.invoke()
+        self.assertTrue(decision["approved"])
+        noted.assert_called_once_with("Developer agent command", "python -m pytest", "Run the tests")
+        self.assertFalse(self.app.approvals)
+
     def test_picking_another_file_returns_destination_for_fresh_review(self):
         chosen = self.folder / "chosen.py"
         decision = dict(approved=False, event=threading.Event(), action=dict(kind="write_file",

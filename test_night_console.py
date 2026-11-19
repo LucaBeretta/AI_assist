@@ -9,6 +9,7 @@ import tempfile
 import threading
 import time
 import tkinter as tk
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -156,6 +157,17 @@ class NightConsoleUITests(unittest.TestCase):
         self.app.status_bar.open_connection_log()
         self.assertTrue(self.app.connection_log.window.winfo_exists())
         self.app.connection_log.close()
+
+    def test_privacy_shows_the_firewall_lock(self):
+        lock = SimpleNamespace(summary={"state": "on", "has_rules": True})
+        self.app.firewall = SimpleNamespace(lock=lock, close=lambda: None)
+        self.assertTrue(self.app.status_bar.snapshot()["privacy"].endswith(" · firewall on"))
+        lock.summary = {"state": "lifted", "has_rules": True, "lift_until": time.time() + 600}
+        values = self.app.status_bar.snapshot()
+        self.assertIn("firewall lifted until", values["privacy"])
+        self.assertEqual(values["privacy_role"], "amber")
+        lock.summary = {"state": "off", "has_rules": False}
+        self.assertEqual(self.app.status_bar.snapshot()["privacy"], "local only")
 
 
 if __name__ == "__main__":

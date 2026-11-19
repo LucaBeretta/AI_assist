@@ -15,6 +15,7 @@ import webbrowser
 import network_gate
 
 
+SHIPPED_SUBFOLDER_FILE = ("child_gate", "sitecustomize.py")
 REPOSITORY = "https://github.com/LucaBeretta/AI_assist"
 API = "https://api.github.com/repos/LucaBeretta/AI_assist"
 
@@ -52,10 +53,12 @@ def check_update(directory):
     files = {}
     for item in tree["tree"]:
         path = PurePosixPath(item["path"])
-        # The application currently ships its runtime modules and launcher at root.
-        if (item["type"] == "blob" and len(path.parts) == 1
+        # The application ships its runtime modules and launcher at root, plus the
+        # internet gate's loader for the Python programs it starts.
+        shipped = len(path.parts) == 1 or path.parts == SHIPPED_SUBFOLDER_FILE
+        if (item["type"] == "blob" and shipped
                 and path.suffix in (".py", ".cmd") and not path.name.startswith("test_")):
-            files[path.name] = item["sha"]
+            files[path.as_posix()] = item["sha"]
     if "AIassist.py" not in files:
         raise ValueError("The GitHub file list does not contain AI Assist.")
     differences = []

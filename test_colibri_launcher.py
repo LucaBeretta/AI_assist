@@ -253,6 +253,14 @@ class LauncherTests(unittest.TestCase):
         with self.assertRaises(colibri_client.ColibriError):
             colibri_client.install_model(self.colibri, "--yes", lambda *item: None, cancel)
 
+    def test_with_the_internet_gate_on_only_the_download_runs_unchecked(self):
+        with patch("colibri_launcher.network_gate.installed", return_value=True):
+            colibri_client.install_model(self.colibri, "qwen3-coder-30b", lambda *item: None, threading.Event(),
+                                         poll_seconds=0.05)
+        calls = self.calls()
+        setup = calls.index("setup --model qwen3-coder-30b --yes --json --no-browser --no-start")
+        self.assertGreater(calls.index("start --json --no-browser"), setup)
+
     def test_context_on_install_and_change(self):
         colibri_client.install_model(self.colibri, "qwen3-coder-30b", lambda *item: None, threading.Event(),
                                      poll_seconds=0.05, ctx=16384)

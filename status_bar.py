@@ -18,6 +18,9 @@ import network_gate
 MONO_CANDIDATES = ("Cascadia Mono", "Cascadia Code", "Consolas", "SF Mono", "Menlo",
                    "JetBrains Mono", "DejaVu Sans Mono", "Liberation Mono", "Courier New")
 AGENT_MAX_STEPS = 12
+FIREWALL_WARNINGS = {"lifted": "firewall lifted until {until}", "partial": "firewall lock incomplete",
+                     "changed": "firewall lock changed", "disabled": "firewall lock off",
+                     "firewall off": "windows firewall off"}
 
 
 def mono_family(root):
@@ -177,6 +180,15 @@ class StatusBar:
         else:
             privacy = "local only · internet locked" if gate["installed"] else "local only"
             privacy_role = "success"
+        lock = getattr(getattr(app, "firewall", None), "lock", None)
+        summary = getattr(lock, "summary", None) or {}
+        state = summary.get("state")
+        if state == "on":
+            privacy += " · firewall on"
+        elif state in FIREWALL_WARNINGS and summary.get("has_rules"):
+            until = summary.get("lift_until")
+            privacy += " · " + FIREWALL_WARNINGS[state].format(until=time.strftime("%H:%M", time.localtime(until)) if until else "")
+            privacy_role = "amber"
         return {
             "engine": f"{engine.lower()} {state}", "engine_role": "success" if state == "ready" else "muted",
             "model": model_text, "context": context_text, "fraction": fraction,

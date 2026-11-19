@@ -1,10 +1,12 @@
-"""The internet gate's windows: the two-step approval and the connection log."""
+"""The internet gate's windows: the two-step approval, the connection log, and the firewall lock."""
 
 import queue
 import threading
+import time
 import tkinter as tk
 from tkinter import scrolledtext
 
+import firewall_lock
 import network_gate
 from status_bar import mono_family
 
@@ -261,6 +263,7 @@ class ConnectionLog:
                                                      bg=c["surface"], fg=c["ink"], borderwidth=0, height=16)
         text.tag_configure("allowed", foreground=c["amber"])
         text.tag_configure("blocked", foreground=c["error"])
+        text.tag_configure("safe", foreground=c["success"])
         text.tag_configure("detail", foreground=c["muted"])
         text.pack(fill="both", expand=True, padx=22)
         entries = network_gate.recent()
@@ -276,8 +279,9 @@ class ConnectionLog:
     def add(self, entry):
         text = self.text
         text.configure(state="normal")
-        tag = "allowed" if entry["decision"] == "allowed" else "blocked"
-        text.insert("end", f"{entry['time']}  {entry['decision'].upper()}  ", tag)
+        decision = entry["decision"]
+        tag = "blocked" if decision.startswith("blocked") else "safe" if decision == "firewall lock on" else "allowed"
+        text.insert("end", f"{entry['time']}  {decision.upper()}  ", tag)
         text.insert("end", f"{entry['kind']}: {entry['target']}\n")
         text.insert("end", f"    why: {entry['purpose'] or 'not declared'} · asked by {entry['source']}\n", "detail")
         text.configure(state="disabled")
@@ -300,5 +304,176 @@ class ConnectionLog:
             self.entries = queue.Queue()
 
     def close(self):
+        if self.window is not None and self.window.winfo_exists():
+            self.window.destroy()
+
+
+class FirewallLockUI:
+    """Settings > Firewall lock: Windows Firewall rules that keep the AI engines off the internet."""
+
+    POLL_MS = 400
+    STATES = {
+        "on": ("On", "success"), "off": ("Off", "muted"), "partial": ("Partly on", "amber"),
+        "changed": ("Changed outside AI Assist", "amber"), "lifted": ("Lifted", "amber"),
+        "disabled": ("Off: the rules are turned off", "amber"), "firewall off": ("Windows Firewall is off", "error"),
+        "ignored": ("Not possible on this PC", "error"), "unavailable": ("Not available", "muted"),
+        "error": ("Could not read the firewall", "error"),
+    }
+    WORKING = {
+        "checking": "Checking Windows Firewall...", "on": "Waiting for administrator approval to turn the lock on...",
+        "off": "Waiting for administrator approval to turn the lock off...",
+        "relock": "Waiting for administrator approval to lock again...",
+        "lift": "Waiting for administrator approval to lift the lock...",
+    }
+    DONE = {"on": "The lock is on.", "off": "The lock is off.", "relock": "The lock is on again.",
+            "lift": "The lock is lifted. It turns back on by itself."}
+    INTRO = ("Ollama runs as its own programs, outside AI Assist's internet gate. The firewall lock adds Windows "
+             "Firewall rules that block those programs from internet addresses: even when AI Assist is closed, and "
+             "when you use Ollama directly. This computer and your local network keep working. Every change needs "
+             "administrator approval, and a startup task turns the lock back on after a restart.")
+    NOTE = ("colibri runs on Python, so the internet gate checks it from inside instead. Commands the developer "
+            "agent runs can be any program, so Windows cannot lock them without cutting off this whole PC: Python "
+            "they start is checked by the gate, and every command needs two confirmations.")
+
+    def __init__(self, app, lock=None):
+        self.app = app
+        self.lock = lock if lock is not None else firewall_lock.Lock(lambda: getattr(app, "colibri_dir", None))
+        self.window = None
+        self.message = ""
+        self.closed = False
+        network_gate.set_lock_check(self.lock.blocks)
+        self.lock.refresh()
+        self.poll_id = app.root.after(self.POLL_MS, self.poll)
+
+    def poll(self):
+        if self.closed:
+            return
+        for action, error in self.lock.poll():
+            self.finished(action, error)
+        summary = self.lock.summary
+        if (summary and summary.get("state") == "lifted" and not self.lock.busy
+                and time.time() > (summary.get("lift_until") or 0) + 5):
+            self.lock.refresh()
+        if self.window is not None and self.window.winfo_exists():
+            self.render()
+        try:
+            self.poll_id = self.app.root.after(self.POLL_MS, self.poll)
+        except tk.TclError:
+            pass
+
+    def finished(self, action, error):
+        if error:
+            self.message = error
+            return
+        self.message = self.DONE.get(action, "")
+        summary = self.lock.summary or {}
+        locked = sum(1 for row in summary.get("programs", []) if row.get("active"))
+        if action in ("on", "relock"):
+            network_gate.note("firewall lock on", "Firewall lock", f"{locked} engine program(s) blocked from the internet")
+        elif action == "off":
+            network_gate.note("firewall lock off", "Firewall lock", "Ollama can reach the internet by itself")
+        elif action == "lift" and summary.get("lift_until"):
+            until = time.strftime("%H:%M", time.localtime(summary["lift_until"]))
+            network_gate.note("firewall lock lifted", "Firewall lock", f"Ollama can reach the internet until {until}")
+
+    def act(self, action, minutes=None):
+        self.message = ""
+        self.lock.run(action, minutes)
+        self.render()
+
+    def open(self):
+        if self.window is not None and self.window.winfo_exists():
+            self.window.lift()
+            return
+        app, c = self.app, self.app.COLORS
+        window = self.window = tk.Toplevel(app.root)
+        window.title("Firewall lock")
+        window.geometry("760x620")
+        window.minsize(600, 480)
+        window.configure(bg=c["background"])
+
+        def label(text="", size=10, weight="normal", color="muted", pady=(0, 8)):
+            widget = tk.Label(window, text=text, bg=c["background"], fg=c[color], font=("Segoe UI", size, weight),
+                              anchor="w", justify="left", wraplength=700)
+            widget.pack(fill="x", padx=22, pady=pady)
+            return widget
+
+        label("Firewall lock", 15, "bold", "ink", (18, 4))
+        label(self.INTRO, pady=(0, 12))
+        self.state_label = label(size=12, weight="bold", color="ink", pady=(0, 2))
+        self.detail_label = label(pady=(0, 8))
+        footer = tk.Frame(window, bg=c["background"])
+        footer.pack(side="bottom", fill="x", padx=22, pady=(4, 16))
+        app.button(footer, "Close", window.destroy, c["user"], c["ink"], c["border"]).pack(side="right")
+        self.refresh_button = app.button(footer, "Check again", self.lock.refresh, c["user"], c["ink"], c["border"])
+        self.refresh_button.pack(side="right", padx=(0, 10))
+        self.message_label = tk.Label(footer, bg=c["background"], fg=c["amber"], font=("Segoe UI", 10),
+                                      anchor="w", justify="left", wraplength=480)
+        self.message_label.pack(side="left", fill="x", expand=True)
+        tk.Label(window, text=self.NOTE, bg=c["background"], fg=c["muted"], font=("Segoe UI", 9), anchor="w",
+                 justify="left", wraplength=700).pack(side="bottom", fill="x", padx=22, pady=(8, 0))
+        actions = tk.Frame(window, bg=c["background"])
+        actions.pack(side="bottom", fill="x", padx=22, pady=(10, 0))
+        self.on_button = app.button(actions, "Turn on", lambda: self.act("on"), c["accent"], c["on_accent"], c["accent_hover"])
+        self.on_button.pack(side="left")
+        self.lift_buttons = []
+        for minutes in firewall_lock.LIFT_MINUTES:
+            button = app.button(actions, f"Lift {minutes} min", lambda minutes=minutes: self.act("lift", minutes),
+                                c["user"], c["ink"], c["border"])
+            button.pack(side="left", padx=(8, 0))
+            self.lift_buttons.append(button)
+        self.relock_button = app.button(actions, "Lock again now", lambda: self.act("relock"), c["user"], c["ink"], c["border"])
+        self.relock_button.pack(side="left", padx=(8, 0))
+        self.off_button = app.button(actions, "Turn off", lambda: self.act("off"), c["user"], c["ink"], c["border"])
+        self.off_button.pack(side="right")
+        self.programs_text = scrolledtext.ScrolledText(window, height=8, wrap="none", font=(mono_family(app.root), 9),
+                                                       bg=c["surface"], fg=c["ink"], borderwidth=0)
+        self.programs_text.tag_configure("locked", foreground=c["success"])
+        self.programs_text.tag_configure("open", foreground=c["amber"])
+        self.programs_text.pack(fill="both", expand=True, padx=22)
+        self.render()
+
+    def render(self):
+        summary, busy, c = self.lock.summary, self.lock.busy, self.app.COLORS
+        state = summary.get("state") if summary else None
+        if busy:
+            title, role = self.WORKING.get(busy, "Working..."), "accent"
+        elif summary is None:
+            title, role = self.WORKING["checking"], "accent"
+        else:
+            title, role = self.STATES.get(state, (state, "muted"))
+        self.state_label.configure(text=title, fg=c[role])
+        self.detail_label.configure(text=summary.get("detail", "") if summary else "")
+        self.message_label.configure(text=self.message)
+        lines = [("locked  " if row["active"] else "open    ", "locked" if row["active"] else "open",
+                  row["path"] + ("  (no longer installed)" if row.get("gone") else ""))
+                 for row in (summary or {}).get("programs", [])]
+        self.programs_text.configure(state="normal")
+        self.programs_text.delete("1.0", "end")
+        for status, tag, path in lines:
+            self.programs_text.insert("end", status, tag)
+            self.programs_text.insert("end", path + "\n")
+        if summary is not None and not lines:
+            self.programs_text.insert("end", "No engine programs found.\n")
+        self.programs_text.configure(state="disabled")
+        has_rules = bool(summary and summary.get("has_rules"))
+
+        def allow(button, condition):
+            button.configure(state="normal" if condition and not busy else "disabled")
+
+        self.on_button.configure(text="Turn on again" if has_rules else "Turn on")
+        allow(self.on_button, state in ("off", "partial", "changed", "disabled") and bool(summary and summary.get("can_turn_on")))
+        for button in self.lift_buttons:
+            allow(button, state in ("on", "partial", "changed"))
+        allow(self.relock_button, state in ("lifted", "disabled"))
+        allow(self.off_button, has_rules)
+        allow(self.refresh_button, True)
+
+    def close(self):
+        self.closed = True
+        try:
+            self.app.root.after_cancel(self.poll_id)
+        except tk.TclError:
+            pass
         if self.window is not None and self.window.winfo_exists():
             self.window.destroy()

@@ -12,7 +12,7 @@ import urllib.error
 import urllib.request
 import urllib.parse
 
-from gate_ui import ConnectionLog
+from gate_ui import ConnectionLog, FirewallLockUI
 import network_gate
 from model_downloads import ModelDownloadDialog
 from workspace_ui import WorkspaceMixin
@@ -702,12 +702,16 @@ class OllamaAssistantBase:
             self.connection_log = ConnectionLog(self)
         self.connection_log.open()
 
+    def open_firewall_lock(self, event=None):
+        if getattr(self, "firewall", None) is None:
+            self.firewall = FirewallLockUI(self)
+        self.firewall.open()
+
     def close(self):
         self.closed = True
-        if getattr(self, "gate_ui", None) is not None:
-            self.gate_ui.close()
-        if getattr(self, "connection_log", None) is not None:
-            self.connection_log.close()
+        for part in ("gate_ui", "connection_log", "firewall"):
+            if getattr(self, part, None) is not None:
+                getattr(self, part).close()
         if self.download_dialog is not None:
             self.download_dialog.close(force=True)
         if hasattr(self, "poll_id"):
@@ -730,4 +734,5 @@ if __name__ == "__main__":
         raise SystemExit(f"AI Assist could not start: {error}") from None
     app = AIAssistantGUI(root)
     app.gate_ui = GateUI(app)
+    app.firewall = FirewallLockUI(app)
     root.mainloop()

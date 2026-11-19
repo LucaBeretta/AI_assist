@@ -17,6 +17,7 @@ from chat_store import ChatStore
 from coding_agent import FILE_LIMIT_CHOICES, estimate_tokens, run_agent
 from developer_tools import build_project_context, extract_code_blocks, fetch_model_capabilities, list_project_files, read_project_file
 from message_widgets import render_message
+import network_gate
 from response_metrics import metrics_summary, response_metrics
 from shared_memory import MAX_NOTES, SharedMemory, memory_note
 from appearance import DARK_THEMES, Appearance
@@ -326,6 +327,7 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         self.settings_menu.add_separator()
         self.settings_menu.add_command(label="Check for updates...", command=lambda: self.update_checker.open())
         self.settings_menu.add_command(label="Connection log...", command=self.open_connection_log)
+        self.settings_menu.add_command(label="Firewall lock...", command=self.open_firewall_lock)
         self.menubar.add_cascade(label="Settings", menu=self.settings_menu)
         self.root.configure(menu=self.menubar)
         self.main_frame = tk.Frame(self.root, bg=c["background"])
@@ -1376,19 +1378,23 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         window.grab_set()
         self.approvals.append((decision, window))
         title = f"Change {action.get('path', '')}" if action["kind"] == "write_file" else "Run this command?"
-        tk.Label(window, text=title, bg=c["background"], fg=c["ink"], font=("Segoe UI", 15, "bold"), wraplength=760, anchor="w").pack(fill="x", padx=22, pady=(20, 10))
+        heading = tk.Label(window, text=title, bg=c["background"], fg=c["ink"], font=("Segoe UI", 15, "bold"), wraplength=760, anchor="w")
+        heading.pack(fill="x", padx=22, pady=(20, 10))
         if action["kind"] == "run_command":
-            detail = (f"Folder: {action.get('cwd', self.project_path)}\nRuns with your account. Review the command before running.\n"
-                      "It runs as a separate program: the internet gate cannot see or block its connections.")
+            detail = f"Folder: {action.get('cwd', self.project_path)}\nRuns with your account. Review the command before running."
             text = action["command"]
         else:
             detail = f"Destination: {action.get('destination', str(Path(self.project_path) / action.get('path', '')))}\nReview the exact proposed changes before applying them."
             text = action.get("diff") or action.get("content", "")
-        tk.Label(window, text=detail, bg=c["background"], fg=c["muted"], font=("Segoe UI", 10), wraplength=760, justify="left", anchor="w").pack(fill="x", padx=22, pady=(0, 10))
+        details = tk.Label(window, text=detail, bg=c["background"], fg=c["muted"], font=("Segoe UI", 10), wraplength=760, justify="left", anchor="w")
+        details.pack(fill="x", padx=22, pady=(0, 10))
         buttons = tk.Frame(window, bg=c["background"])
         buttons.pack(side="bottom", fill="x", padx=22, pady=18)
-        self.button(buttons, "Apply change" if action["kind"] == "write_file" else "Run command",
-                    lambda: self.resolve_approval(decision, window, True), c["accent"], "white", c["accent_hover"]).pack(side="right")
+        primary = self.button(buttons, "Apply change" if action["kind"] == "write_file" else "Run command",
+                              lambda: self.resolve_approval(decision, window, True), c["accent"], "white", c["accent_hover"])
+        if action["kind"] == "run_command":
+            primary.configure(command=lambda: self.confirm_command(decision, window, heading, details, primary))
+        primary.pack(side="right")
         self.button(buttons, "Reject", lambda: self.resolve_approval(decision, window, False), c["user"], c["ink"], c["border"]).pack(side="right", padx=10)
         body = scrolledtext.ScrolledText(window, wrap="none", font=("Consolas", 10), bg=c["surface"], fg=c["ink"], borderwidth=0)
         body.pack(fill="both", expand=True, padx=22)
@@ -1398,6 +1404,31 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
             body.insert(END, line, "add" if line.startswith("+") else "remove" if line.startswith("-") else ())
         body.config(state="disabled")
         window.protocol("WM_DELETE_WINDOW", lambda: self.resolve_approval(decision, window, False))
+
+    COMMAND_CONFIRM_SECONDS = 3
+
+    def confirm_command(self, decision, window, heading, details, button):
+        """The second check before a command runs: it is a separate program the internet gate cannot see."""
+        heading.configure(text="Second check: run this command?")
+        details.configure(fg=self.COLORS["amber"], text=(
+            "It runs as a separate program, outside the internet gate. If it uses the internet, AI Assist cannot "
+            "see or stop it; only Python that it starts is still checked. Run it only if you expect what it does."))
+
+        def tick(remaining):
+            if not window.winfo_exists() or decision["event"].is_set():
+                return
+            if remaining > 0:
+                button.configure(text=f"Run ({remaining})", state="disabled")
+                window.after(1000, tick, remaining - 1)
+            else:
+                button.configure(text="Run", state="normal", command=lambda: self.run_confirmed(decision, window))
+
+        tick(self.COMMAND_CONFIRM_SECONDS)
+
+    def run_confirmed(self, decision, window):
+        action = decision["action"]
+        network_gate.note_outside("Developer agent command", action["command"], action.get("description", ""))
+        self.resolve_approval(decision, window, True)
 
     def resolve_approval(self, decision, window, approved):
         if not decision["event"].is_set():
