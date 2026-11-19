@@ -336,9 +336,58 @@ window.app = (() => {
     element("chats").replaceChildren(...nodes);
   }
 
+  const projectsById = new Map();
+  let editingProject = null;
+
+  function envLabel(environment) {
+    if (!environment?.model) return "no model set";
+    return `${environment.model} · ${environment.context_length ? tokens(environment.context_length) + " ctx" : "auto ctx"}`;
+  }
+
+  function renderProjectBar() {
+    const project = projectsById.get(selectedProject);
+    element("project-bar").hidden = !project;
+    if (!project) return;
+    element("project-bar-name").textContent = project.name;
+    const parts = [envLabel(project.default_environment)];
+    if (project.folder) parts.push(project.folder);
+    if (project.instructions) parts.push("instructions set");
+    element("project-bar-meta").textContent = parts.join(" · ");
+  }
+
+  function currentEnvironment(base) {
+    const context = Number(element("context").value) || null;
+    return {backend: "Ollama", instructions: "", pinned_paths: [], memory_ids: [], ...(base || {}),
+            model: element("model").value || "", context_length: context};
+  }
+
+  function openProjectDialog(project) {
+    editingProject = project || null;
+    element("project-title").textContent = project ? "Edit project" : "New project";
+    element("project-submit").textContent = project ? "Save" : "Create project";
+    element("project-delete").hidden = !project;
+    element("project-name").value = project?.name || "";
+    element("project-instructions").value = project?.instructions || "";
+    element("project-folder").value = project?.folder || "";
+    element("project-use-env").checked = !project || !project.default_environment?.model;
+    element("project-env-label").textContent = "(" + envLabel(currentEnvironment()) + ")";
+    openDialog("project-dialog");
+  }
+
+  async function browseFolder(input) {
+    try {
+      const result = await call("choose_folder");
+      if (!result.cancelled) { element(input).value = result.path; element(input).dispatchEvent?.(new Event("change")); }
+    } catch (error) { showError(error); }
+  }
+
   async function refreshProjects() {
     if (!window.pywebview?.api?.list_projects) return;
     const result = await call("list_projects");
+    projectsById.clear();
+    for (const project of result.projects) projectsById.set(project.id, project);
+    if (selectedProject && !projectsById.has(selectedProject)) selectedProject = null;
+    renderProjectBar();
     const nodes = result.projects.map(project => {
       const item = document.createElement("li");
       const node = button(project.name, "project-item", () => selectProject(project.id === selectedProject ? null : project.id));
@@ -612,7 +661,29 @@ window.app = (() => {
       row.append(label, button("Unload", "btn", async () => { await unloadModel(name); openSettings(); }));
       return row;
     }) : [Object.assign(document.createElement("p"), {className: "setting-hint", textContent: "No models are loaded right now."})]));
+    renderMemorySettings();
     openDialog("settings-dialog");
+  }
+
+  async function renderMemorySettings() {
+    const list = element("memory-list");
+    try {
+      const result = await call("list_memories");
+      element("memory-state").textContent = result.enabled
+        ? `On · ${result.memories.length} memor${result.memories.length === 1 ? "y" : "ies"} stored on this computer. Answers show which ones they used.`
+        : "Off. Shared memory is not sent to the model.";
+      list.hidden = !result.memories.length;
+      list.replaceChildren(...result.memories.map(item => {
+        const row = document.createElement("div");
+        row.className = "mem-row";
+        const text = document.createElement("span");
+        text.textContent = item.text;
+        row.append(text, button("Forget", "btn ghost", async () => {
+          try { await call("forget_memory", item.id); renderMemorySettings(); } catch (error) { showError(error); }
+        }));
+        return row;
+      }));
+    } catch (error) { element("memory-state").textContent = error.message; list.hidden = true; }
   }
 
   function closeContextMenu() { element("context-menu").open = false; }
@@ -695,20 +766,36 @@ window.app = (() => {
       status("Saved.");
     } catch (error) { showError(error); }
   });
-  element("new-project").addEventListener("click", () => {
-    element("project-name").value = "";
-    element("project-instructions").value = "";
-    element("project-folder").value = "";
-    openDialog("project-dialog");
-  });
+  element("new-project").addEventListener("click", () => openProjectDialog(null));
+  element("project-edit").addEventListener("click", () => openProjectDialog(projectsById.get(selectedProject)));
+  element("project-new-chat").addEventListener("click", () => newChat().catch(showError));
+  element("project-close").addEventListener("click", () => selectProject(null));
+  element("project-browse").addEventListener("click", () => browseFolder("project-folder"));
   element("project-cancel").addEventListener("click", () => closeDialog("project-dialog"));
+  element("project-delete").addEventListener("click", async () => {
+    const project = editingProject;
+    if (!project || (window.confirm && !window.confirm(`Delete the project "${project.name}"? Its chats are kept and move back to Recent.`))) return;
+    try { await call("delete_project", project.id); closeDialog("project-dialog"); await selectProject(null); }
+    catch (error) { showError(error); }
+  });
   element("project-form").addEventListener("submit", async event => {
     event.preventDefault();
+    const folder = element("project-folder").value.trim() || null;
+    const name = element("project-name").value.trim();
+    const instructions = element("project-instructions").value;
+    const useEnv = element("project-use-env").checked;
     try {
-      const folder = element("project-folder").value.trim();
-      const result = await call("create_project", element("project-name").value.trim(), element("project-instructions").value, folder || null);
+      let id;
+      if (editingProject) {
+        const changes = {name, instructions, folder};
+        if (useEnv) changes.default_environment = currentEnvironment(editingProject.default_environment);
+        id = (await call("update_project", editingProject.id, changes)).project.id;
+      } else {
+        id = (await call("create_project", name, instructions, folder, null, useEnv ? currentEnvironment() : null)).project.id;
+      }
       closeDialog("project-dialog");
-      await selectProject(result.project.id);
+      await selectProject(id);
+      status(editingProject ? "Project saved." : "Project created: new chats here start with its setup.");
     } catch (error) { showError(error); }
   });
   element("same-environment").addEventListener("click", async () => {

@@ -57,6 +57,12 @@ class Desktop:
             self._activation.clear()
             self.main_window.restore()
             self.main_window.show()
+            # Windows does not raise a background window on show(); a brief on-top toggle brings it forward.
+            try:
+                self.main_window.on_top = True
+                self.main_window.on_top = False
+            except Exception:
+                pass
 
     def evaluate(self, script):
         return self.main_window.evaluate_js(script)

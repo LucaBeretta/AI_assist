@@ -503,6 +503,23 @@ code, kbd, pre, .mono { font-family: var(--mono); }
 .mem-row span { flex: 1 1 auto; color: var(--body-2); }
 .msg-actions:has(.mem-used[open]) { opacity: 1; }
 
+/* ---------- project bar, dialog rows, memory settings ---------- */
+.project-bar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 24px 8px; padding: 10px 14px;
+  border: 1px solid var(--border-2); border-radius: 12px; background: var(--panel);
+}
+.project-bar[hidden] { display: none; }
+.project-bar-info { display: flex; flex-direction: column; gap: 2px; flex: 1 1 260px; min-width: 0; }
+.project-bar-info .dev-hint { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-bar .btn { height: 30px; font-size: 12.5px; }
+.field-row { display: flex; gap: 8px; }
+.field-row input { flex: 1 1 auto; height: 34px; padding: 0 10px; border: 1px solid var(--border-2); border-radius: var(--r); background: var(--raised); color: var(--text); }
+.check-row { display: flex; align-items: flex-start; gap: 8px; margin: 8px 0; font-size: 13px; color: var(--body-2); }
+.check-row input { margin-top: 3px; accent-color: var(--accent); }
+.check-row em { font-style: normal; color: var(--faint); font-size: 12px; }
+.settings-mem { max-height: 220px; overflow-y: auto; }
+.settings-mem[hidden] { display: none; }
+
 /* ---------- Models ---------- */
 .small-btn { height: 28px; padding: 0 8px; font-size: 12px; }
 .models-scroll { flex: 1 1 auto; overflow-y: auto; padding: 8px 24px 32px; }

@@ -81,6 +81,16 @@
         </div>
       </header>
 
+      <div id="project-bar" class="project-bar" hidden>
+        <div class="project-bar-info">
+          <span id="project-bar-name" class="strong"></span>
+          <span id="project-bar-meta" class="dev-hint mono"></span>
+        </div>
+        <button id="project-new-chat" class="btn primary" type="button">New chat in project</button>
+        <button id="project-edit" class="btn" type="button">Edit project</button>
+        <button id="project-close" class="icon-btn" type="button" aria-label="Show all chats" title="Show all chats">×</button>
+      </div>
+
       <div id="banner" class="banner" role="alert" hidden>
         <span id="banner-text"></span>
         <span id="banner-actions" class="banner-actions"></span>
@@ -148,6 +158,7 @@
           <h1>Developer</h1>
           <label class="dev-project-field"><span class="sr-only">Project folder</span>
             <input id="dev-project" class="mono" placeholder="Project folder, e.g. C:\Users\…\anteprima-v2" spellcheck="false"></label>
+          <button id="dev-browse" class="btn" type="button">Browse…</button>
         </header>
         <div class="dev-body">
           <div class="dev-main">
@@ -272,6 +283,11 @@
     <div id="loaded-models"></div>
   </section>
   <section class="setting-group">
+    <h3>Shared memory</h3>
+    <p id="memory-state" class="setting-hint"></p>
+    <div id="memory-list" class="mem-list settings-mem"></div>
+  </section>
+  <section class="setting-group">
     <h3>Data</h3>
     <div class="setting-row"><span><span class="setting-title">Back up all chats</span><span class="setting-hint">Saves every chat as a .zip in a folder you choose.</span></span>
       <button id="export-chats" class="btn" type="button">Export…</button></div>
@@ -298,12 +314,18 @@
 <dialog id="project-dialog" class="dialog" aria-labelledby="project-title">
   <form id="project-form">
     <div class="dialog-head"><h2 id="project-title">New project</h2></div>
+    <p class="setting-hint">A project groups chats that share instructions, a folder and a setup (model and context). New chats in the project start with that setup.</p>
     <label class="field"><span>Name</span><input id="project-name" required maxlength="120" placeholder="e.g. Sito anteprima-v2"></label>
     <label class="field"><span>Instructions <em>(optional, used by every chat in the project)</em></span><textarea id="project-instructions" rows="4"></textarea></label>
-    <label class="field"><span>Folder <em>(optional, for Developer tasks)</em></span><input id="project-folder" class="mono" placeholder="C:\Users\…\project"></label>
+    <div class="field"><span>Folder <em>(optional, for Developer tasks and pinned files)</em></span>
+      <span class="field-row"><input id="project-folder" class="mono" placeholder="C:\Users\…\project" aria-label="Project folder"><button id="project-browse" class="btn" type="button">Browse…</button></span></div>
+    <label class="check-row"><input id="project-use-env" type="checkbox" checked>
+      <span>Use the current model and context as the project setup <em id="project-env-label" class="mono"></em></span></label>
     <div class="dialog-actions">
+      <button id="project-delete" class="btn ghost danger" type="button" hidden>Delete project</button>
+      <span class="grow"></span>
       <button id="project-cancel" class="btn ghost" type="button">Cancel</button>
-      <button class="btn primary" type="submit">Create project</button>
+      <button id="project-submit" class="btn primary" type="submit">Create project</button>
     </div>
   </form>
 </dialog>

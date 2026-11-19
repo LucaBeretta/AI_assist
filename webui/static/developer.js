@@ -385,6 +385,14 @@ window.devui = (() => {
   element("dev-project").value = recall("aiassist-dev-project") || "";
   element("dev-project").addEventListener("change", () => { chatId = null; loadCheckpoints(); loadFiles(); loadPins(); });
   element("dev-file-filter").addEventListener("input", renderFiles);
+  element("dev-browse").addEventListener("click", async () => {
+    try {
+      const result = await call("choose_folder");
+      if (result.cancelled) return;
+      element("dev-project").value = result.path;
+      element("dev-project").dispatchEvent(new Event("change"));
+    } catch (error) { status(error.message); }
+  });
   element("dev-form").addEventListener("submit", run);
   element("dev-task").addEventListener("keydown", event => {
     if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) run(event);

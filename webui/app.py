@@ -594,6 +594,19 @@ class Api:
         return {"ok": True, "chats": matches}
 
     @_json_method
+    def choose_folder(self):
+        """Native folder picker for project and Developer folders; returns the chosen path or cancelled."""
+        if self._closed:
+            raise RuntimeError("The web UI is closing.")
+        selection = self._desktop.choose_folder()
+        if not selection:
+            return {"ok": True, "cancelled": True}
+        folder = Path(selection[0] if isinstance(selection, (list, tuple)) else selection).expanduser().resolve()
+        if not folder.is_dir():
+            raise ValueError("Choose an existing folder.")
+        return {"ok": True, "path": str(folder)}
+
+    @_json_method
     def export_chats(self):
         if self._closed:
             raise RuntimeError("The web UI is closing.")
