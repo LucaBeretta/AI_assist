@@ -2,6 +2,8 @@
 "use strict";
 
 window.modelsui = (() => {
+  const t = (text, vars = {}) => window.i18n ? window.i18n.t(text, vars) : text.replace(/\{(\w+)\}/g, (_, key) => String(vars[key] ?? ""));
+
   const element = id => document.getElementById(id);
   let pull = null;            // {id, model, completed, total, status}
   let advice = null;          // last recommend_models result
@@ -10,7 +12,7 @@ window.modelsui = (() => {
 
   async function call(method, ...args) {
     const result = await window.pywebview.api[method](...args);
-    if (!result || result.ok === false) throw new Error(result?.error || "Invalid API response");
+    if (!result || result.ok === false) throw new Error(result?.error || t("Invalid API response"));
     return result;
   }
   function node(tag, className, text) {
@@ -31,14 +33,14 @@ window.modelsui = (() => {
   // ---------- hardware ----------
   function renderHardware(hw) {
     const box = element("hw-summary");
-    if (!hw) { box.replaceChildren(node("p", "dev-hint", "Reading your hardware…")); return; }
+    if (!hw) { box.replaceChildren(node("p", "dev-hint", t("Reading your hardware…"))); return; }
     const gpu = (hw.gpus || []).find(item => item.supported !== false) || (hw.gpus || [])[0];
     const tiles = [
-      ["GPU", gpu ? gpu.name : "None detected", gpu?.total_bytes ? `${gb(gpu.total_bytes)} VRAM${gpu.free_bytes != null ? " · " + gb(gpu.free_bytes) + " free" : ""}` : "CPU only"],
-      ["Memory", hw.ram_total_bytes ? gb(hw.ram_total_bytes) + " RAM" : "?", hw.ram_available_bytes ? gb(hw.ram_available_bytes) + " available now" : ""],
-      ["Processor", hw.cpu || "?", hw.logical_processors ? hw.logical_processors + " threads" : ""],
-      ["Disk", hw.disk_free_bytes ? gb(hw.disk_free_bytes) + " free" : "?", hw.model_directory || ""],
-      ["Ollama", hw.ollama_running ? "Running" : "Not running", hw.ollama_version ? "v" + hw.ollama_version : (hw.server_local === false ? "remote server" : "")],
+      ["GPU", gpu ? gpu.name : t("None detected"), gpu?.total_bytes ? `${gb(gpu.total_bytes)} VRAM${gpu.free_bytes != null ? " · " + gb(gpu.free_bytes) + t(" free") : ""}` : t("CPU only")],
+      [t("Memory"), hw.ram_total_bytes ? gb(hw.ram_total_bytes) + " RAM" : "?", hw.ram_available_bytes ? gb(hw.ram_available_bytes) + " available now" : ""],
+      [t("Processor"), hw.cpu || "?", hw.logical_processors ? hw.logical_processors + t(" threads") : ""],
+      [t("Disk"), hw.disk_free_bytes ? gb(hw.disk_free_bytes) + t(" free") : "?", hw.model_directory || ""],
+      ["Ollama", hw.ollama_running ? t("Running") : t("Not running"), hw.ollama_version ? "v" + hw.ollama_version : (hw.server_local === false ? t("remote server") : "")],
     ];
     box.replaceChildren(...tiles.map(([label, value, detail]) => {
       const tile = node("div", "hw-tile");
@@ -52,7 +54,7 @@ window.modelsui = (() => {
   // ---------- installed ----------
   function renderInstalled() {
     const list = element("models-installed");
-    if (!installed.length) { list.replaceChildren(node("p", "dev-hint", "No models installed yet. Pick one below to download it.")); return; }
+    if (!installed.length) { list.replaceChildren(node("p", "dev-hint", t("No models installed yet. Pick one below to download it."))); return; }
     list.replaceChildren(...installed.map(name => {
       const row = node("div", "model-row");
       const info = node("div", "model-info");
@@ -61,15 +63,15 @@ window.modelsui = (() => {
       const details = loaded[name];
       if (details) {
         const split = details.size_vram != null && details.size ? Math.round(details.size_vram / details.size * 100) : null;
-        info.append(node("span", "pill ok", "loaded" + (split != null ? ` · ${split}% gpu${split < 100 ? " · " + (100 - split) + "% cpu" : ""}` : "")));
+        info.append(node("span", "pill ok", t("loaded") + (split != null ? ` · ${split}% gpu${split < 100 ? " · " + (100 - split) + "% cpu" : ""}` : "")));
       }
       const actions = node("div", "model-actions");
-      actions.append(btn("Use in chat", "btn", () => { window.app?.selectModel(name); window.app?.showView("chat"); }));
-      if (details) actions.append(btn("Unload", "btn ghost", async () => {
-        try { await call("unload_model", name); note(`${name} unloaded.`); await refresh(); } catch (error) { note(error.message); }
+      actions.append(btn(t("Use in chat"), "btn", () => { window.app?.selectModel(name); window.app?.showView("chat"); }));
+      if (details) actions.append(btn(t("Unload"), "btn ghost", async () => {
+        try { await call("unload_model", name); note(t("{v0} unloaded.", {v0: (name)})); await refresh(); } catch (error) { note(error.message); }
       }));
-      actions.append(btn("Delete", "btn ghost danger", async () => {
-        if (window.confirm && !window.confirm(`Delete ${name} from this computer? You can download it again later.`)) return;
+      actions.append(btn(t("Delete"), "btn ghost danger", async () => {
+        if (window.confirm && !window.confirm(t("Delete {v0} from this computer? You can download it again later.", {v0: (name)}))) return;
         try { await call("delete_model", name); note(`${name} deleted.`); await refresh(); window.app?.refreshModels(); }
         catch (error) { note(error.message); }
       }));
@@ -87,9 +89,9 @@ window.modelsui = (() => {
 
   function renderRecommendations() {
     const list = element("models-recommended");
-    if (!advice) { list.replaceChildren(node("p", "dev-hint", "Checking which models fit this computer…")); return; }
+    if (!advice) { list.replaceChildren(node("p", "dev-hint", t("Checking which models fit this computer…"))); return; }
     const cards = advice.recommendations || [];
-    if (!cards.length) { list.replaceChildren(node("p", "dev-hint", "No recommendations: the model catalog could not be read (offline?) or nothing fits.")); return; }
+    if (!cards.length) { list.replaceChildren(node("p", "dev-hint", t("No recommendations: the model catalog could not be read (offline?) or nothing fits."))); return; }
     list.replaceChildren(...cards.map(card => {
       const item = node("article", "model-card");
       const head = node("div", "model-card-head");
@@ -99,12 +101,12 @@ window.modelsui = (() => {
       if (card.reason) item.append(node("p", "dev-hint", card.reason));
       const foot = node("div", "model-card-foot");
       foot.append(node("span", "dev-hint mono",
-        `${card.size_bytes ? gb(card.size_bytes) + " download" : ""}${card.estimated_memory_bytes ? " · needs ~" + gb(card.estimated_memory_bytes) : ""}`));
+        `${card.size_bytes ? gb(card.size_bytes) + t(" download") : ""}${card.estimated_memory_bytes ? t(" · needs ~") + gb(card.estimated_memory_bytes) : ""}`));
       foot.append(node("span", "grow"));
-      if (installed.includes(card.name)) foot.append(node("span", "pill ok", "installed"));
+      if (installed.includes(card.name)) foot.append(node("span", "pill ok", t("installed")));
       else if (pull?.model === card.name) foot.append(progress());
       else {
-        const download = btn("Download", "btn primary", () => start(card.name));
+        const download = btn(t("Download"), "btn primary", () => start(card.name));
         download.disabled = Boolean(pull);
         foot.append(download);
       }
@@ -120,7 +122,7 @@ window.modelsui = (() => {
     bar.max = pull.total || 1;
     bar.value = pull.completed || 0;
     const pct = pull.total ? Math.floor(pull.completed / pull.total * 100) + "%" : "";
-    wrap.append(bar, node("span", "dev-hint mono", `${pull.status || "starting"} ${pct}`), btn("Stop", "btn ghost", stop));
+    wrap.append(bar, node("span", "dev-hint mono", `${pull.status || t("starting")} ${pct}`), btn(t("Stop"), "btn ghost", stop));
     return wrap;
   }
 
@@ -128,15 +130,15 @@ window.modelsui = (() => {
     if (pull) return;
     try {
       const result = await call("pull_model", name);
-      pull = {id: result.pull_id, model: name, completed: 0, total: 0, status: "starting"};
-      note(`Downloading ${name}…`);
+      pull = {id: result.pull_id, model: name, completed: 0, total: 0, status: t("starting")};
+      note(t("Downloading {v0}…", {v0: (name)}));
       renderAll();
     } catch (error) { note(error.message); }
   }
 
   async function stop() {
     if (!pull) return;
-    try { await call("stop_pull", pull.id); note("Stopping download…"); } catch (error) { note(error.message); }
+    try { await call("stop_pull", pull.id); note(t("Stopping download…")); } catch (error) { note(error.message); }
   }
 
   function renderPullOther() {
@@ -156,8 +158,8 @@ window.modelsui = (() => {
         renderRecommendations(); renderPullOther();
         return true;
       case "pull_done": pull = null; note(`${event.model} downloaded.`); refresh(); return true;
-      case "pull_stopped": pull = null; note("Download stopped."); renderAll(); return true;
-      case "pull_error": pull = null; note(event.error || "Download failed."); renderAll(); return true;
+      case "pull_stopped": pull = null; note(t("Download stopped.")); renderAll(); return true;
+      case "pull_error": pull = null; note(event.error || t("Download failed.")); renderAll(); return true;
       case "models_changed": refresh(); window.app?.refreshModels(); return true;
       default: return false;
     }
@@ -190,5 +192,6 @@ window.modelsui = (() => {
     if (name) start(name);
   });
   element("models-refresh").addEventListener("click", () => { advice = null; refresh(); loadAdvice(); });
+  window.addEventListener("languagechange", () => { if (!element("models-view").hidden) { renderHardware(advice?.hardware); renderAll(); } });
   return {onEvent, onShow};
 })();

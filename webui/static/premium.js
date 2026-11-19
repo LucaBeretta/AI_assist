@@ -1,6 +1,8 @@
 /* Small keyboard and reading features, with plain testable transformations. */
 "use strict";
 window.premiumui = (() => {
+  const t = (text, vars = {}) => window.i18n ? window.i18n.t(text, vars) : text.replace(/\{(\w+)\}/g, (_, key) => String(vars[key] ?? ""));
+
   let zoom = 1, loaded = false, timer = null;
   const expanded = new Set();
   const el = id => document.getElementById(id);
@@ -30,7 +32,7 @@ window.premiumui = (() => {
       details.className = "thinking";
       details.open = expanded.has(identity);
       details.addEventListener("toggle", () => { if (identity) { if (details.open) expanded.add(identity); else expanded.delete(identity); } });
-      summary.textContent = Number.isFinite(seconds) ? `Thought for ${Math.round(seconds)} s` : parts.pending ? "Thinking…" : "Thought process";
+      summary.textContent = Number.isFinite(seconds) ? t("Thought for {v0} s", {v0: (Math.round(seconds))}) : parts.pending ? t("Thinking…") : t("Thought process");
       details.append(summary, window.renderMarkdown(parts.thinking)); result.append(details);
     }
     result.append(window.renderMarkdown(parts.answer)); return result;
@@ -40,7 +42,7 @@ window.premiumui = (() => {
     if (!value || Number.isNaN(date.getTime())) return "";
     const day = item => Date.UTC(item.getFullYear(), item.getMonth(), item.getDate());
     const days = Math.round((day(now) - day(date)) / 86400000);
-    return days <= 0 ? "Today" : days === 1 ? "Yesterday" : days < 7 ? "Last 7 days" : "Older";
+    return days <= 0 ? t("Today") : days === 1 ? t("Yesterday") : days < 7 ? t("Last 7 days") : t("Older");
   }
   function groupNodes(records, nodes) {
     const groups = new Map();
@@ -50,7 +52,7 @@ window.premiumui = (() => {
       groups.get(group).push(nodes[index]);
     });
     const out = [];
-    for (const name of ["Today", "Yesterday", "Last 7 days", "Older", ""]) {
+    for (const name of [t("Today"), t("Yesterday"), t("Last 7 days"), t("Older"), ""]) {
       if (!groups.has(name)) continue;
       if (name) { const heading = document.createElement("li"); heading.className = "chat-date"; heading.textContent = name; out.push(heading); }
       out.push(...groups.get(name));

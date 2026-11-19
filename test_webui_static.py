@@ -63,6 +63,26 @@ vm.runInNewContext(fs.readFileSync(process.argv[1], 'utf8'), {document, window, 
 
 class StaticTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_locales_translate_controls_but_never_model_or_user_text(self):
+        self.run_scenario(r'''
+        const load=name=>vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),name),'utf8'),{document,window,Map,Set,Error,String,Number,Boolean,Array});
+        window.navigator={language:'it-IT'};
+        load('strings.js');
+        assert.equal(window.i18n.language,'it');
+        assert.equal(window.i18n.t('New chat'),'Nuova chat');
+        assert.equal(window.i18n.t('Thought for {v0} s',{v0:3}),'Ha ragionato per 3 s');
+        for(const [key,value] of Object.entries(window.i18n.messages.it)) {
+          assert.deepEqual((key.match(/\{\w+\}/g)||[]).sort(),(value.match(/\{\w+\}/g)||[]).sort());
+        }
+        saved.messages=[{role:'assistant',content:'New chat\n<script>unsafe</script>'}];
+        await window.listeners.pywebviewready();
+        assert.match(elements.get('messages').textContent,/New chat/);
+        assert.match(elements.get('messages').textContent,/<script>unsafe<\/script>/);
+        assert.equal(elements.get('messages').children[0].children[1].children[0].textContent,'Copia');
+        window.i18n.setLanguage('en'); assert.equal(window.i18n.t('New chat'),'New chat');
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
     def test_thinking_keyboard_groups_and_saved_zoom(self):
         self.run_scenario(r'''
         document.documentElement={style:{}};

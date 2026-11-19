@@ -2,6 +2,8 @@
 "use strict";
 
 window.app = (() => {
+  const t = (text, vars = {}) => window.i18n ? window.i18n.t(text, vars) : text.replace(/\{(\w+)\}/g, (_, key) => String(vars[key] ?? ""));
+
   const element = id => document.getElementById(id);
   const later = (callback, ms) => (typeof setTimeout === "function" ? setTimeout(callback, ms) : null);
   const streams = new Map();
@@ -22,7 +24,7 @@ window.app = (() => {
 
   async function call(method, ...args) {
     const result = await window.pywebview.api[method](...args);
-    if (!result || result.ok === false) throw new Error(result?.error || "Invalid API response");
+    if (!result || result.ok === false) throw new Error(result?.error || t("Invalid API response"));
     return result;
   }
 
@@ -53,7 +55,7 @@ window.app = (() => {
   // ---------- conversation ----------
   function renderMessages() {
     const record = chats.get(selected);
-    element("chat-title").textContent = record?.title || "Conversation";
+    element("chat-title").textContent = record?.title || t("Conversation");
     element("incognito-badge").hidden = !record?.incognito;
     const nodes = [];
     const messages = record?.messages || [];
@@ -74,7 +76,7 @@ window.app = (() => {
       const archive = document.createElement("details");
       archive.className = "compacted";
       const label = document.createElement("summary");
-      label.textContent = `Conversation compacted — show ${record.summary.upto} original messages`;
+      label.textContent = t("Conversation compacted — show {v0} original messages", {v0: (record.summary.upto)});
       archive.append(label, ...messages.slice(0, record.summary.upto).map((message, index) => messageNode(message, index)));
       const summary = document.createElement("pre");
       summary.className = "summary-text";
@@ -93,7 +95,7 @@ window.app = (() => {
       if (stream.saved === false) {
         const warning = document.createElement("p");
         warning.className = "notice";
-        warning.textContent = "Not saved — copy this response before closing.";
+        warning.textContent = t("Not saved — copy this response before closing.");
         text.append(warning);
       }
       text.append(window.premiumui?.renderReply(stream.text, undefined, stream.id) || window.renderMarkdown(stream.text));
@@ -121,8 +123,8 @@ window.app = (() => {
       const nav = document.createElement("span");
       nav.className = "versions";
       const [current, count] = version;
-      const prev = button("‹", "icon-btn", () => switchVersion(index - 1, current - 1), "Previous version");
-      const next = button("›", "icon-btn", () => switchVersion(index - 1, current + 1), "Next version");
+      const prev = button("‹", "icon-btn", () => switchVersion(index - 1, current - 1), t("Previous version"));
+      const next = button("›", "icon-btn", () => switchVersion(index - 1, current + 1), t("Next version"));
       prev.disabled = busy || current === 0;
       next.disabled = busy || current === count - 1;
       const label = document.createElement("span");
@@ -131,15 +133,15 @@ window.app = (() => {
       nav.append(prev, label, next);
       bar.append(nav);
     }
-    const copy = button("Copy", "icon-btn", () => copyText(message.content, copy), "Copy message");
+    const copy = button(t("Copy"), "icon-btn", () => copyText(message.content, copy), t("Copy message"));
     bar.append(copy);
     const messages = record?.messages || [];
     if (message.role === "user") {
-      const edit = button("Edit", "icon-btn", () => startEditing(index), "Edit and resend");
+      const edit = button(t("Edit"), "icon-btn", () => startEditing(index), t("Edit and resend"));
       edit.disabled = busy;
       bar.append(edit);
     } else if (message.role === "assistant" && index === messages.length - 1 && messages[index - 1]?.role === "user") {
-      const again = button("Regenerate", "icon-btn", () => regenerate(), "Regenerate answer");
+      const again = button(t("Regenerate"), "icon-btn", () => regenerate(), t("Regenerate answer"));
       again.disabled = busy;
       bar.append(again);
     }
@@ -153,7 +155,7 @@ window.app = (() => {
     const box = document.createElement("details");
     box.className = "mem-used";
     const summary = document.createElement("summary");
-    summary.textContent = `Used ${items.length} memor${items.length === 1 ? "y" : "ies"}`;
+    summary.textContent = t("Memories used: {v0}", {v0: (items.length)});
     const list = document.createElement("div");
     list.className = "mem-list";
     for (const item of items) {
@@ -161,8 +163,8 @@ window.app = (() => {
       row.className = "mem-row";
       const text = document.createElement("span");
       text.textContent = item.text;
-      const forget = button("Forget", "btn ghost", async () => {
-        try { await call("forget_memory", item.id); forget.disabled = true; forget.textContent = "Forgotten"; status("Memory removed; it will not be used again."); }
+      const forget = button(t("Forget"), "btn ghost", async () => {
+        try { await call("forget_memory", item.id); forget.disabled = true; forget.textContent = t("Forgotten"); status(t("Memory removed; it will not be used again.")); }
         catch (error) { showError(error); }
       });
       row.append(text, forget);
@@ -188,7 +190,7 @@ window.app = (() => {
     }
     if (node) {
       const label = node.textContent;
-      node.textContent = "Copied";
+      node.textContent = t("Copied");
       later(() => { node.textContent = label; }, 1200);
     }
   }
@@ -223,7 +225,7 @@ window.app = (() => {
       const result = await call("regenerate", chatId);
       track(chatId, result);
       await reloadChat(chatId);
-      status("Regenerating…");
+      status(t("Regenerating…"));
       renderMessages(); renderChats();
     } catch (error) { showError(error); }
   }
@@ -284,7 +286,7 @@ window.app = (() => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(String(reader.result).split(",", 2)[1] || "");
-      reader.onerror = () => reject(reader.error || new Error("Could not read " + file.name));
+      reader.onerror = () => reject(reader.error || new Error(t("Could not read ") + file.name));
       reader.readAsDataURL(file);
     });
   }
@@ -294,11 +296,11 @@ window.app = (() => {
     if (!chatId || !files?.length) return;
     for (const file of files) {
       try {
-        status(`Attaching ${file.name}…`);
+        status(t("Attaching {v0}…", {v0: (file.name)}));
         await call("attach", chatId, file.name || "pasted.png", await readBase64(file));
         await reloadChat(chatId);
         renderMessages();
-        status(`Attached ${file.name}`);
+        status(t("Attached {v0}", {v0: (file.name)}));
       } catch (error) { showError(error); }
     }
   }
@@ -325,17 +327,17 @@ window.app = (() => {
       node.textContent = record.title;
       if (activeStream(record.id)) {
         const working = document.createElement("span");
-        working.className = "working";
-        working.textContent = "working";
+        working.className = t("working");
+        working.textContent = t("working");
         node.append(working);
       }
       node.addEventListener("click", () => openChat(record.id).catch(showError));
       node.addEventListener("contextmenu", event => showMenu(event, [
-        ["Open", () => { showView("chat"); openChat(record.id).catch(showError); }],
-        ["Rename…", () => startRename(record.id)],
-        ["Memories for this chat…", () => window.workspaceui?.openMemories(record.id)],
-        ["Chat instructions…", () => window.workspaceui?.openInstructions(record.id)],
-        ["Delete", () => deleteChat(record.id), "danger"],
+        [t("Open"), () => { showView("chat"); openChat(record.id).catch(showError); }],
+        [t("Rename…"), () => startRename(record.id)],
+        [t("Memories for this chat…"), () => window.workspaceui?.openMemories(record.id)],
+        [t("Chat instructions…"), () => window.workspaceui?.openInstructions(record.id)],
+        [t("Delete"), () => deleteChat(record.id), "danger"],
       ]));
       item.append(node);
       return item;
@@ -370,8 +372,8 @@ window.app = (() => {
 
   function openProjectDialog(project) {
     editingProject = project || null;
-    element("project-title").textContent = project ? "Edit project" : "New project";
-    element("project-submit").textContent = project ? "Save" : "Create project";
+    element("project-title").textContent = project ? t("Edit project") : t("New project");
+    element("project-submit").textContent = project ? t("Save") : t("Create project");
     element("project-delete").hidden = !project;
     element("project-name").value = project?.name || "";
     element("project-instructions").value = project?.instructions || "";
@@ -400,18 +402,18 @@ window.app = (() => {
       const node = button(project.name, "project-item", () => selectProject(project.id === selectedProject ? null : project.id));
       node.setAttribute("aria-pressed", project.id === selectedProject ? "true" : "false");
       node.addEventListener("contextmenu", event => showMenu(event, [
-        ["Open", () => selectProject(project.id)],
-        ["New chat in project", async () => { await selectProject(project.id); newChat().catch(showError); }],
-        ["Edit project…", () => openProjectDialog(project)],
-        ["Delete project", () => deleteProject(project), "danger"],
+        [t("Open"), () => selectProject(project.id)],
+        [t("New chat in project"), async () => { await selectProject(project.id); newChat().catch(showError); }],
+        [t("Edit project…"), () => openProjectDialog(project)],
+        [t("Delete project"), () => deleteProject(project), "danger"],
       ]));
       item.append(node);
       return item;
     });
     element("projects").replaceChildren(...nodes);
     element("chats-label").textContent = selectedProject
-      ? (result.projects.find(project => project.id === selectedProject)?.name || "Project") + " · chats"
-      : "Recent";
+      ? (result.projects.find(project => project.id === selectedProject)?.name || t("Project")) + " · chats"
+      : t("Recent");
   }
 
   async function selectProject(id) {
@@ -497,7 +499,7 @@ window.app = (() => {
     addChatFirst(result.chat);
     renderChats();
     await openChat(result.chat.id);
-    if (incognito) status("Incognito chat: not saved, no memory.");
+    if (incognito) status(t("Incognito chat: not saved, no memory."));
   }
 
   async function refreshModels() {
@@ -517,7 +519,7 @@ window.app = (() => {
       if (!names.length) {
         const option = document.createElement("option");
         option.disabled = true;
-        option.textContent = backend === "Colibri" && !result.colibri?.installed ? "Not installed or no server available" : "No running model available";
+        option.textContent = backend === "Colibri" && !result.colibri?.installed ? t("Not installed or no server available") : t("No running model available");
         group.append(option);
       }
       for (const name of names) {
@@ -530,7 +532,7 @@ window.app = (() => {
     element("model").value = values.includes(previous) ? previous : values[0] || "";
     window.workspaceui?.onState(result);
     window.premiumui?.onState(result);
-    status(`${result.engine}: ${result.host}. ${result.models.length} models available.`);
+    status(t("{v0}: {v1}. {v2} models available.", {v0: (result.engine), v1: (result.host), v2: (result.models.length)}));
     controls();
   }
 
@@ -564,7 +566,7 @@ window.app = (() => {
       chats.get(chatId).localDraft = "";
       await reloadChat(chatId);
       if (selected === chatId) element("prompt").value = "";
-      if (selected === chatId && streams.get(result.stream_id).active) status("Generating…");
+      if (selected === chatId && streams.get(result.stream_id).active) status(t("Generating…"));
       renderMessages();
       renderChats();
     } catch (error) { showError(error); }
@@ -585,7 +587,7 @@ window.app = (() => {
 
   async function unloadModel(name) {
     try {
-      status(`Unloading ${name}…`);
+      status(t("Unloading {v0}…", {v0: (name)}));
       await call("unload_model", name);
     } catch (error) { showError(error); }
   }
@@ -595,11 +597,11 @@ window.app = (() => {
   function appEvent(event) {
     switch (event.type) {
       case "vram_warning":
-        showBanner(`${event.models.length} models loaded need ${gigabytes(event.required_bytes)}, more than the ${gigabytes(event.gpu_memory_bytes)} of GPU memory. Responses slow down.`,
-          event.models.map(name => button("Unload " + name, "btn", () => unloadModel(name))));
+        showBanner(t("{v0} models loaded need {v1}, more than the {v2} of GPU memory. Responses slow down.", {v0: (event.models.length), v1: (gigabytes(event.required_bytes)), v2: (gigabytes(event.gpu_memory_bytes))}),
+          event.models.map(name => button(t("Unload ") + name, "btn", () => unloadModel(name))));
         return true;
       case "model_unloaded":
-        status(`${event.model} unloaded from memory.`);
+        status(t("{v0} unloaded from memory.", {v0: (event.model)}));
         element("banner").hidden = true;
         return true;
       case "attached":
@@ -623,7 +625,7 @@ window.app = (() => {
       case "memories_changed":
         return true;
       case "checkpoint_restored":
-        status(`Restored ${event.restored} files from the task checkpoint.`);
+        status(t("Restored {v0} files from the task checkpoint.", {v0: (event.restored)}));
         return true;
       default:
         return false;
@@ -642,8 +644,8 @@ window.app = (() => {
       window.welcomeui?.onEvent(event);
       if (event.type === "model_loading" || event.type === "model_loaded") {
         const text = event.type === "model_loading"
-          ? `Loading ${event.model}… ${Math.floor(event.elapsed_seconds)} s`
-          : `${event.model} ready in ${event.load_seconds.toFixed(1)} s`;
+          ? t("Loading {v0}… {v1} s", {v0: (event.model), v1: (Math.floor(event.elapsed_seconds))})
+          : t("{v0} ready in {v1} s", {v0: (event.model), v1: (event.load_seconds.toFixed(1))});
         if (event.chat_id === selected) status(text);
         if (event.task_id) window.devui?.onEvent({...event, type: "loading", text});
         continue;
@@ -701,32 +703,11 @@ window.app = (() => {
       const label = document.createElement("span");
       label.className = "mono";
       label.textContent = `${name}${details?.size ? " · " + gigabytes(details.size) : ""}`;
-      row.append(label, button("Unload", "btn", async () => { await unloadModel(name); openSettings(); }));
+      row.append(label, button(t("Unload"), "btn", async () => { await unloadModel(name); openSettings(); }));
       return row;
-    }) : [Object.assign(document.createElement("p"), {className: "setting-hint", textContent: "No models are loaded right now."})]));
-    if (window.workspaceui) window.workspaceui.openSettings(); else renderMemorySettings();
+    }) : [Object.assign(document.createElement("p"), {className: "setting-hint", textContent: t("No models are loaded right now.")})]));
+    window.workspaceui?.openSettings();
     openDialog("settings-dialog");
-  }
-
-  async function renderMemorySettings() {
-    const list = element("memory-list");
-    try {
-      const result = await call("list_memories");
-      element("memory-state").textContent = result.enabled
-        ? `On · ${result.memories.length} memor${result.memories.length === 1 ? "y" : "ies"} stored on this computer. Answers show which ones they used.`
-        : "Off. Shared memory is not sent to the model.";
-      list.hidden = !result.memories.length;
-      list.replaceChildren(...result.memories.map(item => {
-        const row = document.createElement("div");
-        row.className = "mem-row";
-        const text = document.createElement("span");
-        text.textContent = item.text;
-        row.append(text, button("Forget", "btn ghost", async () => {
-          try { await call("forget_memory", item.id); renderMemorySettings(); } catch (error) { showError(error); }
-        }));
-        return row;
-      }));
-    } catch (error) { element("memory-state").textContent = error.message; list.hidden = true; }
   }
 
   function closeContextMenu() { element("context-menu").open = false; }
@@ -796,11 +777,11 @@ window.app = (() => {
     const code = node.parentElement?.nextElementSibling;
     if (!code) return;
     if (node.getAttribute("data-action") === "preview") {
-      call("preview_code", code.textContent).then(() => status("Preview opened in a separate window.")).catch(showError);
+      call("preview_code", code.textContent).then(() => status(t("Preview opened in a separate window."))).catch(showError);
     } else if (node.getAttribute("data-action") === "save") {
       const language = code.firstChild?.className?.replace("lang-", "") || "txt";
       const extension = ({python: "py", javascript: "js", typescript: "ts", text: "txt"})[language] || language;
-      call("save_code", code.textContent, "code." + extension.replace(/[^a-z0-9]/gi, "")).then(result => { if (!result.cancelled) status("Code saved."); }).catch(showError);
+      call("save_code", code.textContent, "code." + extension.replace(/[^a-z0-9]/gi, "")).then(result => { if (!result.cancelled) status(t("Code saved.")); }).catch(showError);
     } else copyText(code.textContent, node);
   });
 
@@ -818,7 +799,7 @@ window.app = (() => {
     try {
       const result = await call("set_idle_unload_minutes", Number(element("setting-idle").value));
       if (lastState) lastState.settings = result.settings;
-      status("Saved.");
+      status(t("Saved."));
     } catch (error) { showError(error); }
   });
   element("new-project").addEventListener("click", () => openProjectDialog(null));
@@ -845,7 +826,7 @@ window.app = (() => {
       }
       closeDialog("project-dialog");
       await selectProject(id);
-      status(editingProject ? "Project saved." : "Project created: new chats here start with its setup.");
+      status(editingProject ? t("Project saved.") : t("Project created: new chats here start with its setup."));
     } catch (error) { showError(error); }
   });
   element("same-environment").addEventListener("click", async () => {
@@ -865,7 +846,7 @@ window.app = (() => {
     try {
       const result = await call("compact", chatId);
       track(chatId, result, "compact");
-      if (selected === chatId && streams.get(result.stream_id).active) status("Compacting…");
+      if (selected === chatId && streams.get(result.stream_id).active) status(t("Compacting…"));
       renderChats();
     } catch (error) { showError(error); }
     finally { submitting = false; controls(); }
@@ -876,7 +857,7 @@ window.app = (() => {
     const stream = activeStream(selected);
     if (!stream) return;
     stream.stopping = true;
-    status("Stopping; waiting for the stream to close…");
+    status(t("Stopping; waiting for the stream to close…"));
     controls();
     try { await call("stop", stream.id); }
     catch (error) { stream.stopping = false; showError(error); }
@@ -930,14 +911,14 @@ window.app = (() => {
   async function deleteChat(id) {
     const record = chats.get(id);
     if (!record) return;
-    if (window.confirm && !window.confirm(`Delete "${record.title}"? This removes the chat and its attachments from this computer.`)) return;
+    if (window.confirm && !window.confirm(t("Delete \"{v0}\"? This removes the chat and its attachments from this computer.", {v0: (record.title)}))) return;
     try {
       const result = await call("delete_chat", id);
-      status(result.warnings?.length ? result.warnings.join(" ") : "Chat deleted.");
+      status(result.warnings?.length ? result.warnings.join(" ") : t("Chat deleted."));
     } catch (error) { showError(error); }
   }
   async function deleteProject(project) {
-    if (window.confirm && !window.confirm(`Delete the project "${project.name}"? Its chats are kept and move back to Recent.`)) return;
+    if (window.confirm && !window.confirm(t("Delete the project \"{v0}\"? Its chats are kept and move back to Recent.", {v0: (project.name)}))) return;
     try {
       await call("delete_project", project.id);
       closeDialog("project-dialog");
@@ -960,18 +941,18 @@ window.app = (() => {
   element("export-chats").addEventListener("click", async () => {
     try {
       const result = await call("export_chats");
-      element("export-result").textContent = result.cancelled ? "" : `Saved ${result.count} chats to ${result.path}`;
+      element("export-result").textContent = result.cancelled ? "" : t("Saved {v0} chats to {v1}", {v0: (result.count), v1: (result.path)});
     } catch (error) { element("export-result").textContent = error.message; }
   });
 
   // ---------- Ctrl+K palette: search chats and run commands ----------
-  const commands = [
-    ["New chat", "Ctrl+N", () => newChat().catch(showError)],
-    ["New incognito chat", "Ctrl+Shift+N", () => newChat(true).catch(showError)],
-    ["Developer", "", () => showView("dev")],
-    ["Models", "", () => showView("models")],
-    ["Settings", "Ctrl+,", () => openSettings()],
-    ["Switch theme", "Ctrl+Shift+L", () => toggleTheme()],
+  const commands = () => [
+    [t("New chat"), t("Ctrl+N"), () => newChat().catch(showError)],
+    [t("New incognito chat"), t("Ctrl+Shift+N"), () => newChat(true).catch(showError)],
+    [t("Developer"), "", () => showView("dev")],
+    [t("Models"), "", () => showView("models")],
+    [t("Settings"), t("Ctrl+,"), () => openSettings()],
+    [t("Switch theme"), t("Ctrl+Shift+L"), () => toggleTheme()],
   ];
   let paletteItems = [];
   let paletteIndex = 0;
@@ -986,7 +967,7 @@ window.app = (() => {
 
   function renderPalette(results) {
     const query = element("palette-input").value.trim().toLowerCase();
-    const matching = commands.filter(([label]) => !query || label.toLowerCase().includes(query));
+    const matching = commands().filter(([label]) => !query || label.toLowerCase().includes(query));
     paletteItems = [];
     const nodes = [];
     const group = text => { const li = document.createElement("li"); li.className = "palette-group"; li.textContent = text; nodes.push(li); };
@@ -1000,8 +981,8 @@ window.app = (() => {
       nodes.push(li);
       paletteItems.push(node);
     };
-    if (results.length) { group("Chats"); for (const chat of results.slice(0, 30)) item(chat.title, chat.snippet, () => { showView("chat"); openChat(chat.id).catch(showError); }); }
-    if (matching.length) { group("Commands"); for (const [label, keys, run] of matching) item(label, keys, run); }
+    if (results.length) { group(t("Chats")); for (const chat of results.slice(0, 30)) item(chat.title, chat.snippet, () => { showView("chat"); openChat(chat.id).catch(showError); }); }
+    if (matching.length) { group(t("Commands")); for (const [label, keys, run] of matching) item(label, keys, run); }
     element("palette-list").replaceChildren(...nodes);
     paletteIndex = 0;
     highlightPalette();
@@ -1049,6 +1030,7 @@ window.app = (() => {
   }
 
   function setPrompt(text) { element("prompt").value = text; fitPrompt(); scheduleDraft(); element("prompt").focus?.(); }
+  window.addEventListener("languagechange", () => { renderMessages(); renderChats(); renderProjectBar(); });
   return {onEvent, showView, selectModel, modelChoice, setPrompt,
           currentChat: () => chats.get(selected), refreshChat: async id => { await reloadChat(id); if (selected === id) renderMessages(); },
           refreshModels: () => refreshModels().catch(showError)};

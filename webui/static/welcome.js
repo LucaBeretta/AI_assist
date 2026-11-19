@@ -1,12 +1,14 @@
 /* A skippable first conversation, using the same model download events as Models. */
 "use strict";
 window.welcomeui = (() => {
+  const t = (text, vars = {}) => window.i18n ? window.i18n.t(text, vars) : text.replace(/\{(\w+)\}/g, (_, key) => String(vars[key] ?? ""));
+
   const el = id => document.getElementById(id);
   let state = null, shown = false, advice = null, pull = null, pendingModel = null, cancelRequested = false;
   const finished = new Set();
   const call = async (method, ...args) => {
     const value = await window.pywebview.api[method](...args);
-    if (!value || value.ok === false) throw new Error(value?.error || "Invalid API response");
+    if (!value || value.ok === false) throw new Error(value?.error || t("Invalid API response"));
     return value;
   };
   const installed = () => state?.ollama?.models || (state?.engine === "Ollama" ? state.models || [] : []);
@@ -20,10 +22,10 @@ window.welcomeui = (() => {
     el("welcome-stop").hidden = !pendingModel; el("welcome-download").hidden = !pendingModel;
     el("welcome-model").disabled = Boolean(pendingModel);
     const card = (advice?.recommendations || []).find(item => item.name === name);
-    el("welcome-reason").textContent = card ? [card.purpose, card.fit, card.reason, card.size_bytes ? gb(card.size_bytes) + " download" : ""].filter(Boolean).join(" · ") : "Already installed on this computer.";
+    el("welcome-reason").textContent = card ? [card.purpose, card.fit, card.reason, card.size_bytes ? gb(card.size_bytes) + t(" download") : ""].filter(Boolean).join(" · ") : t("Already installed on this computer.");
   }
   async function load() {
-    el("welcome-status").textContent = "Reading hardware and recommendations…";
+    el("welcome-status").textContent = t("Reading hardware and recommendations…");
     el("welcome-retry").hidden = true;
     try {
       advice = await call("recommend_models");
@@ -34,7 +36,7 @@ window.welcomeui = (() => {
         const option = document.createElement("option"); option.value = name; option.textContent = name; return option;
       }));
       el("welcome-model").value = names[0] || "";
-      el("welcome-status").textContent = names.length ? "Choose a model to continue. You can change it later." : "No suitable recommendation is available. Open Models to choose one manually.";
+      el("welcome-status").textContent = names.length ? t("Choose a model to continue. You can change it later.") : t("No suitable recommendation is available. Open Models to choose one manually.");
       render();
     } catch (failure) { el("welcome-status").textContent = failure.message; el("welcome-retry").hidden = false; }
   }
@@ -48,7 +50,7 @@ window.welcomeui = (() => {
   async function start() {
     const name = el("welcome-model").value;
     if (!name || pendingModel) return;
-    pendingModel = name; cancelRequested = false; el("welcome-status").textContent = "Starting the download…"; render();
+    pendingModel = name; cancelRequested = false; el("welcome-status").textContent = t("Starting the download…"); render();
     try {
       const result = await call("pull_model", name);
       if (finished.has(result.pull_id)) return;
@@ -66,8 +68,8 @@ window.welcomeui = (() => {
       finished.add(event.pull_id); pendingModel = null; pull = null;
       if (event.type === "pull_done") {
         const names = [...installed(), event.model]; state = {...state, ollama: {models: names}};
-        window.app.refreshModels(); el("welcome-status").textContent = "The model is ready. Open your first chat.";
-      } else el("welcome-status").textContent = event.error || "Download stopped. You can resume it later.";
+        window.app.refreshModels(); el("welcome-status").textContent = t("The model is ready. Open your first chat.");
+      } else el("welcome-status").textContent = event.error || t("Download stopped. You can resume it later.");
       render();
     }
   }

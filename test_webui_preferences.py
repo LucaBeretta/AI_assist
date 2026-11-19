@@ -34,6 +34,11 @@ class PreferenceTests(unittest.TestCase):
         self.assertGreaterEqual(message["thinking_seconds"], 0)
         self.assertEqual(message["content"], "<think>Reasoning</think>Answer")
 
+    def test_language_preference_is_validated_and_saved(self):
+        self.assertTrue(self.api.set_web_preferences({"language": "it"})["ok"])
+        self.assertEqual(settings.load(self.store.directory)["language"], "it")
+        self.assertFalse(self.api.set_web_preferences({"language": "invalid"})["ok"])
+
 
 if __name__ == "__main__":
     unittest.main()

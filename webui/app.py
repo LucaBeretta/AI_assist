@@ -120,7 +120,7 @@ class Api:
 
     @_json_method
     def set_web_preferences(self, values):
-        if not isinstance(values, dict) or not set(values) <= {"first_run_complete", "zoom"}:
+        if not isinstance(values, dict) or not set(values) <= {"first_run_complete", "zoom", "language"}:
             raise ValueError("Choose supported web preferences.")
         with self._lock:
             if self._closed:

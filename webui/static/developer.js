@@ -2,13 +2,15 @@
 "use strict";
 
 window.devui = (() => {
+  const t = (text, vars = {}) => window.i18n ? window.i18n.t(text, vars) : text.replace(/\{(\w+)\}/g, (_, key) => String(vars[key] ?? ""));
+
   const element = id => document.getElementById(id);
   let task = null;          // {id, chatId, steps: [], cards: Map, running}
   let chatId = null;        // Developer chat used for the current project
 
   async function call(method, ...args) {
     const result = await window.pywebview.api[method](...args);
-    if (!result || result.ok === false) throw new Error(result?.error || "Invalid API response");
+    if (!result || result.ok === false) throw new Error(result?.error || t("Invalid API response"));
     return result;
   }
 
@@ -42,7 +44,7 @@ window.devui = (() => {
     if (task.activity) return task.activity;
     const details = node("details", "activity");
     details.open = true;
-    const summary = node("summary", "activity-summary", "Working…");
+    const summary = node("summary", "activity-summary", t("Working…"));
     const list = node("ol", "activity-list");
     details.append(summary, list);
     append(details);
@@ -53,10 +55,10 @@ window.devui = (() => {
   function summarize() {
     const a = task.activity;
     if (!a) return;
-    const parts = [`${a.steps} step${a.steps === 1 ? "" : "s"}`];
-    if (a.reads) parts.push(`${a.reads} read`);
-    if (a.edits) parts.push(`${a.edits} changed`);
-    if (a.commands) parts.push(`${a.commands} command${a.commands === 1 ? "" : "s"}`);
+    const parts = [t("Steps: {v0}", {v0: (a.steps)})];
+    if (a.reads) parts.push(t("Read: {v0}", {v0: (a.reads)}));
+    if (a.edits) parts.push(t("Changed: {v0}", {v0: (a.edits)}));
+    if (a.commands) parts.push(t("Commands: {v0}", {v0: (a.commands)}));
     a.summary.textContent = parts.join(" · ") + (task.running ? " · working" : "");
   }
 
@@ -85,11 +87,11 @@ window.devui = (() => {
   // ---------- approvals ----------
   function planCard(event) {
     const card = node("section", "dev-card plan-card");
-    card.append(node("div", "dev-card-head", "Proposed plan · nothing has been changed yet"));
+    card.append(node("div", "dev-card-head", t("Proposed plan · nothing has been changed yet")));
     const area = node("textarea", "plan-text");
     area.value = event.text || "";
     area.rows = Math.min(14, Math.max(4, area.value.split("\n").length + 1));
-    area.setAttribute("aria-label", "Plan (you can edit it before approving)");
+    area.setAttribute("aria-label", t("Plan (you can edit it before approving)"));
     const actions = node("div", "dev-card-actions");
     const original = area.value;
     const decide = async (decision) => {
@@ -99,15 +101,15 @@ window.devui = (() => {
         if (decision === "approve" && edited) await call("approve_plan", event.task_id, "edit", area.value);
         else await call("approve_plan", event.task_id, decision);
         card.classList.add("is-decided");
-        actions.replaceChildren(node("span", "dev-decided", decision === "cancel" ? "Plan cancelled" : edited ? "Edited plan approved" : "Plan approved"));
+        actions.replaceChildren(node("span", "dev-decided", decision === "cancel" ? t("Plan cancelled") : edited ? t("Edited plan approved") : t("Plan approved")));
       } catch (error) {
         status(error.message);
         for (const item of actions.querySelectorAll("button")) item.disabled = false;
       }
     };
-    actions.append(btn("Cancel task", "btn ghost", () => decide("cancel")), node("span", "grow"),
-                   node("span", "dev-hint", "Edit the text to change the plan."),
-                   btn("Approve plan", "btn primary", () => decide("approve")));
+    actions.append(btn(t("Cancel task"), "btn ghost", () => decide("cancel")), node("span", "grow"),
+                   node("span", "dev-hint", t("Edit the text to change the plan.")),
+                   btn(t("Approve plan"), "btn primary", () => decide("approve")));
     card.append(area, actions);
     append(card);
     area.focus?.();
@@ -132,7 +134,7 @@ window.devui = (() => {
           box.type = "checkbox";
           box.checked = true;
           box.addEventListener("change", updateApplyLabel);
-          bar.append(box, node("span", "", `Block ${index + 1}`), node("span", "mono dev-hint", hunk.header));
+          bar.append(box, node("span", "", t("Block {v0}", {v0: (index + 1)})), node("span", "mono dev-hint", hunk.header));
           const {pre: lines} = diffBlock(hunk.header + "\n" + hunk.lines.join(""));
           lines.firstChild?.remove?.();
           card.append(bar, lines);
@@ -142,7 +144,7 @@ window.devui = (() => {
         card.append(pre);
       }
       if (action.destination && !action.destination.replaceAll("\\", "/").includes("/" + action.path.replaceAll("\\", "/"))) {
-        card.append(node("p", "dev-warning", "Destination: " + action.destination));
+        card.append(node("p", "dev-warning", t("Destination: ") + action.destination));
       }
     } else if (action.kind === "run_command") {
       head.append(node("span", "tag", "COMMAND"), node("code", "mono strong", action.command));
@@ -150,7 +152,7 @@ window.devui = (() => {
       if (action.description) card.append(node("p", "dev-hint pad", action.description));
       card.append(node("p", "dev-hint pad mono", `in ${action.cwd} · timeout ${action.timeout_seconds}s`));
     } else {
-      head.append(node("span", "strong", action.kind || "Action"));
+      head.append(node("span", "strong", action.kind || t("Action")));
       card.append(head, node("pre", "diff", JSON.stringify(action, null, 2)));
     }
     const actions = node("div", "dev-card-actions");
@@ -164,32 +166,32 @@ window.devui = (() => {
         card.classList.add("is-decided");
         for (const item of blocks) item.box.disabled = true;
         actions.replaceChildren(node("span", "dev-decided " + (approved ? "ok" : "no"),
-          !approved ? "Rejected" : partial ? `Applied ${chosen.length} of ${blocks.length} blocks` : "Approved"));
+          !approved ? t("Rejected") : partial ? t("Applied {v0} of {v1} blocks", {v0: (chosen.length), v1: (blocks.length)}) : t("Approved")));
       } catch (error) {
         status(error.message);
         for (const item of actions.querySelectorAll("button")) item.disabled = false;
       }
     };
-    const yes = btn(action.kind === "run_command" ? "Run" : "Apply", "btn primary", () => decide(true));
+    const yes = btn(action.kind === "run_command" ? t("Run") : t("Apply"), "btn primary", () => decide(true));
     function updateApplyLabel() {
       const chosen = blocks.filter(item => item.box.checked).length;
-      yes.textContent = chosen === blocks.length ? "Apply all" : `Apply ${chosen} of ${blocks.length}`;
+      yes.textContent = chosen === blocks.length ? t("Apply all") : t("Apply {v0} of {v1}", {v0: (chosen), v1: (blocks.length)});
       yes.disabled = chosen === 0;
     }
     if (blocks.length) updateApplyLabel();
-    actions.append(btn("Reject", "btn ghost", () => decide(false)), node("span", "grow"),
-                   node("span", "dev-hint", action.kind === "write_file" ? "The original is kept: you can restore it from Checkpoints." : "Runs on this computer, not sandboxed."),
+    actions.append(btn(t("Reject"), "btn ghost", () => decide(false)), node("span", "grow"),
+                   node("span", "dev-hint", action.kind === "write_file" ? t("The original is kept: you can restore it from Checkpoints.") : t("Runs on this computer, not sandboxed.")),
                    yes);
     card.append(actions);
     append(card);
-    if (window.Notification?.permission === "granted" && document.hidden) new Notification("AI Assist needs your review", {body: action.path || action.command || ""});
+    if (window.Notification?.permission === "granted" && document.hidden) new Notification(t("AI Assist needs your review"), {body: action.path || action.command || ""});
   }
 
   function commandResult(text) {
     const box = node("details", "command-result");
     const firstLine = String(text).split("\n")[0];
     const failed = /exited with code [1-9]/.test(firstLine);
-    const summary = node("summary", failed ? "fail" : "ok", firstLine || "Command finished");
+    const summary = node("summary", failed ? "fail" : "ok", firstLine || t("Command finished"));
     box.append(summary, node("pre", "mono", text));
     append(box);
   }
@@ -216,9 +218,9 @@ window.devui = (() => {
         break;
       case "changed": ensureActivity().edits++; activityLine("changed", event.text); summarize(); break;
       case "checkpoint": activityLine("info", event.text); loadCheckpoints(); break;
-      case "plan_approval": planCard(event); status("Waiting for your plan approval"); break;
-      case "approval": actionCard(event); status("Waiting for your review"); break;
-      case "plan_approved": activityLine("done", "Plan approved"); break;
+      case "plan_approval": planCard(event); status(t("Waiting for your plan approval")); break;
+      case "approval": actionCard(event); status(t("Waiting for your review")); break;
+      case "plan_approved": activityLine("done", t("Plan approved")); break;
       case "assistant":
         if (event.text && !event.final) { const p = node("div", "dev-note"); p.append(window.renderMarkdown(event.text)); append(p); }
         break;
@@ -232,9 +234,9 @@ window.devui = (() => {
     summarize();
     if (task.activity) task.activity.details.open = false;
     const answer = node("div", "dev-answer" + (event.type === "agent_error" ? " is-error" : ""));
-    answer.append(window.renderMarkdown(event.type === "agent_error" ? "**Error:** " + event.error : event.text || ""));
+    answer.append(window.renderMarkdown(event.type === "agent_error" ? t("**Error:** ") + event.error : event.text || ""));
     append(answer);
-    status(event.type === "agent_done" ? "Task finished" : event.type === "agent_stopped" ? "Task stopped" : "Task failed");
+    status(event.type === "agent_done" ? t("Task finished") : event.type === "agent_stopped" ? t("Task stopped") : t("Task failed"));
     element("dev-step").textContent = "";
     controls();
     loadCheckpoints();
@@ -255,9 +257,9 @@ window.devui = (() => {
     const text = element("dev-task").value.trim();
     const project = element("dev-project").value.trim();
     if (!text) return;
-    if (!project) { status("Choose a project folder first."); element("dev-project").focus?.(); return; }
+    if (!project) { status(t("Choose a project folder first.")); element("dev-project").focus?.(); return; }
     const choice = window.app?.modelChoice() || {name: element("model").value, backend: "Ollama"};
-    if (choice.backend !== "Ollama") { status("Developer currently requires an Ollama model."); return; }
+    if (choice.backend !== "Ollama") { status(t("Developer currently requires an Ollama model.")); return; }
     const model = choice.name;
     try {
       if (!chatId) {
@@ -274,14 +276,14 @@ window.devui = (() => {
       bubble.append(node("pre", "", text));
       append(bubble);
       element("dev-task").value = "";
-      status(element("dev-plan").checked ? "Planning (read-only)…" : "Working…");
+      status(element("dev-plan").checked ? t("Planning (read-only)…") : t("Working…"));
       controls();
     } catch (error) { status(error.message); }
   }
 
   async function stop() {
     if (!task?.running) return;
-    status("Stopping…");
+    status(t("Stopping…"));
     try { await call("stop_task", task.id); } catch (error) { status(error.message); }
   }
 
@@ -289,10 +291,10 @@ window.devui = (() => {
   async function loadCheckpoints() {
     const project = element("dev-project").value.trim();
     const list = element("dev-checkpoints");
-    if (!project) { list.replaceChildren(node("p", "dev-hint", "Choose a project folder to see its checkpoints.")); return; }
+    if (!project) { list.replaceChildren(node("p", "dev-hint", t("Choose a project folder to see its checkpoints."))); return; }
     try {
       const result = await call("list_checkpoints", project);
-      if (!result.checkpoints.length) { list.replaceChildren(node("p", "dev-hint", "No checkpoints yet. One is saved before the first change of each task.")); return; }
+      if (!result.checkpoints.length) { list.replaceChildren(node("p", "dev-hint", t("No checkpoints yet. One is saved before the first change of each task."))); return; }
       list.replaceChildren(...result.checkpoints.map(item => {
         const row = node("div", "checkpoint");
         const files = Object.keys(item.files || {});
@@ -300,10 +302,10 @@ window.devui = (() => {
         const info = node("div", "checkpoint-info");
         info.append(node("span", "strong", isNaN(when) ? item.created_at : when.toLocaleString()),
                     node("span", "dev-hint mono", files.slice(0, 3).join(", ") + (files.length > 3 ? ` +${files.length - 3}` : "")));
-        row.append(info, btn("Restore", "btn", async () => {
-          const message = `Restore ${files.length} file(s) to how they were before this task?\n\nLater changes to these files will be overwritten and files created by the task will be deleted.`;
+        row.append(info, btn(t("Restore"), "btn", async () => {
+          const message = t("Restore {v0} file(s) to how they were before this task?\\n\\nLater changes to these files will be overwritten and files created by the task will be deleted.", {v0: (files.length)});
           if (window.confirm && !window.confirm(message)) return;
-          try { const done = await call("restore_checkpoint", item.task_id); status(`Restored ${done.restored} file(s).`); }
+          try { const done = await call("restore_checkpoint", item.task_id); status(t("Restored {v0} file(s).", {v0: (done.restored)})); }
           catch (error) { status(error.message); }
         }));
         return row;
@@ -320,7 +322,7 @@ window.devui = (() => {
   async function loadFiles() {
     const project = element("dev-project").value.trim();
     const list = element("dev-files");
-    if (!project) { files = []; list.replaceChildren(node("p", "dev-hint", "Choose a project folder to list its files.")); return; }
+    if (!project) { files = []; list.replaceChildren(node("p", "dev-hint", t("Choose a project folder to list its files."))); return; }
     try {
       files = (await call("list_project_files", project)).files;
       renderFiles();
@@ -337,15 +339,15 @@ window.devui = (() => {
   function renderPins() {
     const box = element("dev-pins");
     if (!pinned.length) {
-      box.replaceChildren(node("p", "dev-hint", "Choose a folder, then pin files to send them with every request."));
+      box.replaceChildren(node("p", "dev-hint", t("Choose a folder, then pin files to send them with every request.")));
       return;
     }
     box.replaceChildren(...pinned.map(item => {
       const chip = node("span", "chip pin-chip" + (item.error ? " is-error" : ""));
       chip.title = item.error || item.path;
-      chip.append(node("span", "mono", item.path), node("span", "dev-hint", item.error ? "unavailable" : tokensLabel(item.estimated_tokens)),
+      chip.append(node("span", "mono", item.path), node("span", "dev-hint", item.error ? t("unavailable") : tokensLabel(item.estimated_tokens)),
                   btn("×", "chip-x", () => togglePin(item.path, false)));
-      chip.lastChild.setAttribute("aria-label", "Unpin " + item.path);
+      chip.lastChild.setAttribute("aria-label", t("Unpin ") + item.path);
       return chip;
     }));
   }
@@ -359,8 +361,8 @@ window.devui = (() => {
     list.replaceChildren(...shown.map(item => {
       const row = node("div", "file-row" + (pins.has(item.path) ? " is-pinned" : ""));
       row.append(node("span", "file-path mono", item.path), node("span", "dev-hint", tokensLabel(item.estimated_tokens)));
-      if (/\.html?$/i.test(item.path)) row.append(btn("Preview", "file-btn", () => preview(item.path)));
-      const pin = btn(pins.has(item.path) ? "Unpin" : "Pin", "file-btn", () => togglePin(item.path, !pins.has(item.path)));
+      if (/\.html?$/i.test(item.path)) row.append(btn(t("Preview"), "file-btn", () => preview(item.path)));
+      const pin = btn(pins.has(item.path) ? t("Unpin") : t("Pin"), "file-btn", () => togglePin(item.path, !pins.has(item.path)));
       pin.disabled = !chatId;
       row.append(pin);
       return row;
@@ -377,7 +379,7 @@ window.devui = (() => {
   }
 
   async function preview(path) {
-    try { await call("preview_file", element("dev-project").value.trim(), path); status("Preview opened in a separate window."); }
+    try { await call("preview_file", element("dev-project").value.trim(), path); status(t("Preview opened in a separate window.")); }
     catch (error) { status(error.message); }
   }
 
@@ -386,7 +388,7 @@ window.devui = (() => {
 
   element("dev-project").value = recall("aiassist-dev-project") || "";
   async function setProject(folder) {
-    if (task?.running) throw new Error("Stop the current task before changing its folder.");
+    if (task?.running) throw new Error(t("Stop the current task before changing its folder."));
     if (!chatId) chatId = (await call("new_chat", false, null, folder)).chat.id;
     await call("set_chat_project", chatId, folder);
     element("dev-project").value = folder; remember("aiassist-dev-project", folder);

@@ -1,6 +1,8 @@
 /* Shared memory, saved prompts and status controls over the D5 API. */
 "use strict";
 window.workspaceui = (() => {
+  const t = (text, vars = {}) => window.i18n ? window.i18n.t(text, vars) : text.replace(/\{(\w+)\}/g, (_, key) => String(vars[key] ?? ""));
+
   const el = id => document.getElementById(id);
   const node = (tag, text, cls = "") => {
     const item = document.createElement(tag); item.className = cls;
@@ -9,7 +11,7 @@ window.workspaceui = (() => {
   };
   const call = async (method, ...args) => {
     const value = await window.pywebview.api[method](...args);
-    if (!value || value.ok === false) throw new Error(value?.error || "Invalid API response");
+    if (!value || value.ok === false) throw new Error(value?.error || t("Invalid API response"));
     return value;
   };
   const show = id => { const dialog = el(id); if (dialog.showModal) dialog.showModal(); else dialog.open = true; };
@@ -37,12 +39,12 @@ window.workspaceui = (() => {
   async function renderMemories() {
     const result = await call("list_memories");
     el("memory-enabled").checked = result.enabled;
-    el("memory-state").textContent = result.enabled ? "Shared memory is included in replies. Each reply shows the notes it used." : "Off. Shared memory is not sent to the model.";
+    el("memory-state").textContent = result.enabled ? t("Shared memory is included in replies. Each reply shows the notes it used.") : t("Off. Shared memory is not sent to the model.");
     el("memory-list").replaceChildren(...result.memories.map(item => {
       const row = node("div", undefined, "mem-row");
-      row.append(node("span", item.text), button("Edit", () => editText("Edit memory", item.text, 4000,
+      row.append(node("span", item.text), button(t("Edit"), () => editText(t("Edit memory"), item.text, 4000,
         async text => { await call("edit_memory", item.id, text); await renderMemories(); })),
-        button("Forget", async () => { await call("forget_memory", item.id); await renderMemories(); }));
+        button(t("Forget"), async () => { await call("forget_memory", item.id); await renderMemories(); }));
       return row;
     }));
   }
@@ -50,20 +52,20 @@ window.workspaceui = (() => {
     try { await call("set_memory_enabled", el("memory-enabled").checked); await renderMemories(); }
     catch (failure) { error(failure); await renderMemories().catch(error); }
   });
-  el("memory-add").addEventListener("click", () => editText("Add memory", "", 4000,
+  el("memory-add").addEventListener("click", () => editText(t("Add memory"), "", 4000,
     async text => { await call("add_memory", text); await renderMemories(); }));
 
   async function openInstructions(id) {
     try {
       const {chat} = await call("open_chat", id);
-      editText("Chat instructions", chat.environment.instructions, 1000000,
+      editText(t("Chat instructions"), chat.environment.instructions, 1000000,
         async text => { await call("set_chat_instructions", id, text); await window.app?.refreshChat(id); });
     } catch (failure) { error(failure); }
   }
   async function openMemories(id) {
     try {
       const [{chat}, result] = await Promise.all([call("open_chat", id), call("list_memories")]);
-      if (chat.incognito) throw new Error("Incognito chats never use shared memory.");
+      if (chat.incognito) throw new Error(t("Incognito chats never use shared memory."));
       memoryChat = id;
       el("chat-memory-all").checked = !chat.environment.memory_ids.length;
       memoryChecks = result.memories.map(item => {
@@ -82,7 +84,7 @@ window.workspaceui = (() => {
     event.preventDefault();
     try {
       const ids = el("chat-memory-all").checked ? [] : memoryChecks.filter(item => item.check.checked).map(item => item.id);
-      if (!el("chat-memory-all").checked && !ids.length) throw new Error("Choose a memory or select all memories.");
+      if (!el("chat-memory-all").checked && !ids.length) throw new Error(t("Choose a memory or select all memories."));
       await call("set_chat_memories", memoryChat, ids); await window.app?.refreshChat(memoryChat); close("chat-memory-dialog");
     } catch (failure) { el("chat-memory-error").textContent = failure.message; }
   });
@@ -91,9 +93,9 @@ window.workspaceui = (() => {
     prompts = (await call("list_prompts")).prompts;
     el("saved-prompts-list").replaceChildren(...prompts.map(item => {
       const row = node("div", undefined, "setting-row");
-      row.append(node("span", item.name), button("Edit", () => {
+      row.append(node("span", item.name), button(t("Edit"), () => {
         el("saved-prompt-name").value = item.name; el("saved-prompt-text").value = item.text;
-      }), button("Delete", async () => { await call("delete_prompt", item.name); await loadPrompts(); }));
+      }), button(t("Delete"), async () => { await call("delete_prompt", item.name); await loadPrompts(); }));
       return row;
     }));
   }
@@ -131,14 +133,15 @@ window.workspaceui = (() => {
   }
   function renderStatus(value) {
     if (value.ok === false) return;
-    el("status").textContent = value.engine;
+    el("status").textContent = value.backend && value.engine_state ? value.backend.toLowerCase() + " " + t(value.engine_state) : value.engine;
     el("status-model").textContent = value.model_name || "";
     el("status-placement").textContent = value.gpu_fraction == null ? (value.backend === "Colibri" ? "ram + ssd" : "")
       : `${Math.round(value.gpu_fraction * 100)}% gpu · ${Math.round(value.cpu_fraction * 100)}% cpu`;
     el("status-vram").textContent = value.vram || "";
     el("status-context").textContent = value.context || ""; el("status-meter").value = value.fraction || 0;
-    el("status-speed").textContent = value.speed || ""; el("status-agent").textContent = value.agent || "";
-    el("status-privacy").textContent = value.privacy_kind || value.privacy;
+    el("status-speed").textContent = value.speed || "";
+    el("status-agent").textContent = value.agent ? t("Agent step {v0} / {v1}", {v0: value.agent_step, v1: value.agent_max_steps}) : "";
+    el("status-privacy").textContent = t(value.privacy_kind || value.privacy || "");
     el("status-privacy").className = "privacy" + (value.privacy_kind && value.privacy_kind !== "local only" ? " is-remote" : "");
     el("status-meter").className = value.fraction >= .95 ? "level-full" : value.fraction >= .8 ? "level-warn" : "";
   }
@@ -146,7 +149,18 @@ window.workspaceui = (() => {
     if (event.type === "memories_changed" && el("settings-dialog").open) renderMemories().catch(error);
     if (event.type === "prompts_changed") loadPrompts().then(renderPromptMenu).catch(error);
   }
-  function openSettings() { renderMemories().catch(error); loadPrompts().catch(error); }
-  function onState() { if (!prompts.length && window.pywebview.api.list_prompts) loadPrompts().catch(error); }
+  function openSettings() {
+    el("setting-language").value = window.i18n?.preference || "system";
+    renderMemories().catch(error); loadPrompts().catch(error);
+  }
+  function onState(state) {
+    window.i18n?.setLanguage(state.settings?.language || "system");
+    if (!prompts.length && window.pywebview.api.list_prompts) loadPrompts().catch(error);
+  }
+  el("setting-language").addEventListener("change", async () => {
+    try { await call("set_web_preferences", {language: el("setting-language").value}); window.i18n.setLanguage(el("setting-language").value); }
+    catch (failure) { error(failure); }
+  });
+  window.addEventListener("languagechange", () => { if (el("settings-dialog").open) openSettings(); });
   return {openSettings, openMemories, openInstructions, renderStatus, promptKey, onEvent, onState};
 })();

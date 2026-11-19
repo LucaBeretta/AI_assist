@@ -120,7 +120,7 @@
     const actions = node("div"); actions.className = "code-actions";
     const language = (/^[\w+-]{1,40}$/.test(info) ? info.toLowerCase() : "text");
     for (const [action, label] of [["copy", "Copy"], ["save", "Save as…"], ...(["html", "htm"].includes(language) ? [["preview", "Preview"]] : [])]) {
-      const button = node("button", label); button.type = "button"; button.disabled = true;
+      const button = node("button", window.i18n?.t(label) || label); button.type = "button"; button.disabled = true;
       button.setAttribute("data-action", action); actions.append(button);
     }
     const pre = node("pre"), code = node("code");

@@ -6,6 +6,7 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-eval'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <title>AI Assist</title>
   <link rel="stylesheet" href="styles.css">
+  <script defer src="strings.js"></script>
   <script defer src="markdown.js"></script>
   <script defer src="workspace.js"></script>
   <script defer src="app.js"></script>
@@ -17,86 +18,86 @@
 <body>
 <div class="app">
   <div class="shell">
-    <aside class="sidebar" aria-label="Chats">
+    <aside class="sidebar" aria-label="Chats" data-i18n-aria-label="Chats">
       <div class="brand">
         <span class="brand-name"><svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 9-8 9-8-9z"></path></svg>AI Assist</span>
         <span class="brand-actions">
-          <button id="new-incognito" class="icon-btn" type="button" aria-label="New incognito chat" title="Incognito chat · Ctrl+Shift+N">
+          <button id="new-incognito" class="icon-btn" type="button" aria-label="New incognito chat" title="Incognito chat · Ctrl+Shift+N" data-i18n-aria-label="New incognito chat" data-i18n-title="Incognito chat · Ctrl+Shift+N">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3l18 18"></path><path d="M10.6 10.6a2 2 0 0 0 2.8 2.8"></path><path d="M9.9 5.1A9.8 9.8 0 0 1 12 5c5 0 9 4.5 10 7a12.7 12.7 0 0 1-2.4 3.4M6.6 6.6C4.4 8 2.8 10.2 2 12c1 2.5 5 7 10 7a9.6 9.6 0 0 0 5.4-1.6"></path></svg>
           </button>
-          <button id="new-chat" class="icon-btn bordered" type="button" aria-label="New chat" title="New chat · Ctrl+N">
+          <button id="new-chat" class="icon-btn bordered" type="button" aria-label="New chat" title="New chat · Ctrl+N" data-i18n-aria-label="New chat" data-i18n-title="New chat · Ctrl+N">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"></path></svg>
           </button>
         </span>
       </div>
 
       <button id="open-palette" class="search-btn" type="button">
-        <span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.5-3.5"></path></svg>Search or run a command</span>
+        <span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.5-3.5"></path></svg><span data-i18n="Search or run a command"></span></span>
         <kbd>Ctrl K</kbd>
       </button>
-      <nav class="nav" aria-label="Sections">
+      <nav class="nav" aria-label="Sections" data-i18n-aria-label="Sections">
         <button id="nav-chats" class="nav-item" type="button" aria-current="page">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.4A8 8 0 1 1 21 12z"></path></svg>Chats
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.4A8 8 0 1 1 21 12z"></path></svg><span data-i18n="Chats"></span>
         </button>
         <button id="nav-dev" class="nav-item" type="button" aria-current="false">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5"></path></svg>Developer
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5"></path></svg><span data-i18n="Developer"></span>
         </button>
         <button id="nav-models" class="nav-item" type="button" aria-current="false">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"></rect><path d="M9 9h6v6H9z"></path></svg>Models
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"></rect><path d="M9 9h6v6H9z"></path></svg><span data-i18n="Models"></span>
         </button>
       </nav>
 
       <div class="section-head">
-        <span class="section-label">Projects</span>
-        <button id="new-project" class="icon-btn small" type="button" aria-label="New project" title="New project">
+        <span class="section-label"><span data-i18n="Projects"></span></span>
+        <button id="new-project" class="icon-btn small" type="button" aria-label="New project" title="New project" data-i18n-aria-label="New project" data-i18n-title="New project">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
         </button>
       </div>
       <ul id="projects" class="project-list"></ul>
 
-      <span id="chats-label" class="section-label">Recent</span>
+      <span id="chats-label" class="section-label"><span data-i18n="Recent"></span></span>
       <ul id="chats" class="chat-list"></ul>
       <div class="sidebar-spacer"></div>
-      <button id="refresh" class="btn ghost" type="button" title="Reload the model list">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"></path></svg>Refresh models
+      <button id="refresh" class="btn ghost" type="button" title="Reload the model list" data-i18n-title="Reload the model list">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"></path></svg><span data-i18n="Refresh models"></span>
       </button>
-      <button id="open-settings" class="btn ghost" type="button" title="Settings · Ctrl+,">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"></path></svg>Settings
+      <button id="open-settings" class="btn ghost" type="button" title="Settings · Ctrl+," data-i18n-title="Settings · Ctrl+,">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"></path></svg><span data-i18n="Settings"></span>
       </button>
     </aside>
 
     <main class="main">
       <section id="welcome-view" class="view welcome" aria-labelledby="welcome-title" hidden>
         <div class="welcome-content">
-          <span class="brand-name">◇ AI Assist</span>
-          <h1 id="welcome-title">Your first local conversation</h1>
-          <p class="welcome-lead">Choose a model that fits this computer. Your conversations stay here.</p>
-          <section class="side-group"><h2>This computer</h2><p id="welcome-hardware" class="mono">Reading hardware…</p></section>
+          <span class="brand-name"><span data-i18n="◇ AI Assist"></span></span>
+          <h1 id="welcome-title"><span data-i18n="Your first local conversation"></span></h1>
+          <p class="welcome-lead"><span data-i18n="Choose a model that fits this computer. Your conversations stay here."></span></p>
+          <section class="side-group"><h2><span data-i18n="This computer"></span></h2><p id="welcome-hardware" class="mono"><span data-i18n="Reading hardware…"></span></p></section>
           <section class="side-group"><h2>A model to start with</h2>
-            <label class="field"><span>Recommended model</span><select id="welcome-model"></select></label>
+            <label class="field"><span><span data-i18n="Recommended model"></span></span><select id="welcome-model"></select></label>
             <p id="welcome-reason" class="setting-hint"></p>
             <div id="welcome-download" class="pull-progress" hidden><progress id="welcome-progress" max="1" value="0"></progress><span id="welcome-progress-text" class="mono"></span></div>
             <p id="welcome-status" class="setting-hint" role="status" aria-live="polite"></p>
           </section>
-          <div class="welcome-actions"><button id="welcome-skip" class="btn ghost" type="button">Skip for now</button>
-            <button id="welcome-retry" class="btn" type="button" hidden>Try again</button>
-            <button id="welcome-stop" class="btn" type="button" hidden>Stop download</button>
-            <button id="welcome-start" class="btn primary" type="button" disabled>Download model</button>
-            <button id="welcome-open" class="btn primary" type="button" hidden>Open the first chat</button></div>
+          <div class="welcome-actions"><button id="welcome-skip" class="btn ghost" type="button"><span data-i18n="Skip for now"></span></button>
+            <button id="welcome-retry" class="btn" type="button" hidden><span data-i18n="Try again"></span></button>
+            <button id="welcome-stop" class="btn" type="button" hidden><span data-i18n="Stop download"></span></button>
+            <button id="welcome-start" class="btn primary" type="button" disabled><span data-i18n="Download model"></span></button>
+            <button id="welcome-open" class="btn primary" type="button" hidden><span data-i18n="Open the first chat"></span></button></div>
         </div>
       </section>
       <div id="chat-view" class="view">
       <header class="header">
-        <h1 id="chat-title">Conversation</h1>
+        <h1 id="chat-title"><span data-i18n="Conversation"></span></h1>
         <div class="header-actions">
-          <span id="incognito-badge" class="badge" hidden>Incognito · not saved</span>
-          <button id="rename-chat" class="icon-btn" type="button" aria-label="Rename chat" title="Rename chat">
+          <span id="incognito-badge" class="badge" hidden><span data-i18n="Incognito · not saved"></span></span>
+          <button id="rename-chat" class="icon-btn" type="button" aria-label="Rename chat" title="Rename chat" data-i18n-aria-label="Rename chat" data-i18n-title="Rename chat">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"></path></svg>
           </button>
-          <button id="delete-chat" class="icon-btn" type="button" aria-label="Delete chat" title="Delete chat">
+          <button id="delete-chat" class="icon-btn" type="button" aria-label="Delete chat" title="Delete chat" data-i18n-aria-label="Delete chat" data-i18n-title="Delete chat">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"></path></svg>
           </button>
-          <button id="theme" class="icon-btn" type="button" aria-label="Switch theme" title="Switch theme · Ctrl+Shift+L">
+          <button id="theme" class="icon-btn" type="button" aria-label="Switch theme" title="Switch theme · Ctrl+Shift+L" data-i18n-aria-label="Switch theme" data-i18n-title="Switch theme · Ctrl+Shift+L">
             <svg class="icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg>
             <svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"></path></svg>
           </button>
@@ -108,133 +109,133 @@
           <span id="project-bar-name" class="strong"></span>
           <span id="project-bar-meta" class="dev-hint mono"></span>
         </div>
-        <button id="project-new-chat" class="btn primary" type="button">New chat in project</button>
-        <button id="project-edit" class="btn" type="button">Edit project</button>
-        <button id="project-close" class="icon-btn" type="button" aria-label="Show all chats" title="Show all chats">×</button>
+        <button id="project-new-chat" class="btn primary" type="button"><span data-i18n="New chat in project"></span></button>
+        <button id="project-edit" class="btn" type="button"><span data-i18n="Edit project"></span></button>
+        <button id="project-close" class="icon-btn" type="button" aria-label="Show all chats" title="Show all chats" data-i18n-aria-label="Show all chats" data-i18n-title="Show all chats">×</button>
       </div>
 
       <div id="banner" class="banner" role="alert" hidden>
         <span id="banner-text"></span>
         <span id="banner-actions" class="banner-actions"></span>
-        <button id="banner-close" class="icon-btn" type="button" aria-label="Dismiss">×</button>
+        <button id="banner-close" class="icon-btn" type="button" aria-label="Dismiss" data-i18n-aria-label="Dismiss">×</button>
       </div>
 
-      <section id="conversation" class="conversation" aria-label="Conversation">
+      <section id="conversation" class="conversation" aria-label="Conversation" data-i18n-aria-label="Conversation">
         <div id="messages" class="thread"></div>
       </section>
 
       <div class="composer-wrap">
         <button id="jump" class="jump" type="button" hidden>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6"></path></svg>Jump to latest
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6"></path></svg><span data-i18n="Jump to latest"></span>
         </button>
         <div id="interrupted" class="inline-notice" hidden>
-          <span>The last reply was interrupted before it finished.</span>
-          <button id="keep-interrupted" class="btn" type="button">Keep it</button>
-          <button id="discard-interrupted" class="btn ghost" type="button">Discard</button>
+          <span><span data-i18n="The last reply was interrupted before it finished."></span></span>
+          <button id="keep-interrupted" class="btn" type="button"><span data-i18n="Keep it"></span></button>
+          <button id="discard-interrupted" class="btn ghost" type="button"><span data-i18n="Discard"></span></button>
         </div>
         <form id="composer" class="composer">
           <div id="edit-hint" class="edit-hint" hidden>
-            <span>Editing a message — sending creates a new version; the old one stays.</span>
-            <button id="cancel-edit" class="btn ghost" type="button">Cancel · Esc</button>
+            <span><span data-i18n="Editing a message — sending creates a new version; the old one stays."></span></span>
+            <button id="cancel-edit" class="btn ghost" type="button"><span data-i18n="Cancel · Esc"></span></button>
           </div>
           <div id="attachments" class="chips" hidden></div>
-          <label class="sr-only" for="prompt">Message</label>
-          <textarea id="prompt" rows="2" required placeholder="Reply to AI Assist…"></textarea>
-          <div id="saved-prompt-menu" class="prompt-menu" role="listbox" aria-label="Saved prompts" hidden></div>
+          <label class="sr-only" for="prompt"><span data-i18n="Message"></span></label>
+          <textarea id="prompt" rows="2" required placeholder="Reply to AI Assist…" data-i18n-placeholder="Reply to AI Assist…"></textarea>
+          <div id="saved-prompt-menu" class="prompt-menu" role="listbox" aria-label="Saved prompts" hidden data-i18n-aria-label="Saved prompts"></div>
           <div class="composer-bar">
-            <button id="attach" class="icon-btn bordered" type="button" aria-label="Attach files" title="Attach files (or paste / drop them)">
+            <button id="attach" class="icon-btn bordered" type="button" aria-label="Attach files" title="Attach files (or paste / drop them)" data-i18n-aria-label="Attach files" data-i18n-title="Attach files (or paste / drop them)">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5l-8.6 8.6a5 5 0 0 1-7.1-7.1l8.6-8.6a3.3 3.3 0 0 1 4.7 4.7L10 17.7a1.7 1.7 0 0 1-2.4-2.4l7.9-7.9"></path></svg>
             </button>
             <input id="attach-input" class="sr-only" type="file" multiple tabindex="-1" aria-hidden="true">
-            <label class="model-pick"><span class="sr-only">Model</span><select id="model" aria-label="Model"></select></label>
-            <button id="open-models" class="btn ghost small-btn" type="button" title="See all models, your hardware and downloads">Models…</button>
-            <label title="Context length in tokens (empty = automatic)"><span class="sr-only">Context length</span><input id="context" class="ctx-input" type="number" min="2048" max="1048576" step="1" value="16384" placeholder="auto"></label>
+            <label class="model-pick"><span class="sr-only"><span data-i18n="Model"></span></span><select id="model" aria-label="Model" data-i18n-aria-label="Model"></select></label>
+            <button id="open-models" class="btn ghost small-btn" type="button" title="See all models, your hardware and downloads" data-i18n-title="See all models, your hardware and downloads"><span data-i18n="Models…"></span></button>
+            <label title="Context length in tokens (empty = automatic)" data-i18n-title="Context length in tokens (empty = automatic)"><span class="sr-only"><span data-i18n="Context length"></span></span><input id="context" class="ctx-input" type="number" min="2048" max="1048576" step="1" value="16384" placeholder="auto"></label>
             <span class="grow"></span>
             <details id="context-menu" class="ctx">
-              <summary title="Context: compact or start a new chat with the same setup">
+              <summary title="Context: compact or start a new chat with the same setup" data-i18n-title="Context: compact or start a new chat with the same setup">
                 <meter id="context-meter" min="0" max="1" low="0.8" high="0.95" optimum="0" value="0"></meter>
                 <span id="context-usage">–</span>
               </summary>
               <div class="ctx-panel" role="menu">
                 <button id="compact" class="menu-item" type="button" role="menuitem" disabled>
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M7 12h10M10 17h4"></path></svg>
-                  <span><span class="menu-title">Compact conversation</span><span class="menu-hint">Summarize older messages with this model; the latest stay as they are. Originals remain viewable.</span></span>
+                  <span><span class="menu-title"><span data-i18n="Compact conversation"></span></span><span class="menu-hint"><span data-i18n="Summarize older messages with this model; the latest stay as they are. Originals remain viewable."></span></span></span>
                 </button>
                 <button id="same-environment" class="menu-item" type="button" role="menuitem" disabled>
                   <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"></rect><path d="M12 8v8M8 12h8"></path></svg>
-                  <span><span class="menu-title">New chat, same environment</span><span class="menu-hint">Same model, context, instructions, pinned files and memory, empty conversation.</span></span>
+                  <span><span class="menu-title"><span data-i18n="New chat, same environment"></span></span><span class="menu-hint"><span data-i18n="Same model, context, instructions, pinned files and memory, empty conversation."></span></span></span>
                 </button>
               </div>
             </details>
-            <button id="stop" class="stop-btn" type="button" aria-label="Stop" title="Stop · Esc" disabled></button>
-            <button id="send" class="send-btn" type="submit" aria-label="Send" title="Send · Enter" disabled>
+            <button id="stop" class="stop-btn" type="button" aria-label="Stop" title="Stop · Esc" disabled data-i18n-aria-label="Stop" data-i18n-title="Stop · Esc"></button>
+            <button id="send" class="send-btn" type="submit" aria-label="Send" title="Send · Enter" disabled data-i18n-aria-label="Send" data-i18n-title="Send · Enter">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"></path></svg>
             </button>
           </div>
         </form>
-        <span class="footnote">Everything runs on this computer. Answers can be wrong.</span>
+        <span class="footnote"><span data-i18n="Everything runs on this computer. Answers can be wrong."></span></span>
       </div>
       </div>
 
       <div id="dev-view" class="view dev" hidden>
         <header class="header dev-header">
-          <h1>Developer</h1>
-          <label class="dev-project-field"><span class="sr-only">Project folder</span>
-            <input id="dev-project" class="mono" placeholder="Project folder, e.g. C:\Users\…\anteprima-v2" spellcheck="false"></label>
-          <button id="dev-browse" class="btn" type="button">Browse…</button>
+          <h1><span data-i18n="Developer"></span></h1>
+          <label class="dev-project-field"><span class="sr-only"><span data-i18n="Project folder"></span></span>
+            <input id="dev-project" class="mono" placeholder="Project folder, e.g. C:\Users\…\anteprima-v2" spellcheck="false" data-i18n-placeholder="Project folder, e.g. C:\Users\…\anteprima-v2"></label>
+          <button id="dev-browse" class="btn" type="button"><span data-i18n="Browse…"></span></button>
         </header>
         <div class="dev-body">
           <div class="dev-main">
-            <section id="dev-scroll" class="conversation" aria-label="Agent work">
+            <section id="dev-scroll" class="conversation" aria-label="Agent work" data-i18n-aria-label="Agent work">
               <div id="dev-thread" class="thread dev-thread">
                 <div class="dev-empty">
-                  <h2>Give the agent a task on your project</h2>
-                  <p>It reads files, proposes changes and commands, and waits for your approval before each one. A copy of every file is kept before it changes.</p>
+                  <h2><span data-i18n="Give the agent a task on your project"></span></h2>
+                  <p><span data-i18n="It reads files, proposes changes and commands, and waits for your approval before each one. A copy of every file is kept before it changes."></span></p>
                 </div>
               </div>
             </section>
             <div class="composer-wrap">
               <form id="dev-form" class="composer">
-                <label class="sr-only" for="dev-task">Task</label>
-                <textarea id="dev-task" rows="2" placeholder="Describe the task…  (Ctrl+Enter to run)"></textarea>
+                <label class="sr-only" for="dev-task"><span data-i18n="Task"></span></label>
+                <textarea id="dev-task" rows="2" placeholder="Describe the task…  (Ctrl+Enter to run)" data-i18n-placeholder="Describe the task…  (Ctrl+Enter to run)"></textarea>
                 <div class="composer-bar">
-                  <label class="toggle" title="The agent first reads and proposes a numbered plan; nothing changes until you approve it">
-                    <input id="dev-plan" type="checkbox" checked><span>Plan first</span>
+                  <label class="toggle" title="The agent first reads and proposes a numbered plan; nothing changes until you approve it" data-i18n-title="The agent first reads and proposes a numbered plan; nothing changes until you approve it">
+                    <input id="dev-plan" type="checkbox" checked><span><span data-i18n="Plan first"></span></span>
                   </label>
                   <span id="dev-step" class="dev-step mono"></span>
                   <span class="grow"></span>
-                  <button id="dev-stop" class="stop-btn" type="button" aria-label="Stop agent" title="Stop · Esc" disabled></button>
-                  <button id="dev-run" class="send-btn" type="submit" aria-label="Run task" title="Run · Ctrl+Enter">
+                  <button id="dev-stop" class="stop-btn" type="button" aria-label="Stop agent" title="Stop · Esc" disabled data-i18n-aria-label="Stop agent" data-i18n-title="Stop · Esc"></button>
+                  <button id="dev-run" class="send-btn" type="submit" aria-label="Run task" title="Run · Ctrl+Enter" data-i18n-aria-label="Run task" data-i18n-title="Run · Ctrl+Enter">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"></path></svg>
                   </button>
                 </div>
               </form>
-              <span id="dev-status" class="footnote" role="status" aria-live="polite">Uses the model and context chosen in Chats.</span>
+              <span id="dev-status" class="footnote" role="status" aria-live="polite"><span data-i18n="Uses the model and context chosen in Chats."></span></span>
             </div>
           </div>
-          <aside class="dev-side" aria-label="Task options">
+          <aside class="dev-side" aria-label="Task options" data-i18n-aria-label="Task options">
             <section class="side-group">
-              <h3>Step limit</h3>
-              <div class="segmented" role="radiogroup" aria-label="Step limit">
+              <h3><span data-i18n="Step limit"></span></h3>
+              <div class="segmented" role="radiogroup" aria-label="Step limit" data-i18n-aria-label="Step limit">
                 <label><input type="radio" name="dev-steps" value="12"><span>12</span></label>
                 <label><input type="radio" name="dev-steps" value="20" checked><span>20</span></label>
                 <label><input type="radio" name="dev-steps" value="30"><span>30</span></label>
               </div>
-              <p class="dev-hint">The agent stops and reports after this many steps.</p>
+              <p class="dev-hint"><span data-i18n="The agent stops and reports after this many steps."></span></p>
             </section>
             <section class="side-group">
-              <h3>Pinned · sent with every request</h3>
+              <h3><span data-i18n="Pinned · sent with every request"></span></h3>
               <div id="dev-pins" class="chips"></div>
             </section>
             <section class="side-group">
-              <h3>Files</h3>
-              <label class="sr-only" for="dev-file-filter">Filter files</label>
-              <input id="dev-file-filter" class="side-filter mono" placeholder="Filter files…" spellcheck="false">
+              <h3><span data-i18n="Files"></span></h3>
+              <label class="sr-only" for="dev-file-filter"><span data-i18n="Filter files"></span></label>
+              <input id="dev-file-filter" class="side-filter mono" placeholder="Filter files…" spellcheck="false" data-i18n-placeholder="Filter files…">
               <div id="dev-files" class="file-list"></div>
             </section>
             <section class="side-group">
-              <div class="section-head"><h3>Checkpoints</h3>
-                <button id="dev-refresh-checkpoints" class="icon-btn small" type="button" aria-label="Refresh checkpoints">
+              <div class="section-head"><h3><span data-i18n="Checkpoints"></span></h3>
+                <button id="dev-refresh-checkpoints" class="icon-btn small" type="button" aria-label="Refresh checkpoints" data-i18n-aria-label="Refresh checkpoints">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"></path></svg></button></div>
               <div id="dev-checkpoints" class="checkpoints"></div>
             </section>
@@ -243,10 +244,10 @@
       </div>
       <div id="models-view" class="view" hidden>
         <header class="header">
-          <h1 class="strong">Models</h1>
+          <h1 class="strong"><span data-i18n="Models"></span></h1>
           <div class="header-actions">
             <span id="models-status" class="dev-hint" role="status" aria-live="polite"></span>
-            <button id="models-refresh" class="icon-btn" type="button" aria-label="Check hardware and recommendations again">
+            <button id="models-refresh" class="icon-btn" type="button" aria-label="Check hardware and recommendations again" data-i18n-aria-label="Check hardware and recommendations again">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"></path></svg>
             </button>
           </div>
@@ -254,24 +255,24 @@
         <div class="models-scroll">
           <div class="models-page">
             <section aria-labelledby="hw-title">
-              <h2 id="hw-title" class="models-h">This computer</h2>
+              <h2 id="hw-title" class="models-h"><span data-i18n="This computer"></span></h2>
               <div id="hw-summary" class="hw-grid"></div>
               <div id="hw-notes"></div>
             </section>
             <section aria-labelledby="installed-title">
-              <h2 id="installed-title" class="models-h">Installed</h2>
+              <h2 id="installed-title" class="models-h"><span data-i18n="Installed"></span></h2>
               <div id="models-installed" class="model-list"></div>
             </section>
             <section aria-labelledby="rec-title">
-              <h2 id="rec-title" class="models-h">Recommended for this computer</h2>
+              <h2 id="rec-title" class="models-h"><span data-i18n="Recommended for this computer"></span></h2>
               <div id="models-recommended" class="model-grid"></div>
             </section>
             <section aria-labelledby="other-title">
-              <h2 id="other-title" class="models-h">Another model</h2>
+              <h2 id="other-title" class="models-h"><span data-i18n="Another model"></span></h2>
               <form id="pull-other" class="pull-other">
-                <label class="sr-only" for="pull-other-name">Model tag</label>
+                <label class="sr-only" for="pull-other-name"><span data-i18n="Model tag"></span></label>
                 <input id="pull-other-name" class="mono" placeholder="e.g. qwen3:14b (from ollama.com/library)" spellcheck="false">
-                <button id="pull-other-button" class="btn" type="submit">Download</button>
+                <button id="pull-other-button" class="btn" type="submit"><span data-i18n="Download"></span></button>
                 <span id="pull-other-progress"></span>
               </form>
             </section>
@@ -282,53 +283,56 @@
   </div>
 
   <footer class="statusbar">
-    <span id="status" class="status-engine" role="status" aria-live="polite">Connecting…</span>
+    <span id="status" class="status-engine" role="status" aria-live="polite"><span data-i18n="Connecting…"></span></span>
     <span id="status-model"></span><span id="status-placement"></span><span id="status-vram"></span>
     <span class="status-context"><meter id="status-meter" min="0" max="1" value="0"></meter><span id="status-context"></span></span>
     <span id="status-speed"></span><span id="status-agent"></span>
     <span class="grow"></span>
-    <span id="status-privacy" class="privacy">local only</span>
+    <span id="status-privacy" class="privacy" data-i18n="local only"></span>
   </footer>
 </div>
 
 <dialog id="settings-dialog" class="dialog" aria-labelledby="settings-title">
   <div class="dialog-head">
-    <h2 id="settings-title">Settings</h2>
-    <button id="settings-close" class="icon-btn" type="button" aria-label="Close">×</button>
+    <h2 id="settings-title"><span data-i18n="Settings"></span></h2>
+    <button id="settings-close" class="icon-btn" type="button" aria-label="Close" data-i18n-aria-label="Close">×</button>
   </div>
   <section class="setting-group">
-    <h3>Appearance</h3>
-    <label class="setting-row"><span><span class="setting-title">Theme</span><span class="setting-hint">Ctrl+Shift+L switches anywhere.</span></span>
-      <select id="setting-theme"><option value="night">Night</option><option value="day">Day</option></select></label>
+    <h3><span data-i18n="Appearance"></span></h3>
+    <label class="setting-row"><span data-i18n="Language"></span><select id="setting-language">
+      <option value="system" data-i18n="System default"></option><option value="en">English</option><option value="it">Italiano</option>
+    </select></label>
+    <label class="setting-row"><span><span class="setting-title"><span data-i18n="Theme"></span></span><span class="setting-hint"><span data-i18n="Ctrl+Shift+L switches anywhere."></span></span></span>
+      <select id="setting-theme"><option value="night" data-i18n="Night"></option><option value="day" data-i18n="Day"></option></select></label>
   </section>
   <section class="setting-group">
-    <h3>Models</h3>
-    <label class="setting-row"><span><span class="setting-title">Unload after inactivity</span><span class="setting-hint">Frees GPU memory when a model has not been used for a while.</span></span>
-      <select id="setting-idle"><option value="0">Never</option><option value="5">5 minutes</option><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option></select></label>
-    <div class="setting-sub">Loaded now</div>
+    <h3><span data-i18n="Models"></span></h3>
+    <label class="setting-row"><span><span class="setting-title"><span data-i18n="Unload after inactivity"></span></span><span class="setting-hint"><span data-i18n="Frees GPU memory when a model has not been used for a while."></span></span></span>
+      <select id="setting-idle"><option value="0" data-i18n="Never"></option><option value="5" data-i18n="5 minutes"></option><option value="15" data-i18n="15 minutes"></option><option value="30" data-i18n="30 minutes"></option><option value="60" data-i18n="1 hour"></option></select></label>
+    <div class="setting-sub"><span data-i18n="Loaded now"></span></div>
     <div id="loaded-models"></div>
   </section>
   <section class="setting-group">
-    <h3>Shared memory</h3>
-    <label class="check-row"><input id="memory-enabled" type="checkbox"><span>Use shared memory</span></label>
-    <button id="memory-add" class="btn" type="button">Add memory…</button>
+    <h3><span data-i18n="Shared memory"></span></h3>
+    <label class="check-row"><input id="memory-enabled" type="checkbox"><span><span data-i18n="Use shared memory"></span></span></label>
+    <button id="memory-add" class="btn" type="button"><span data-i18n="Add memory…"></span></button>
     <p id="memory-state" class="setting-hint"></p>
     <div id="memory-list" class="mem-list settings-mem"></div>
   </section>
   <section class="setting-group">
-    <h3>Saved prompts</h3>
-    <p class="setting-hint">Type / in the composer to insert a saved prompt.</p>
+    <h3><span data-i18n="Saved prompts"></span></h3>
+    <p class="setting-hint"><span data-i18n="Type / in the composer to insert a saved prompt."></span></p>
     <div id="saved-prompts-list"></div>
     <form id="saved-prompt-form">
-      <label class="field"><span>Name</span><input id="saved-prompt-name" maxlength="100" required></label>
-      <label class="field"><span>Prompt</span><textarea id="saved-prompt-text" rows="3" required></textarea></label>
-      <button class="btn" type="submit">Save prompt</button>
+      <label class="field"><span><span data-i18n="Name"></span></span><input id="saved-prompt-name" maxlength="100" required></label>
+      <label class="field"><span><span data-i18n="Prompt"></span></span><textarea id="saved-prompt-text" rows="3" required></textarea></label>
+      <button class="btn" type="submit"><span data-i18n="Save prompt"></span></button>
     </form>
   </section>
   <section class="setting-group">
-    <h3>Data</h3>
-    <div class="setting-row"><span><span class="setting-title">Back up all chats</span><span class="setting-hint">Saves every chat as a .zip in a folder you choose.</span></span>
-      <button id="export-chats" class="btn" type="button">Export…</button></div>
+    <h3><span data-i18n="Data"></span></h3>
+    <div class="setting-row"><span><span class="setting-title"><span data-i18n="Back up all chats"></span></span><span class="setting-hint"><span data-i18n="Saves every chat as a .zip in a folder you choose."></span></span></span>
+      <button id="export-chats" class="btn" type="button"><span data-i18n="Export…"></span></button></div>
     <p id="export-result" class="setting-hint mono"></p>
   </section>
 </dialog>
@@ -338,62 +342,62 @@
     <div class="dialog-head"><h2 id="text-dialog-title"></h2></div>
     <label class="field"><span id="text-dialog-label"></span><textarea id="text-dialog-input" rows="6"></textarea></label>
     <p id="text-dialog-error" class="setting-hint" role="alert"></p>
-    <div class="dialog-actions"><button id="text-dialog-cancel" class="btn ghost" type="button">Cancel</button><button class="btn primary" type="submit">Save</button></div>
+    <div class="dialog-actions"><button id="text-dialog-cancel" class="btn ghost" type="button"><span data-i18n="Cancel"></span></button><button class="btn primary" type="submit"><span data-i18n="Save"></span></button></div>
   </form>
 </dialog>
 <dialog id="chat-memory-dialog" class="dialog" aria-labelledby="chat-memory-title">
   <form id="chat-memory-form">
-    <div class="dialog-head"><h2 id="chat-memory-title">Memories for this chat</h2></div>
-    <p class="setting-hint">Incognito chats never use shared memory.</p>
-    <label class="check-row"><input id="chat-memory-all" type="checkbox"><span>All memories, including future additions</span></label>
+    <div class="dialog-head"><h2 id="chat-memory-title"><span data-i18n="Memories for this chat"></span></h2></div>
+    <p class="setting-hint"><span data-i18n="Incognito chats never use shared memory."></span></p>
+    <label class="check-row"><input id="chat-memory-all" type="checkbox"><span><span data-i18n="All memories, including future additions"></span></span></label>
     <div id="chat-memory-list"></div><p id="chat-memory-error" class="setting-hint" role="alert"></p>
-    <div class="dialog-actions"><button id="chat-memory-cancel" class="btn ghost" type="button">Cancel</button><button class="btn primary" type="submit">Save</button></div>
+    <div class="dialog-actions"><button id="chat-memory-cancel" class="btn ghost" type="button"><span data-i18n="Cancel"></span></button><button class="btn primary" type="submit"><span data-i18n="Save"></span></button></div>
   </form>
 </dialog>
 <div id="popup-menu" class="popup-menu" role="menu" hidden></div>
 <dialog id="shortcuts-dialog" class="dialog" aria-labelledby="shortcuts-title">
-  <div class="dialog-head"><h2 id="shortcuts-title">Keyboard shortcuts</h2><button id="shortcuts-close" class="icon-btn" type="button" aria-label="Close">×</button></div>
+  <div class="dialog-head"><h2 id="shortcuts-title"><span data-i18n="Keyboard shortcuts"></span></h2><button id="shortcuts-close" class="icon-btn" type="button" aria-label="Close" data-i18n-aria-label="Close">×</button></div>
   <dl class="shortcuts-list">
-    <dt><kbd>Ctrl N</kbd></dt><dd>New chat</dd><dt><kbd>Ctrl Shift N</kbd></dt><dd>Incognito chat</dd>
-    <dt><kbd>Ctrl K</kbd></dt><dd>Search chats and commands</dd><dt><kbd>Ctrl ,</kbd></dt><dd>Settings</dd>
-    <dt><kbd>Ctrl Shift L</kbd></dt><dd>Switch theme</dd><dt><kbd>Esc</kbd></dt><dd>Stop generating</dd>
-    <dt><kbd>↑</kbd></dt><dd>Edit the last message when the composer is empty</dd>
-    <dt><kbd>Shift Enter</kbd></dt><dd>New line</dd><dt><kbd>Ctrl + / − / 0</kbd></dt><dd>Zoom in / out / reset</dd>
-    <dt><kbd>Ctrl /</kbd></dt><dd>Keyboard shortcuts</dd>
+    <dt><kbd>Ctrl N</kbd></dt><dd><span data-i18n="New chat"></span></dd><dt><kbd>Ctrl Shift N</kbd></dt><dd><span data-i18n="Incognito chat"></span></dd>
+    <dt><kbd>Ctrl K</kbd></dt><dd><span data-i18n="Search chats and commands"></span></dd><dt><kbd>Ctrl ,</kbd></dt><dd><span data-i18n="Settings"></span></dd>
+    <dt><kbd>Ctrl Shift L</kbd></dt><dd><span data-i18n="Switch theme"></span></dd><dt><kbd>Esc</kbd></dt><dd><span data-i18n="Stop generating"></span></dd>
+    <dt><kbd>↑</kbd></dt><dd><span data-i18n="Edit the last message when the composer is empty"></span></dd>
+    <dt><kbd>Shift Enter</kbd></dt><dd><span data-i18n="New line"></span></dd><dt><kbd>Ctrl + / − / 0</kbd></dt><dd><span data-i18n="Zoom in / out / reset"></span></dd>
+    <dt><kbd>Ctrl /</kbd></dt><dd><span data-i18n="Keyboard shortcuts"></span></dd>
   </dl>
 </dialog>
 
 <dialog id="rename-dialog" class="dialog" aria-labelledby="rename-title">
   <form id="rename-form">
-    <div class="dialog-head"><h2 id="rename-title">Rename chat</h2></div>
-    <label class="field"><span class="sr-only">Title</span><input id="rename-input" required maxlength="300"></label>
+    <div class="dialog-head"><h2 id="rename-title"><span data-i18n="Rename chat"></span></h2></div>
+    <label class="field"><span class="sr-only"><span data-i18n="Title"></span></span><input id="rename-input" required maxlength="300"></label>
     <div class="dialog-actions">
-      <button id="rename-cancel" class="btn ghost" type="button">Cancel</button>
-      <button class="btn primary" type="submit">Save</button>
+      <button id="rename-cancel" class="btn ghost" type="button"><span data-i18n="Cancel"></span></button>
+      <button class="btn primary" type="submit"><span data-i18n="Save"></span></button>
     </div>
   </form>
 </dialog>
 
-<dialog id="palette" class="dialog palette" aria-label="Search chats and commands">
-  <input id="palette-input" placeholder="Search chats or type a command…" autocomplete="off" spellcheck="false">
+<dialog id="palette" class="dialog palette" aria-label="Search chats and commands" data-i18n-aria-label="Search chats and commands">
+  <input id="palette-input" placeholder="Search chats or type a command…" autocomplete="off" spellcheck="false" data-i18n-placeholder="Search chats or type a command…">
   <ul id="palette-list" class="palette-list"></ul>
 </dialog>
 
 <dialog id="project-dialog" class="dialog" aria-labelledby="project-title">
   <form id="project-form">
-    <div class="dialog-head"><h2 id="project-title">New project</h2></div>
-    <p class="setting-hint">A project groups chats that share instructions, a folder and a setup (model and context). New chats in the project start with that setup.</p>
-    <label class="field"><span>Name</span><input id="project-name" required maxlength="120" placeholder="e.g. Sito anteprima-v2"></label>
-    <label class="field"><span>Instructions <em>(optional, used by every chat in the project)</em></span><textarea id="project-instructions" rows="4"></textarea></label>
-    <div class="field"><span>Folder <em>(optional, for Developer tasks and pinned files)</em></span>
-      <span class="field-row"><input id="project-folder" class="mono" placeholder="C:\Users\…\project" aria-label="Project folder"><button id="project-browse" class="btn" type="button">Browse…</button></span></div>
+    <div class="dialog-head"><h2 id="project-title"><span data-i18n="New project"></span></h2></div>
+    <p class="setting-hint"><span data-i18n="A project groups chats that share instructions, a folder and a setup (model and context). New chats in the project start with that setup."></span></p>
+    <label class="field"><span><span data-i18n="Name"></span></span><input id="project-name" required maxlength="120" placeholder="e.g. Sito anteprima-v2" data-i18n-placeholder="e.g. Sito anteprima-v2"></label>
+    <label class="field"><span><span data-i18n="Instructions"></span> <em>(optional, used by every chat in the project)</em></span><textarea id="project-instructions" rows="4"></textarea></label>
+    <div class="field"><span><span data-i18n="Folder"></span> <em><span data-i18n="(optional, for Developer tasks and pinned files)"></span></em></span>
+      <span class="field-row"><input id="project-folder" class="mono" placeholder="C:\Users\…\project" aria-label="Project folder" data-i18n-placeholder="C:\Users\…\project" data-i18n-aria-label="Project folder"><button id="project-browse" class="btn" type="button"><span data-i18n="Browse…"></span></button></span></div>
     <label class="check-row"><input id="project-use-env" type="checkbox" checked>
-      <span>Use the current model and context as the project setup <em id="project-env-label" class="mono"></em></span></label>
+      <span><span data-i18n="Use the current model and context as the project setup"></span> <em id="project-env-label" class="mono"></em></span></label>
     <div class="dialog-actions">
-      <button id="project-delete" class="btn ghost danger" type="button" hidden>Delete project</button>
+      <button id="project-delete" class="btn ghost danger" type="button" hidden><span data-i18n="Delete project"></span></button>
       <span class="grow"></span>
-      <button id="project-cancel" class="btn ghost" type="button">Cancel</button>
-      <button id="project-submit" class="btn primary" type="submit">Create project</button>
+      <button id="project-cancel" class="btn ghost" type="button"><span data-i18n="Cancel"></span></button>
+      <button id="project-submit" class="btn primary" type="submit"><span data-i18n="Create project"></span></button>
     </div>
   </form>
 </dialog>

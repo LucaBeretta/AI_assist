@@ -6,7 +6,7 @@ from pathlib import Path
 import tempfile
 
 
-DEFAULTS = {"idle_unload_minutes": 0, "first_run_complete": False, "zoom": 1.0}
+DEFAULTS = {"idle_unload_minutes": 0, "first_run_complete": False, "zoom": 1.0, "language": "system"}
 
 
 def validate(values):
@@ -18,6 +18,8 @@ def validate(values):
     zoom = values.get("zoom", 1.0)
     if type(zoom) not in (int, float) or not .7 <= zoom <= 1.5:
         raise ValueError("UI zoom must be between 0.7 and 1.5.")
+    if values.get("language", "system") not in ("system", "en", "it"):
+        raise ValueError("Choose the system language, English or Italian.")
     return {**DEFAULTS, **values}
 
 
