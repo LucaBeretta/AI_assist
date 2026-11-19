@@ -58,7 +58,7 @@ _LAN_NETWORKS = tuple(ipaddress.ip_network(network) for network in (
 _EVENTS = frozenset({
     "socket.getaddrinfo", "socket.gethostbyname", "socket.gethostbyname_ex",
     "socket.gethostbyaddr", "socket.getnameinfo", "socket.connect", "socket.sendto",
-    "socket.sendmsg", "urllib.Request", "webbrowser.open", "os.startfile", "import"})
+    "socket.sendmsg", "socket.bind", "urllib.Request", "webbrowser.open", "os.startfile", "import"})
 # Ollama endpoints that make Ollama itself contact its online registry.
 _OLLAMA_REGISTRY = {
     "/api/pull": ("Ollama model download", "Ollama downloads the model from its online registry."),
@@ -73,6 +73,9 @@ _SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]+:")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]+")
 _GATE_FILE = os.path.normcase(os.path.abspath(__file__))
 _APP_DIRECTORY = os.path.dirname(_GATE_FILE)
+# AI Assist's own packages. Listed by name: the private Python in runtime/ also
+# lives inside the app folder, and its libraries are not AI Assist's code.
+_APP_PACKAGES = {os.path.join(_APP_DIRECTORY, name): name for name in ("app_core", "webui")}
 _CHILD_GATE_DIRECTORY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "child_gate")
 _LIBRARIES = tuple({os.path.join(os.path.normcase(os.path.abspath(path)), "")
                     for path in (sysconfig.get_paths().get(name) for name in ("stdlib", "platstdlib", "purelib", "platlib"))
@@ -383,8 +386,34 @@ def _check(event, args):
     elif event in ("socket.gethostbyaddr", "socket.getnameinfo"):
         address = args[0]
         _check_reverse(address[0] if isinstance(address, tuple) and address else address)
+    elif event == "socket.bind":
+        _check_listen(args[0], args[1])
     elif args[1] is not None:
         _check_address(args[0], args[1])
+
+
+def _check_listen(sock, address):
+    """AI Assist itself only listens on this computer. A socket bound to every
+    interface, or to a network address, could expose chats, files or the AI
+    engines to other devices, so it is refused. Programs AI Assist starts
+    (colibri) keep their own settings; this rule is for the app's process."""
+    if _parent is not None:
+        return
+    family = getattr(sock, "family", None)
+    if hasattr(socket, "AF_UNIX") and family == socket.AF_UNIX:
+        return
+    host = address[0] if isinstance(address, tuple) and address else None
+    if family in (socket.AF_INET, socket.AF_INET6) and isinstance(host, (str, bytes, bytearray)):
+        name = _normal(host)
+        ip = _address(name)
+        if name == "localhost" or (ip is not None and ip.is_loopback):
+            return
+        shown = name or "every network interface"
+    else:
+        shown = "an address the gate cannot check"
+    _record("blocked: listening beyond this computer",
+            Request("Listen for connections", shown, "", "", _source(), "not started"), notify=True)
+    raise InternetBlocked(f"AI Assist only accepts connections from this computer, so it did not listen on {shown}.")
 
 
 def _check_name(host):
@@ -645,6 +674,8 @@ def _source():
         if path != _GATE_FILE:
             if _parent is None and os.path.dirname(path) == _APP_DIRECTORY:
                 return f"{os.path.basename(filename)} line {frame.f_lineno}"
+            if _parent is None and os.path.dirname(path) in _APP_PACKAGES:
+                return f"{_APP_PACKAGES[os.path.dirname(path)]}/{os.path.basename(filename)} line {frame.f_lineno}"
             # In a program AI Assist started, name the program's own code, not its libraries.
             if (_parent is not None and not filename.startswith("<") and not path.startswith(_LIBRARIES)
                     and "site-packages" not in path):
@@ -773,10 +804,13 @@ def _record(decision, request, notify=False):
 def _write_log(entry):
     path = log_path()
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         if path.is_file() and path.stat().st_size > MAX_LOG_BYTES:
             os.replace(path, path.with_name(path.name + ".1"))
-        with open(path, "a", encoding="utf-8") as handle:
+        # Where and why AI Assist went online is private: a new log is readable only by this user.
+        # O_BINARY: on Windows a raw descriptor would otherwise translate newlines a second time.
+        descriptor = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_BINARY", 0), 0o600)
+        with open(descriptor, "a", encoding="utf-8") as handle:
             handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
     except OSError:
         pass

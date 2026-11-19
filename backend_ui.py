@@ -1,6 +1,5 @@
 """Backend selection and Colibri integration for the existing workspace."""
 
-import json
 import os
 import threading
 import time
@@ -8,16 +7,15 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 import webbrowser
 
+from app_core import settings
 from colibri_backend import ColibriClient, normalize_url
 import colibri_launcher as launcher
 
-DEFAULT_COLIBRI_URL = "http://127.0.0.1:8000/v1"
+DEFAULT_COLIBRI_URL = settings.DEFAULT_COLIBRI_URL
 
 
 class BackendMixin:
     def initialize_backend(self):
-        self.backend = "Ollama"
-        self.colibri_url = DEFAULT_COLIBRI_URL
         # The colibri folder lets AI Assist drive colibri's own launcher: its
         # recommendations, installs, context, and starting or stopping the server.
         self.colibri_settings = self.chat_store.directory / "colibri.settings" if self.chat_store else None
@@ -27,17 +25,7 @@ class BackendMixin:
         self.colibri_key = os.environ.get("COLI_API_KEY", "")
         self.backend_window = None
         self.backend_settings = self.chat_store.directory / "backend.settings" if self.chat_store else None
-        if self.backend_settings:
-            try:
-                data = json.loads(self.backend_settings.read_text(encoding="utf-8"))
-                url = normalize_url(data.get("url", self.colibri_url))
-                if data.get("backend") in ("Ollama", "Colibri"):
-                    self.backend = data["backend"]
-                    self.colibri_url = url
-            except (OSError, ValueError, TypeError, AttributeError):
-                pass
-        if os.environ.get("COLIBRI_URL"):
-            self.colibri_url = normalize_url(os.environ["COLIBRI_URL"])
+        self.backend, self.colibri_url = settings.load_backend(self.backend_settings, normalize_url)
 
     def colibri_client(self):
         return ColibriClient(self.colibri_url, self.colibri_key)
@@ -71,9 +59,7 @@ class BackendMixin:
     def save_backend_settings(self):
         if not self.backend_settings:
             return
-        temporary = self.backend_settings.with_suffix(".tmp")
-        temporary.write_text(json.dumps({"backend": self.backend, "url": self.colibri_url}), encoding="utf-8")
-        temporary.replace(self.backend_settings)
+        settings.save_backend(self.backend_settings, self.backend, self.colibri_url)
 
     def switch_backend(self, backend, refresh=True, fresh_chat=True):
         """Change engines: the model list reloads and, by default, a new chat starts."""

@@ -1,6 +1,6 @@
 # AI Assist
 
-A local Ollama workspace with saved chats, a developer agent, code previews, model capabilities, and hardware-aware downloads. Built with Python and Tkinter; no pip packages are required.
+A local Ollama workspace with saved chats, a developer agent, code previews, model capabilities, and hardware-aware downloads. Built with Python and Tkinter, plus a browser-based [web workspace (preview)](#web-workspace-preview); no pip packages are required.
 
 ## Requirements
 
@@ -46,7 +46,8 @@ AI Assist works offline. Nothing it does reaches the internet until you approve 
 - **What is checked.** At startup the app turns on a Python audit hook that stays on until the app closes. Every DNS lookup, connection and datagram the app makes is classed as *this computer*, *local network* (private addresses such as 192.168.x.x, 10.x.x.x or fe80::) or *internet*. Host names other than `localhost` count as internet, because looking one up may ask a DNS server outside your network. Requests that make another program go online are checked too: Ollama model downloads and uploads, Ollama cloud models (including local aliases of one, which Ollama's `/api/show` reveals), colibri model installs, and internet links opened in the browser or another program.
 - **Two confirmations.** The approval window shows what would go online, where, why, what leaves the computer, and which app file asked. When the code gave no reason, *Why* reads *Not declared* in amber. **Continue to allow...** leads to a second step, where **Allow** unlocks after three seconds. Blocking is the default: closing the window, Escape and Enter all block. An approval covers only that task (or 60 seconds) on the thread that asked; there is no "always allow". After you block a request, the same request is blocked without asking for 30 seconds.
 - **Notifications and log.** A system notification announces each request waiting for review, each allowed connection, and each automatic block. **Settings > Connection log...**, or a click on the privacy indicator in the status bar, lists every request and its decision. The same entries are saved as JSON lines in `network.log` beside the saved chats (up to 1 MB, plus one older file). The status bar shows *local only · internet locked*, or *online now: host* for a minute after an approval.
-- **Fails closed.** Without the approval window (scripts, tests), internet access is blocked. If the gate cannot check something, such as an unknown socket type or an Ollama model it cannot confirm runs locally, the request is blocked. asyncio's Windows connection method bypasses audit hooks, so the app refuses to load it.
+- **Fails closed.** Without the approval window (scripts, tests, the web workspace), internet access is blocked. If the gate cannot check something, such as an unknown socket type or an Ollama model it cannot confirm runs locally, the request is blocked. asyncio's Windows connection method bypasses audit hooks, so the app refuses to load it.
+- **Listens on this computer only.** AI Assist itself never accepts connections from other devices: a listening socket on any address other than this computer (127.x, ::1) is refused and logged. Programs it starts, such as colibri, keep their own settings.
 - **Updates and previews.** AI Assist never checks GitHub by itself; **Check for updates...** asks first. HTML previews carry a Content Security Policy that lets the browser load only the preview's own files, so scripts, fonts and images from the internet do not load. A page can still send the browser to another address.
 
 **Programs AI Assist starts.** colibri is written in Python, and so is much of what the developer agent runs. Every Python program AI Assist starts, including the colibri server it launches and Python started by an agent command, loads the same gate from `child_gate/sitecustomize.py`. Its internet requests appear in the same approval window, labelled with the program (for example *colibri*), and are blocked if AI Assist is not running to approve them. If the gate cannot start in such a program (for example Python older than 3.8), the program is stopped instead of running unchecked. An approved colibri model install is the one exception: its download runs unchecked after your approval, then the server starts under the gate.
@@ -63,6 +64,25 @@ Ollama runs as its own native programs, so the gate cannot see inside them. **Se
 - Every change is written to the connection log and announced with a notification.
 
 **Limits.** Audit hooks cannot see into native code: Python extensions that open their own connections are refused where they are known (`hf_xet`, `hf_transfer`, `pycurl`), and others are not checked. Python started with `-I`, `-E` or `-S` skips the child gate. The browser is outside the gate once a page is open. Audit hooks also cannot stop deliberately malicious code inside a gated process; the gate guards AI Assist's features and the programs it starts. The firewall lock is available on Windows only.
+
+## Web workspace (preview)
+
+A modern interface for the same chats, in your browser, on this computer only. It needs Python but not Tkinter:
+
+```sh
+python web_workspace.py            # opens your browser with a single-use sign-in link
+python web_workspace.py --no-browser --port 8765
+```
+
+The window it runs in prints the link; press Enter there for a new one (each works once, for five minutes) and Ctrl+C to stop. It offers streamed chat with Stop, Markdown and code blocks with Copy, saved chats (search, rename, delete), models and where they run, a details panel (model capabilities, last answer's speed and context, privacy, shared memory, hardware), shared memory editing, the connection log, Night and Day themes, keyboard navigation, and a layout that works on narrow screens.
+
+On purpose, it **cannot**:
+
+- **go online**: there is no approval window, so the internet gate blocks every internet request. Model downloads, cloud models and update checks stay in the desktop app.
+- **change your projects**: developer chats, their project files (with the agent's exclusions), applied diffs and command activity are **read-only**. The agent, edits and commands run in the desktop app, behind its reviewed confirmations.
+- **be reached from other devices**: it listens on 127.0.0.1 (or ::1) only, checks every request's Host and Origin, and needs the page's session for every call. No cookies are used.
+
+Only one AI Assist may use a data folder at a time, so close the desktop window before starting the web workspace (and vice versa); the second one explains which is open. Design and limits: `docs/architecture-decision.md`, `docs/target-architecture.md`, `docs/threat-model.md`.
 
 ## Chats and developer workspace
 
@@ -192,7 +212,15 @@ To update, extract the downloaded ZIP into a new folder and start that copy. The
 ```sh
 python -m unittest discover -v
 python -m compileall -q .
+node --test webui/tests/markdown.test.mjs webui/tests/format.test.mjs   # optional; also run by the suite when Node is installed
+python tools/web_e2e.py                                                # optional; real browser + running Ollama with gemma3:270m
 ```
+
+`tools/web_e2e.py` drives the web workspace in headless Edge or Chrome on a throwaway data folder: a real streamed answer, Stop, dialogs and focus, the read-only developer view, the Day theme, a phone-sized screen, and any script error or Content-Security-Policy violation. It needs no packages.
+
+Code layout: `app_core/` holds the rules both interfaces share (providers, conversation, chat service, privacy, settings, the single-instance lock) and imports no UI toolkit; `webui/` is the loopback API and its page; the root modules are the desktop app, the agent, persistence and the internet gate. See `docs/architecture-audit.md` for the current state and `docs/modernization-backlog.md` for what comes next.
+
+Only one AI Assist runs per data folder: a second desktop window, or the web workspace while the window is open, reports which copy holds the folder instead of overwriting its chats.
 
 Tests isolate chat history and project changes in temporary directories. Ollama responses are simulated for reproducible checks; subprocess integration tests also run harmless real Python commands and verify timeout cleanup. Real symlink tests may be skipped when Windows does not grant symlink privileges; resolved-path confinement is also checked without that privilege.
 

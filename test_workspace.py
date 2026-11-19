@@ -92,6 +92,16 @@ class WorkspaceIntegrationTests(unittest.TestCase):
             if widget.winfo_class() == "Button" and widget.cget("text") == "Check for updates"
         )
         self.assertTrue(update_button.winfo_exists())
+        self.assertEqual(self.app.settings_menu.entrycget(4, "label"), "Hourly status...")
+
+    def test_hourly_status_window_exposes_an_off_by_default_mic_toggle(self):
+        report = self.app.hourly_status
+        self.assertFalse(report.enabled)
+        window = report.open()
+        self.assertTrue(window.winfo_exists())
+        self.assertFalse(report.enabled_var.get())
+        self.assertIn("no audio is saved or sent", report.state_label.cget("text"))
+        report._close_window()
 
     def test_model_controls_keep_navigation_and_chat_available(self):
         self.root.deiconify()

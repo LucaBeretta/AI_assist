@@ -400,10 +400,11 @@ def terminate_tree(process):
     if os.name == "nt":
         try:
             subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], stdin=subprocess.DEVNULL,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10, check=False,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5, check=True,
                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        except (OSError, subprocess.TimeoutExpired):
-            pass
+        except (OSError, subprocess.SubprocessError):
+            if process.poll() is None:
+                process.kill()
     else:
         import signal
         try:
