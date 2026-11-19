@@ -160,8 +160,42 @@ class WatchTests(unittest.TestCase):
                 watch_paired_nodes(client_id="mac_1", stop_event=stop,
                                    notify=lambda *args: notifications.append(args),
                                    interval=1, store=store)
-            self.assertEqual(len(notifications), 2)
-            self.assertTrue(all("dispositivo associato" in m[1] for m in notifications))
+            self.assertEqual(len(notifications), 3)
+            self.assertIn("PC disponibile", notifications[0][0])
+            self.assertIn("non disponibile", notifications[1][0])
+            self.assertIn("PC disponibile", notifications[2][0])
+            self.assertEqual(sum("non disponibile" in title for title, _ in notifications), 1)
+            self.assertTrue(all("nodo" in message.lower() or "dispositivo" in message.lower()
+                                for _, message in notifications))
+
+    def test_offline_at_start_never_generates_disconnection_notice(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = TrustStore(directory)
+            store.save_client(ID, FP, TOKEN, "192.168.1.3", 49381)
+            stop = threading.Event()
+            sent = []
+            checks = [False, False, False, False]
+            def unavailable(*_args, **_kwargs):
+                checks.pop()
+                if not checks:
+                    stop.set()
+                raise NodeUnavailable("Windows sharing off")
+            with patch("paired_node_watch.verify_peer_health", side_effect=unavailable):
+                watch_paired_nodes(client_id="mac_1", stop_event=stop,
+                                   store=store, interval=1,
+                                   notify=lambda *args: sent.append(args))
+            self.assertEqual(sent, [])
+
+    def test_interrupted_single_probe_does_not_generate_offline_notice(self):
+        obj = AvailabilityTransitions()
+        obj.update(ID, True)
+        self.assertEqual(obj.update(ID, True), "online")
+        self.assertIsNone(obj.update(ID, False))
+        self.assertIsNone(obj.update(ID, True))
+        self.assertIsNone(obj.update(ID, False))
+        self.assertEqual(obj.update(ID, False), "offline")
+        for _ in range(6):
+            self.assertIsNone(obj.update(ID, False))
 
     def test_watcher_does_nothing_until_explicitly_started(self):
         with tempfile.TemporaryDirectory() as directory:
