@@ -132,7 +132,12 @@ class InferenceNode:
                 if not node.active.is_set() or not self.allowed():
                     return
                 try:
-                    if self.path == "/v1/models":
+                    if self.path == "/v1/health":
+                        # Fast, authenticated health check: no model download,
+                        # filesystem read, or expensive Ollama probe.
+                        self.send_data(200, {"node_id": node.node_id, "sharing": True,
+                                             "service": "inference-only"})
+                    elif self.path == "/v1/models":
                         self.send_data(200, {"models": local_models()})
                     elif self.path == "/v1/running":
                         running = ollama.running_details(ollama.api_json(OLLAMA, "/api/ps"))
