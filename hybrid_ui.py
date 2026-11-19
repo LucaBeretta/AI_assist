@@ -8,6 +8,7 @@ import tkinter as tk
 from tkinter import ttk
 import urllib.request
 
+from app_core.settings import write_json
 from coding_agent import AgentCancelled
 from colibri_backend import ColibriClient
 import colibri_launcher as launcher
@@ -216,9 +217,7 @@ class HybridMixin:
                         raise ValueError("Choose Ollama and a tool-capable worker model in the sidebar first.")
                     self.hybrid_snapshot(config)
                 if self.hybrid_settings:
-                    temporary = self.hybrid_settings.with_suffix(".tmp")
-                    temporary.write_text(json.dumps(config, indent=2), encoding="utf-8")
-                    temporary.replace(self.hybrid_settings)
+                    write_json(self.hybrid_settings, config, indent=2)
                 self.hybrid_config = config
             except (ValueError, OSError) as error:
                 window.status.config(text=str(error))

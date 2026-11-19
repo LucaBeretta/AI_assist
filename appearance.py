@@ -4,6 +4,8 @@ import json
 import tkinter as tk
 from tkinter import ttk, font
 
+from app_core.settings import write_json
+
 
 DARK_THEMES = ("Dark", "Night")
 # The console pair: one switch in the header flips between them.
@@ -224,9 +226,7 @@ class Appearance:
         if not self.path:
             return None
         try:
-            temporary = self.path.with_suffix(".tmp")
-            temporary.write_text(json.dumps({"theme": self.theme, "style": self.style}), encoding="utf-8")
-            temporary.replace(self.path)
+            write_json(self.path, {"theme": self.theme, "style": self.style})
         except OSError as error:
             return str(error)
         return None

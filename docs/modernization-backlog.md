@@ -19,6 +19,7 @@ Sizes: S (≤1 day), M (2–4 days), L (1–2 weeks). Each item names its eviden
 - **The browser version in its own app window** (`webui/app_window.py`): Edge, Chrome or Brave with `--app`; only this computer's workspace address, checked by the gate like any link.
 - **Undo for the agent's file changes** (`app_core/checkpoints.py`): originals saved per task outside the project; undo restores them and leaves files you edited afterwards alone.
 - **Automatic daily backups with restore** (`app_core/backups.py`): 14 kept; restore adds missing chats, replaces damaged ones, never changes a chat you still have.
+- **P0-4, private settings everywhere**: `appearance.settings`, `colibri.settings`, `hybrid.settings` and `firewall-lift.json` now use `app_core.settings.write_json` like the other settings (atomic, 0600), so every settings file has one writer (audit S4, C6). Evidence: `test_private_settings.py` and `test_hybrid_ui`, with the 0600 checks run on Linux (WSL Ubuntu); macOS not tested.
 
 ## P0
 
@@ -26,7 +27,6 @@ Sizes: S (≤1 day), M (2–4 days), L (1–2 weeks). Each item names its eviden
 | --- | --- | --- | --- | --- |
 | P0-2 | **Sandboxed agent commands** (`Executor` with Seatbelt, bubblewrap/Landlock, and Windows restricted-token backends). Fail closed: no network, writes to the project only. | L | — | Per-OS tests show network refused and writes outside the project refused. |
 | P0-3 | **CI** on Windows, macOS and Linux (Xvfb), Python 3.9 and 3.13, plus `node --test`. | S | — | Matrix green on every push; the support-matrix rows show evidence. |
-| P0-4 | **Private settings everywhere:** `appearance.settings`, `colibri.settings`, the hybrid config and `firewall-lift.json` go through `app_core.settings.write_json` (audit S4, C6). | S | — | A POSIX test shows 0600 for each file. |
 
 ## P1
 
