@@ -288,8 +288,14 @@ def _write_file(project, arguments, approve_action, cancel_event, on_event, dest
             os.chmod(temporary_path, stat.S_IMODE(target.stat().st_mode))
         _check_cancelled(cancel_event)
         recheck()
+        checkpoint = getattr(_run, "checkpoint", None)
+        if checkpoint is not None:
+            # The original is saved for undo first; if that fails, nothing is changed.
+            checkpoint.before_write(target, old_bytes)
         os.replace(temporary_path, target)
         temporary_path = None
+        if checkpoint is not None:
+            checkpoint.after_write(target, new_bytes)
     finally:
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
@@ -523,19 +529,22 @@ def _chat(host, model, messages, context_length, cancel_event):
 
 
 def run_agent(host, model, project_root, messages, on_event, approve_action,
-              cancel_event=None, context_length=4096, max_steps=12, chat_fn=None, file_limit=None):
+              cancel_event=None, context_length=4096, max_steps=12, chat_fn=None, file_limit=None, checkpoint=None):
     """Run the agent with ``file_limit`` bytes as the largest file it may read or
-    edit (default 64,000; FILE_LIMIT_CHOICES lists what the app offers)."""
+    edit (default 64,000; FILE_LIMIT_CHOICES lists what the app offers).
+
+    ``checkpoint`` (app_core.checkpoints.Checkpoint) receives each file's original
+    before the agent's file tools change it, so the task can be undone."""
     if file_limit is None:
         file_limit = _MAX_FILE_BYTES
     if isinstance(file_limit, bool) or not isinstance(file_limit, int) or not 1000 <= file_limit <= 4000000:
         raise ValueError("The agent file size limit must be between 1,000 and 4,000,000 bytes.")
-    _run.file_limit, _run.context_length = file_limit, context_length
+    _run.file_limit, _run.context_length, _run.checkpoint = file_limit, context_length, checkpoint
     try:
         return _run_agent(host, model, project_root, messages, on_event, approve_action,
                           cancel_event, context_length, max_steps, chat_fn)
     finally:
-        _run.file_limit, _run.context_length = _MAX_FILE_BYTES, None
+        _run.file_limit, _run.context_length, _run.checkpoint = _MAX_FILE_BYTES, None, None
 
 
 def _run_agent(host, model, project_root, messages, on_event, approve_action,

@@ -955,6 +955,28 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         native_tool = next(item for item in saved["agent_history"] if item["role"] == "tool")
         self.assertEqual(native_tool, {"role": "tool", "tool_name": "read_file", "content": self.original_code})
 
+    def test_undo_puts_back_the_ais_last_task_after_confirmation(self):
+        self.enter_project()
+        target = (self.project / "main.py").resolve()
+        original = target.read_bytes()
+        point = self.app.checkpoints.begin(self.app.current_chat["id"], self.app.project_path)
+        point.before_write(target, original)
+        target.write_bytes(b"print('changed by the AI')\n")
+        point.after_write(target, b"print('changed by the AI')\n")
+        self.app.refresh_changes()
+        self.app.update_controls()
+        self.assertEqual(str(self.app.undo_button.cget("state")), "normal")
+        with patch("workspace_ui.messagebox.askyesno", return_value=False) as asked:
+            self.app.undo_button.invoke()
+        self.assertIn(str(target), asked.call_args.args[1])
+        self.assertEqual(target.read_bytes(), b"print('changed by the AI')\n")
+        with patch("workspace_ui.messagebox.askyesno", return_value=True):
+            self.app.undo_button.invoke()
+        self.assertEqual(target.read_bytes(), original)
+        self.assertEqual(self.app.dev_activity[-1]["type"], "undone")
+        self.assertIn("Undid the AI's changes to 1 file.", self.app.dev_activity[-1]["text"])
+        self.assertEqual(str(self.app.undo_button.cget("state")), "disabled")
+
     def test_stopping_a_pending_review_releases_the_worker_without_a_write(self):
         self.enter_project()
         decisions = []

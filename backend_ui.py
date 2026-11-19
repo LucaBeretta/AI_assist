@@ -297,6 +297,7 @@ class BackendMixin:
             self.workspace_events.put(("agent_event", request, item, None))
 
         approval = self.agent_approver(request, cancel)
+        checkpoint = self.agent_checkpoint
         try:
             if self.colibri_manageable():
                 event({"type": "status", "text": "Checking that colibri is running..."})
@@ -306,7 +307,7 @@ class BackendMixin:
             client = self.colibri_client()
             result = run_agent(client.url, model, root, messages, event, approval,
                                cancel_event=cancel, context_length=context,
-                               chat_fn=client.agent_chat, file_limit=self.agent_file_limit)
+                               chat_fn=client.agent_chat, file_limit=self.agent_file_limit, checkpoint=checkpoint)
             self.workspace_events.put(("agent_done", request, result, None))
         except Exception as error:
             self.workspace_events.put(("agent_done", request, None, str(error)))

@@ -10,6 +10,7 @@ import tkinter as tk
 from tkinter import END, filedialog, messagebox, scrolledtext, simpledialog, ttk
 
 from app_core import approvals
+from app_core.checkpoints import CheckpointError, CheckpointStore
 from app_core import conversation as conversation_rules
 from app_core import settings as app_settings
 from app_core.settings import load_file_limit  # noqa: F401  (long-standing name)
@@ -148,6 +149,9 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
             self.chat_store = None
             self.storage_error = str(error)
         self.saver = BackgroundSaves(self.chat_store) if self.chat_store else None
+        # Originals of files the agent changes, per task, so a task can be undone.
+        self.checkpoints = CheckpointStore(self.chat_store.directory / "checkpoints") if self.chat_store else None
+        self.agent_checkpoint = None
         self.initialize_backend()
         self.initialize_hybrid()
         self.agent_settings = self.chat_store.directory / "agent.settings" if self.chat_store else None
@@ -509,6 +513,7 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         for button in (self.choose_project_button, self.use_project_button, self.project_entry, self.attach_button):
             button.config(state="disabled" if busy else "normal")
         self.stop_agent_button.config(state="normal" if self.agent_active else "disabled")
+        self.undo_button.config(state="normal" if self.undo_point and not busy else "disabled")
         self.chat_actions.config(state="normal" if (self.current_chat or self.history_records) and not busy else "disabled")
         for label in ("Rename chat", "Export chat...", "Delete chat"):
             self.chat_menu.entryconfigure(label, state="normal" if self.current_chat else "disabled")
@@ -1146,6 +1151,44 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
             self.refresh_changes()
         self.refresh_verification()
 
+    def undo_last_task(self):
+        """Put back the files the AI's last task in this chat changed, after the person confirms."""
+        if self.busy() or self.checkpoints is None:
+            return
+        self.refresh_undo()
+        point = self.undo_point
+        if point is None:
+            self.set_status("There are no AI file changes to undo in this chat.")
+            return
+        paths = [entry["path"] for entry in point["files"]]
+        shown = "\n".join(paths[:12]) + (f"\n...and {len(paths) - 12} more" if len(paths) > 12 else "")
+        if not messagebox.askyesno(
+                "Undo the AI's changes?",
+                "These files go back to how they were before the AI's last task in this chat "
+                "(files it created are removed):\n\n" + shown + "\n\nA file you changed after the AI is left as it is. "
+                "Changes made by commands the AI ran cannot be undone here.", parent=self.root):
+            return
+        try:
+            report = self.checkpoints.undo(point["id"])
+        except (CheckpointError, OSError) as error:
+            self.set_status(f"Could not undo: {error}", error=True)
+            self.refresh_undo()
+            return
+        done = len(report["restored"]) + len(report["removed"])
+        lines = [f"Undid the AI's changes to {done} file{'s' if done != 1 else ''}."]
+        lines += [f"Restored: {path}" for path in report["restored"]]
+        lines += [f"Removed (created by the AI): {path}" for path in report["removed"]]
+        lines += [f"Left as it is ({reason}): {path}" for path, reason in report["kept"]]
+        self.log_activity({"type": "undone", "text": "\n".join(lines)})
+        self.persist_current()
+        if self.project_path:
+            self.scan_project()
+        self.refresh_undo()
+        kept = len(report["kept"])
+        self.set_status(lines[0] + (f" {kept} file{'s were' if kept != 1 else ' was'} left as it is; see Activity."
+                                    if kept else ""), error=bool(kept))
+        self.update_controls()
+
     def send_prompt(self, event=None):
         if self.busy() or not self.model_name.get():
             return "break"
@@ -1215,6 +1258,8 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
                 self.project_context, self.dev_activity)
             messages = conversation_rules.agent_messages(self.conversation, self.agent_history, prompt,
                                                          system_prompt, shared_context)
+            self.agent_checkpoint = (self.checkpoints.begin((self.current_chat or {}).get("id", ""), self.project_path)
+                                     if self.checkpoints else None)
             threading.Thread(target=self.agent_worker, args=(self.request_serial, self.ollama_host(), model, self.project_path,
                                                              messages, context or 4096, self.agent_cancel), daemon=True).start()
         else:
@@ -1281,6 +1326,7 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         def event(item):
             self.workspace_events.put(("agent_event", request, item, None))
         approval = self.agent_approver(request, cancel)
+        checkpoint = self.agent_checkpoint
         try:
             metadata_result = queue.Queue()
             def inspect_model():
@@ -1305,14 +1351,15 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
                 snapshot = dict(self.active_hybrid_config)
                 def worker(worker_messages, emit):
                     return run_agent(host, model, root, worker_messages, emit, approval,
-                                     cancel_event=cancel, context_length=context, file_limit=self.agent_file_limit)
+                                     cancel_event=cancel, context_length=context, file_limit=self.agent_file_limit,
+                                     checkpoint=checkpoint)
                 try:
                     result = self.run_with_quality_review(worker, messages, root, event, cancel, host, model, snapshot)
                 finally:
                     self.health_poll_at = 0
             else:
                 result = run_agent(host, model, root, messages, event, approval, cancel_event=cancel, context_length=context,
-                                   file_limit=self.agent_file_limit)
+                                   file_limit=self.agent_file_limit, checkpoint=checkpoint)
             self.workspace_events.put(("agent_done", request, result, None))
         except Exception as error:
             self.workspace_events.put(("agent_done", request, None, str(error)))
