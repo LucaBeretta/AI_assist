@@ -10,10 +10,18 @@ When the Windows RTX workstation's **manually activated inference service**
 becomes available again, AI Assist checks the **entire pinned TLS certificate**
 fingerprint and the original pairing token over HTTPS before considering it online.
 
-After two successful 15-second checks, macOS displays a notification:
-**"AI Assist · PC disponibile"**. No repeated notifications while it remains
-online. After two failed checks it is considered offline; another notification
-is permitted only after it returns.
+After two successful 15-second checks, macOS displays
+**"AI Assist · PC disponibile"**. If the previously connected node later fails
+two consecutive checks, the Mac displays
+**"AI Assist · Nodo AI non disponibile"**.
+
+These are transition notifications, not repeated status reminders. If Windows is
+already offline when monitoring begins, no offline notification is sent. After
+a disconnection, a new online alert is shown only when two successful checks
+confirm that Windows has returned. A failure cannot distinguish Windows power
+loss from Wi-Fi loss, manually disabled sharing or a temporary network issue:
+the notification correctly describes the AI node as *unavailable*, not the
+whole PC as definitely switched off.
 
 No unpaired device, broadcast packet, ARP response or plain Wi-Fi join is
 enough to trigger an alert. The Mac must be running the dashboard with alerts
