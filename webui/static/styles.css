@@ -300,6 +300,77 @@ code, kbd, pre, .mono { font-family: var(--mono); }
 .status-engine::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
 .privacy { color: var(--green); }
 
+/* ---------- v2 additions: projects, incognito, versions, edit, attachments, banner, dialogs ---------- */
+.brand-actions { display: flex; gap: 4px; }
+.section-head { display: flex; align-items: center; justify-content: space-between; padding-right: 4px; }
+.icon-btn.small { width: 26px; height: 26px; }
+.icon-btn.small svg { width: 14px; height: 14px; }
+.project-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.project-item {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 32px; padding: 0 10px;
+  border: 0; border-radius: var(--r); background: transparent; color: var(--body-2); font-size: 13px; text-align: left;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.project-item::before { content: ""; flex: 0 0 auto; width: 10px; height: 8px; border: 1.5px solid var(--faint); border-radius: 2px; }
+.project-item:hover { background: var(--raised); }
+.project-item[aria-pressed="true"] { background: var(--raised-2); color: var(--strong); }
+.project-item[aria-pressed="true"]::before { border-color: var(--accent); }
+.chat-item.incognito::before { background: transparent; border: 1.5px dashed var(--faint); width: 4px; height: 4px; }
+.badge {
+  display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: 999px;
+  border: 1px dashed var(--border-2); color: var(--muted); font-size: 12px;
+}
+.badge[hidden] { display: none; }
+.versions { display: inline-flex; align-items: center; gap: 2px; margin-right: 6px; color: var(--muted); font-size: 12px; }
+.versions .icon-btn { width: 24px; height: 24px; padding: 0; font-size: 15px; }
+.msg.is-editing > pre { outline: 2px solid var(--ring); }
+.edit-hint, .inline-notice {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 12.5px; color: var(--muted);
+}
+.edit-hint[hidden], .inline-notice[hidden], .chips[hidden] { display: none; }
+.edit-hint .btn { height: 26px; font-size: 12px; }
+.inline-notice {
+  width: 100%; max-width: var(--reading); padding: 8px 12px; border-radius: var(--r-md);
+  background: var(--amber-bg); color: var(--amber);
+}
+.inline-notice span { flex: 1 1 auto; }
+.inline-notice .btn { height: 28px; font-size: 12.5px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  display: inline-flex; align-items: center; height: 26px; padding: 0 10px; border-radius: 999px;
+  background: var(--raised-2); color: var(--body-2); font-size: 12px;
+}
+.chip-image { border: 1px solid var(--link); }
+.composer.is-dropping { border-color: var(--accent); background: var(--raised); }
+.banner {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 24px 8px; padding: 10px 12px;
+  border-radius: var(--r-md); background: var(--amber-bg); color: var(--amber); font-size: 13px;
+}
+.banner[hidden] { display: none; }
+.banner > span:first-child { flex: 1 1 280px; }
+.banner-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.banner .btn { height: 28px; font-size: 12.5px; }
+.dialog {
+  width: min(560px, calc(100vw - 32px)); padding: 20px; border: 1px solid var(--border-2); border-radius: var(--r-lg);
+  background: var(--panel); color: var(--text); box-shadow: var(--shadow);
+}
+.dialog::backdrop { background: rgba(0, 0, 0, .5); }
+.dialog-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.dialog h2 { margin: 0; font-size: 18px; font-weight: 600; color: var(--strong); }
+.setting-group { padding: 12px 0; border-top: 1px solid var(--border); }
+.setting-group h3 { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.setting-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 8px 0; }
+.setting-title { display: block; font-size: 14px; color: var(--strong); }
+.setting-hint { display: block; font-size: 12.5px; color: var(--muted); }
+.setting-sub { margin-top: 8px; font-size: 12px; color: var(--faint); }
+.dialog select, .field input, .field textarea {
+  height: 34px; padding: 0 10px; border: 1px solid var(--border-2); border-radius: var(--r); background: var(--raised); color: var(--text);
+}
+.field { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; font-size: 13px; color: var(--body-2); }
+.field em { color: var(--faint); font-style: normal; }
+.field textarea { height: auto; padding: 8px 10px; resize: vertical; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+
 /* ---------- scrollbars ---------- */
 * { scrollbar-width: thin; scrollbar-color: var(--border-2) transparent; }
 

@@ -15,15 +15,32 @@
     <aside class="sidebar" aria-label="Chats">
       <div class="brand">
         <span class="brand-name"><svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 9-8 9-8-9z"></path></svg>AI Assist</span>
-        <button id="new-chat" class="icon-btn bordered" type="button" aria-label="New chat" title="New chat · Ctrl+N">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"></path></svg>
+        <span class="brand-actions">
+          <button id="new-incognito" class="icon-btn" type="button" aria-label="New incognito chat" title="Incognito chat · Ctrl+Shift+N">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3l18 18"></path><path d="M10.6 10.6a2 2 0 0 0 2.8 2.8"></path><path d="M9.9 5.1A9.8 9.8 0 0 1 12 5c5 0 9 4.5 10 7a12.7 12.7 0 0 1-2.4 3.4M6.6 6.6C4.4 8 2.8 10.2 2 12c1 2.5 5 7 10 7a9.6 9.6 0 0 0 5.4-1.6"></path></svg>
+          </button>
+          <button id="new-chat" class="icon-btn bordered" type="button" aria-label="New chat" title="New chat · Ctrl+N">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"></path></svg>
+          </button>
+        </span>
+      </div>
+
+      <div class="section-head">
+        <span class="section-label">Projects</span>
+        <button id="new-project" class="icon-btn small" type="button" aria-label="New project" title="New project">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
         </button>
       </div>
-      <span class="section-label">Recent</span>
+      <ul id="projects" class="project-list"></ul>
+
+      <span id="chats-label" class="section-label">Recent</span>
       <ul id="chats" class="chat-list"></ul>
       <div class="sidebar-spacer"></div>
       <button id="refresh" class="btn ghost" type="button" title="Reload the model list">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"></path></svg>Refresh models
+      </button>
+      <button id="open-settings" class="btn ghost" type="button" title="Settings · Ctrl+,">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"></path></svg>Settings
       </button>
     </aside>
 
@@ -31,12 +48,19 @@
       <header class="header">
         <h1 id="chat-title">Conversation</h1>
         <div class="header-actions">
+          <span id="incognito-badge" class="badge" hidden>Incognito · not saved</span>
           <button id="theme" class="icon-btn" type="button" aria-label="Switch theme" title="Switch theme · Ctrl+Shift+L">
             <svg class="icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg>
             <svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"></path></svg>
           </button>
         </div>
       </header>
+
+      <div id="banner" class="banner" role="alert" hidden>
+        <span id="banner-text"></span>
+        <span id="banner-actions" class="banner-actions"></span>
+        <button id="banner-close" class="icon-btn" type="button" aria-label="Dismiss">×</button>
+      </div>
 
       <section id="conversation" class="conversation" aria-label="Conversation">
         <div id="messages" class="thread"></div>
@@ -46,10 +70,24 @@
         <button id="jump" class="jump" type="button" hidden>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6"></path></svg>Jump to latest
         </button>
+        <div id="interrupted" class="inline-notice" hidden>
+          <span>The last reply was interrupted before it finished.</span>
+          <button id="keep-interrupted" class="btn" type="button">Keep it</button>
+          <button id="discard-interrupted" class="btn ghost" type="button">Discard</button>
+        </div>
         <form id="composer" class="composer">
+          <div id="edit-hint" class="edit-hint" hidden>
+            <span>Editing a message — sending creates a new version; the old one stays.</span>
+            <button id="cancel-edit" class="btn ghost" type="button">Cancel · Esc</button>
+          </div>
+          <div id="attachments" class="chips" hidden></div>
           <label class="sr-only" for="prompt">Message</label>
           <textarea id="prompt" rows="2" required placeholder="Reply to AI Assist…"></textarea>
           <div class="composer-bar">
+            <button id="attach" class="icon-btn bordered" type="button" aria-label="Attach files" title="Attach files (or paste / drop them)">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5l-8.6 8.6a5 5 0 0 1-7.1-7.1l8.6-8.6a3.3 3.3 0 0 1 4.7 4.7L10 17.7a1.7 1.7 0 0 1-2.4-2.4l7.9-7.9"></path></svg>
+            </button>
+            <input id="attach-input" class="sr-only" type="file" multiple tabindex="-1" aria-hidden="true">
             <label class="model-pick"><span class="sr-only">Model</span><select id="model" aria-label="Model"></select></label>
             <label title="Context length in tokens (empty = automatic)"><span class="sr-only">Context length</span><input id="context" class="ctx-input" type="number" min="2048" max="1048576" step="1" value="16384" placeholder="auto"></label>
             <span class="grow"></span>
@@ -86,5 +124,37 @@
     <span class="privacy">local only</span>
   </footer>
 </div>
+
+<dialog id="settings-dialog" class="dialog" aria-labelledby="settings-title">
+  <div class="dialog-head">
+    <h2 id="settings-title">Settings</h2>
+    <button id="settings-close" class="icon-btn" type="button" aria-label="Close">×</button>
+  </div>
+  <section class="setting-group">
+    <h3>Appearance</h3>
+    <label class="setting-row"><span><span class="setting-title">Theme</span><span class="setting-hint">Ctrl+Shift+L switches anywhere.</span></span>
+      <select id="setting-theme"><option value="night">Night</option><option value="day">Day</option></select></label>
+  </section>
+  <section class="setting-group">
+    <h3>Models</h3>
+    <label class="setting-row"><span><span class="setting-title">Unload after inactivity</span><span class="setting-hint">Frees GPU memory when a model has not been used for a while.</span></span>
+      <select id="setting-idle"><option value="0">Never</option><option value="5">5 minutes</option><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option></select></label>
+    <div class="setting-sub">Loaded now</div>
+    <div id="loaded-models"></div>
+  </section>
+</dialog>
+
+<dialog id="project-dialog" class="dialog" aria-labelledby="project-title">
+  <form id="project-form">
+    <div class="dialog-head"><h2 id="project-title">New project</h2></div>
+    <label class="field"><span>Name</span><input id="project-name" required maxlength="120" placeholder="e.g. Sito anteprima-v2"></label>
+    <label class="field"><span>Instructions <em>(optional, used by every chat in the project)</em></span><textarea id="project-instructions" rows="4"></textarea></label>
+    <label class="field"><span>Folder <em>(optional, for Developer tasks)</em></span><input id="project-folder" class="mono" placeholder="C:\Users\…\project"></label>
+    <div class="dialog-actions">
+      <button id="project-cancel" class="btn ghost" type="button">Cancel</button>
+      <button class="btn primary" type="submit">Create project</button>
+    </div>
+  </form>
+</dialog>
 </body>
 </html>
