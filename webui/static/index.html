@@ -14,6 +14,7 @@
   <script defer src="models.js"></script>
   <script defer src="welcome.js"></script>
   <script defer src="premium.js"></script>
+  <script defer src="parity.js"></script>
 </head>
 <body>
 <div class="app">
@@ -45,6 +46,9 @@
         <button id="nav-models" class="nav-item" type="button" aria-current="false">
           <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"></rect><path d="M9 9h6v6H9z"></path></svg><span data-i18n="Models"></span>
         </button>
+        <button id="nav-capabilities" class="nav-item" type="button" aria-current="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6v4h4v8h-4v4H9v-4H5V8h4z"></path></svg><span data-i18n="Capabilities"></span>
+        </button>
       </nav>
 
       <div class="section-head">
@@ -73,7 +77,7 @@
           <h1 id="welcome-title"><span data-i18n="Your first local conversation"></span></h1>
           <p class="welcome-lead"><span data-i18n="Choose a model that fits this computer. Your conversations stay here."></span></p>
           <section class="side-group"><h2><span data-i18n="This computer"></span></h2><p id="welcome-hardware" class="mono"><span data-i18n="Reading hardware…"></span></p></section>
-          <section class="side-group"><h2>A model to start with</h2>
+          <section class="side-group"><h2 data-i18n="A model to start with"></h2>
             <label class="field"><span><span data-i18n="Recommended model"></span></span><select id="welcome-model"></select></label>
             <p id="welcome-reason" class="setting-hint"></p>
             <div id="welcome-download" class="pull-progress" hidden><progress id="welcome-progress" max="1" value="0"></progress><span id="welcome-progress-text" class="mono"></span></div>
@@ -203,6 +207,7 @@
                     <input id="dev-plan" type="checkbox" checked><span><span data-i18n="Plan first"></span></span>
                   </label>
                   <span id="dev-step" class="dev-step mono"></span>
+                  <label class="toggle"><input id="dev-quality" type="checkbox"><span data-i18n="Colibri quality review"></span></label>
                   <span class="grow"></span>
                   <button id="dev-stop" class="stop-btn" type="button" aria-label="Stop agent" title="Stop · Esc" disabled data-i18n-aria-label="Stop agent" data-i18n-title="Stop · Esc"></button>
                   <button id="dev-run" class="send-btn" type="submit" aria-label="Run task" title="Run · Ctrl+Enter" data-i18n-aria-label="Run task" data-i18n-title="Run · Ctrl+Enter">
@@ -214,6 +219,9 @@
             </div>
           </div>
           <aside class="dev-side" aria-label="Task options" data-i18n-aria-label="Task options">
+            <section class="side-group"><h3 data-i18n="Publish web project"></h3>
+              <p class="dev-hint" data-i18n="Uploads the selected web folder to Vercel, after confirmation."></p>
+              <button id="deploy-open" class="btn" type="button" data-i18n="Deploy…"></button></section>
             <section class="side-group">
               <h3><span data-i18n="Step limit"></span></h3>
               <div class="segmented" role="radiogroup" aria-label="Step limit" data-i18n-aria-label="Step limit">
@@ -268,10 +276,24 @@
               <div id="models-recommended" class="model-grid"></div>
             </section>
             <section aria-labelledby="other-title">
+              <details id="colibri-panel" class="side-group">
+                <summary id="colibri-title" class="models-h" data-i18n="Colibri engine"></summary>
+                <p class="setting-hint" data-i18n="Runs large models with RAM and SSD. Setup and downloads use your local Colibri launcher."></p>
+                <p id="colibri-state" class="setting-hint" role="status"></p>
+                <div class="field-row"><input id="colibri-folder" class="side-filter mono" readonly aria-label="Colibri folder" data-i18n-aria-label="Colibri folder"><button id="colibri-browse" class="btn" type="button" data-i18n="Browse…"></button></div>
+                <div class="model-actions"><button id="colibri-catalog" class="btn" type="button" data-i18n="Load model catalog"></button><button id="colibri-start" class="btn" type="button" data-i18n="Start server"></button><button id="colibri-stop" class="btn" type="button" data-i18n="Stop server"></button></div>
+                <form id="colibri-install-form" class="field">
+                  <label class="field"><span data-i18n="Model"></span><select id="colibri-model"></select></label>
+                  <label class="field"><span data-i18n="Context length"></span><input id="colibri-context" type="number" min="0" max="1048576" value="32768"></label>
+                  <p id="colibri-model-details" class="setting-hint"></p>
+                  <div class="model-actions"><button id="colibri-install" class="btn primary" type="submit" data-i18n="Install and start"></button><button id="colibri-apply-context" class="btn" type="button" data-i18n="Apply context"></button><button id="colibri-cancel" class="btn ghost" type="button" data-i18n="Cancel operation"></button></div>
+                  <progress id="colibri-progress" max="1" value="0" hidden></progress><p id="colibri-output" class="setting-hint" role="status" aria-live="polite"></p>
+                </form>
+              </details>
               <h2 id="other-title" class="models-h"><span data-i18n="Another model"></span></h2>
               <form id="pull-other" class="pull-other">
                 <label class="sr-only" for="pull-other-name"><span data-i18n="Model tag"></span></label>
-                <input id="pull-other-name" class="mono" placeholder="e.g. qwen3:14b (from ollama.com/library)" spellcheck="false">
+                <input id="pull-other-name" class="mono" placeholder="e.g. qwen3:14b (from ollama.com/library)" spellcheck="false" data-i18n-placeholder="e.g. qwen3:14b (from ollama.com/library)">
                 <button id="pull-other-button" class="btn" type="submit"><span data-i18n="Download"></span></button>
                 <span id="pull-other-progress"></span>
               </form>
@@ -279,6 +301,10 @@
           </div>
         </div>
       </div>
+      <section id="capabilities-view" class="view" aria-labelledby="capabilities-title" hidden>
+        <header class="header"><h1 id="capabilities-title" data-i18n="Capabilities"></h1><button id="capabilities-refresh" class="btn" type="button" data-i18n="Refresh"></button></header>
+        <div class="models-scroll"><div class="models-page"><p class="setting-hint" data-i18n="Capabilities reported by the selected model. Unreported features remain unknown."></p><div id="capabilities-result" class="model-list" role="status"></div></div></div>
+      </section>
     </main>
   </div>
 
@@ -329,6 +355,16 @@
       <button class="btn" type="submit"><span data-i18n="Save prompt"></span></button>
     </form>
   </section>
+  <section class="setting-group"><h3 data-i18n="Updates"></h3>
+      <p class="setting-hint" data-i18n="Checks upstream source files. Local changes can also appear as differences."></p>
+      <button id="check-updates" class="btn" type="button" data-i18n="Check for updates"></button><div id="update-result" class="setting-hint" role="status"></div></section>
+  <section class="setting-group"><h3 data-i18n="Colibri quality review"></h3>
+      <form id="hybrid-form"><label class="check-row"><input id="hybrid-enabled" type="checkbox"><span data-i18n="Offer quality review by default"></span></label>
+        <label class="field"><span data-i18n="Reviewer model"></span><input id="hybrid-model" class="mono" maxlength="256"></label>
+        <label class="check-row"><input id="hybrid-memory" type="checkbox" checked><span data-i18n="Manage local memory handoff"></span></label>
+        <p class="setting-hint" data-i18n="Ollama acts once; Colibri reviews without tools. Memory handoff unloads only the selected local worker."></p>
+        <button class="btn" type="submit" data-i18n="Save"></button><p id="hybrid-status" class="setting-hint" role="status"></p>
+      </form></section>
   <section class="setting-group">
     <h3><span data-i18n="Data"></span></h3>
     <div class="setting-row"><span><span class="setting-title"><span data-i18n="Back up all chats"></span></span><span class="setting-hint"><span data-i18n="Saves every chat as a .zip in a folder you choose."></span></span></span>
@@ -388,7 +424,7 @@
     <div class="dialog-head"><h2 id="project-title"><span data-i18n="New project"></span></h2></div>
     <p class="setting-hint"><span data-i18n="A project groups chats that share instructions, a folder and a setup (model and context). New chats in the project start with that setup."></span></p>
     <label class="field"><span><span data-i18n="Name"></span></span><input id="project-name" required maxlength="120" placeholder="e.g. Sito anteprima-v2" data-i18n-placeholder="e.g. Sito anteprima-v2"></label>
-    <label class="field"><span><span data-i18n="Instructions"></span> <em>(optional, used by every chat in the project)</em></span><textarea id="project-instructions" rows="4"></textarea></label>
+    <label class="field"><span><span data-i18n="Instructions"></span> <em data-i18n="(optional, used by every chat in the project)"></em></span><textarea id="project-instructions" rows="4"></textarea></label>
     <div class="field"><span><span data-i18n="Folder"></span> <em><span data-i18n="(optional, for Developer tasks and pinned files)"></span></em></span>
       <span class="field-row"><input id="project-folder" class="mono" placeholder="C:\Users\…\project" aria-label="Project folder" data-i18n-placeholder="C:\Users\…\project" data-i18n-aria-label="Project folder"><button id="project-browse" class="btn" type="button"><span data-i18n="Browse…"></span></button></span></div>
     <label class="check-row"><input id="project-use-env" type="checkbox" checked>
@@ -401,5 +437,20 @@
     </div>
   </form>
 </dialog>
+<dialog id="feedback-dialog" class="dialog" aria-labelledby="feedback-title"><form id="feedback-form">
+  <div class="dialog-head"><h2 id="feedback-title" data-i18n="Give feedback"></h2></div>
+  <label class="field"><span data-i18n="What should improve?"></span><textarea id="feedback-text" rows="4" required></textarea></label>
+  <label class="field"><span data-i18n="Success criteria (optional)"></span><textarea id="feedback-criteria" rows="2"></textarea></label><p id="feedback-error" class="setting-hint" role="alert"></p>
+  <div class="dialog-actions"><button id="feedback-cancel" class="btn ghost" type="button" data-i18n="Cancel"></button><button class="btn primary" type="submit" data-i18n="Prepare follow-up"></button></div>
+</form></dialog>
+<dialog id="deploy-dialog" class="dialog" aria-labelledby="deploy-title"><form id="deploy-form">
+  <div class="dialog-head"><h2 id="deploy-title" data-i18n="Deploy to Vercel"></h2></div>
+  <label class="field"><span data-i18n="Project folder"></span><input id="deploy-folder" class="mono" required></label>
+  <label class="field"><span data-i18n="Vercel project name"></span><input id="deploy-project" required></label>
+  <label class="field"><span data-i18n="Team (optional)"></span><input id="deploy-scope"></label><label class="field"><span data-i18n="Domain (optional)"></span><input id="deploy-domain"></label>
+  <label class="check-row"><input id="deploy-confirm" type="checkbox" required><span data-i18n="I want to upload this folder and publish a production deployment."></span></label>
+  <pre id="deploy-output" class="command-result" role="status"></pre><div id="deploy-result"></div>
+  <div class="dialog-actions"><button id="deploy-close" class="btn ghost" type="button" data-i18n="Close"></button><button id="deploy-stop" class="btn" type="button" data-i18n="Cancel operation"></button><button id="deploy-submit" class="btn primary" type="submit" data-i18n="Deploy to production"></button></div>
+</form></dialog>
 </body>
 </html>

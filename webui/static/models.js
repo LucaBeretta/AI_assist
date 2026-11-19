@@ -37,7 +37,7 @@ window.modelsui = (() => {
     const gpu = (hw.gpus || []).find(item => item.supported !== false) || (hw.gpus || [])[0];
     const tiles = [
       ["GPU", gpu ? gpu.name : t("None detected"), gpu?.total_bytes ? `${gb(gpu.total_bytes)} VRAM${gpu.free_bytes != null ? " · " + gb(gpu.free_bytes) + t(" free") : ""}` : t("CPU only")],
-      [t("Memory"), hw.ram_total_bytes ? gb(hw.ram_total_bytes) + " RAM" : "?", hw.ram_available_bytes ? gb(hw.ram_available_bytes) + " available now" : ""],
+      [t("Memory"), hw.ram_total_bytes ? gb(hw.ram_total_bytes) + " RAM" : "?", hw.ram_available_bytes ? gb(hw.ram_available_bytes) + t(" available now") : ""],
       [t("Processor"), hw.cpu || "?", hw.logical_processors ? hw.logical_processors + t(" threads") : ""],
       [t("Disk"), hw.disk_free_bytes ? gb(hw.disk_free_bytes) + t(" free") : "?", hw.model_directory || ""],
       ["Ollama", hw.ollama_running ? t("Running") : t("Not running"), hw.ollama_version ? "v" + hw.ollama_version : (hw.server_local === false ? t("remote server") : "")],

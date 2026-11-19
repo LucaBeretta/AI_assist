@@ -45,7 +45,7 @@ class ColibriService:
 
     def availability(self):
         folder = self.folder()
-        value = {"installed": folder is not None, "running": False, "models": [], "host": self.url,
+        value = {"installed": folder is not None, "folder": folder, "running": False, "models": [], "host": self.url,
                  "state": "offline", "context_length": None, "tokens_per_second": None}
         try:
             report = launcher.status(folder) if folder and launcher.is_local_url(self.url) else {}

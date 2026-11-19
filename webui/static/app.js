@@ -147,6 +147,10 @@ window.app = (() => {
     }
     const used = message.role === "assistant" && index === messages.length - 1 ? record?.last_response?.memories_used || [] : [];
     if (used.length) bar.append(memoriesUsed(used));
+    if (message.role === "assistant") {
+      const feedback = button(t("Give feedback"), "icon-btn", () => window.parityui?.openFeedback(selected, index));
+      feedback.disabled = busy; bar.append(feedback);
+    }
     return bar;
   }
 
@@ -349,7 +353,7 @@ window.app = (() => {
   let editingProject = null;
 
   function envLabel(environment) {
-    if (!environment?.model) return "no model set";
+    if (!environment?.model) return t("No model set");
     return `${environment.model} · ${environment.context_length ? tokens(environment.context_length) + " ctx" : "auto ctx"}`;
   }
 
@@ -360,14 +364,15 @@ window.app = (() => {
     element("project-bar-name").textContent = project.name;
     const parts = [envLabel(project.default_environment)];
     if (project.folder) parts.push(project.folder);
-    if (project.instructions) parts.push("instructions set");
+    if (project.instructions) parts.push(t("Instructions set"));
     element("project-bar-meta").textContent = parts.join(" · ");
   }
 
   function currentEnvironment(base) {
     const context = Number(element("context").value) || null;
+    const choice = modelChoice();
     return {backend: "Ollama", instructions: "", pinned_paths: [], memory_ids: [], ...(base || {}),
-            model: element("model").value || "", context_length: context};
+            backend: choice.backend, model: choice.name, context_length: context};
   }
 
   function openProjectDialog(project) {
@@ -412,7 +417,7 @@ window.app = (() => {
     });
     element("projects").replaceChildren(...nodes);
     element("chats-label").textContent = selectedProject
-      ? (result.projects.find(project => project.id === selectedProject)?.name || t("Project")) + " · chats"
+      ? (result.projects.find(project => project.id === selectedProject)?.name || t("Project")) + " · " + t("Chats")
       : t("Recent");
   }
 
@@ -532,6 +537,7 @@ window.app = (() => {
     element("model").value = values.includes(previous) ? previous : values[0] || "";
     window.workspaceui?.onState(result);
     window.premiumui?.onState(result);
+    window.parityui?.onState(result);
     status(t("{v0}: {v1}. {v2} models available.", {v0: (result.engine), v1: (result.host), v2: (result.models.length)}));
     controls();
   }
@@ -642,6 +648,7 @@ window.app = (() => {
       }
       window.workspaceui?.onEvent(event);
       window.welcomeui?.onEvent(event);
+      if (window.parityui?.onEvent(event)) continue;
       if (event.type === "model_loading" || event.type === "model_loaded") {
         const text = event.type === "model_loading"
           ? t("Loading {v0}… {v1} s", {v0: (event.model), v1: (Math.floor(event.elapsed_seconds))})
@@ -662,7 +669,7 @@ window.app = (() => {
         stream.active = false;
         stream.saved = event.saved;
         if (event.text !== undefined) stream.text = event.text;
-        if (selected === event.chat_id) status(event.type === "error" ? event.error : `${event.type}${event.metrics?.eval_count ? ` · ${event.metrics.eval_count} tokens${rate(event.metrics)}` : ""}`);
+        if (selected === event.chat_id) status(event.type === "error" ? event.error : `${t(event.type)}${event.metrics?.eval_count ? ` · ${event.metrics.eval_count} tokens${rate(event.metrics)}` : ""}`);
         // Reload the event's chat, not whichever chat happens to be visible.
         reloadChat(event.chat_id).then(() => {
           renderMessages();
@@ -707,6 +714,7 @@ window.app = (() => {
       return row;
     }) : [Object.assign(document.createElement("p"), {className: "setting-hint", textContent: t("No models are loaded right now.")})]));
     window.workspaceui?.openSettings();
+    window.parityui?.openSettings();
     openDialog("settings-dialog");
   }
 
@@ -872,7 +880,7 @@ window.app = (() => {
       if (chats.size) await openChat(chats.keys().next().value);
       else await newChat();
     } catch (error) { showError(error); }
-    if (lastState?.interrupted?.length) status(`${lastState.interrupted.length} chat(s) have an interrupted reply: open them to keep or discard it.`);
+    if (lastState?.interrupted?.length) status(t("{v0} chats have an interrupted reply: open them to keep or discard it.", {v0: lastState.interrupted.length}));
     if (window.pywebview.api.status_snapshot) call("status_snapshot").then(value => window.workspaceui?.renderStatus(value)).catch(showError);
     window.welcomeui?.onReady(lastState);
   });
@@ -1006,7 +1014,7 @@ window.app = (() => {
   element("open-palette").addEventListener("click", openPalette);
 
   // ---------- views (Chats / Developer / Models) ----------
-  const views = {chat: ["chat-view", "nav-chats"], dev: ["dev-view", "nav-dev"], models: ["models-view", "nav-models"], welcome: ["welcome-view", null]};
+  const views = {chat: ["chat-view", "nav-chats"], dev: ["dev-view", "nav-dev"], models: ["models-view", "nav-models"], welcome: ["welcome-view", null], capabilities: ["capabilities-view", "nav-capabilities"]};
   function showView(name) {
     for (const [key, [view, nav]] of Object.entries(views)) {
       element(view).hidden = key !== name;
@@ -1014,10 +1022,12 @@ window.app = (() => {
     }
     if (name === "dev") window.devui?.onShow?.();
     if (name === "models") window.modelsui?.onShow?.();
+    if (name === "capabilities") window.parityui?.capabilities();
   }
   element("nav-chats").addEventListener("click", () => showView("chat"));
   element("nav-dev").addEventListener("click", () => showView("dev"));
   element("nav-models").addEventListener("click", () => showView("models"));
+  element("nav-capabilities").addEventListener("click", () => showView("capabilities"));
   element("open-models").addEventListener("click", () => showView("models"));
 
   async function selectModel(name, backend = "Ollama") {

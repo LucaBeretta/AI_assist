@@ -1,6 +1,8 @@
 """Exercise the bare frontend with a small DOM/API double, without a WebView."""
 
 from pathlib import Path
+from html.parser import HTMLParser
+import json
 import shutil
 import subprocess
 import unittest
@@ -62,6 +64,71 @@ vm.runInNewContext(fs.readFileSync(process.argv[1], 'utf8'), {document, window, 
 
 
 class StaticTests(unittest.TestCase):
+    def test_every_authored_translation_id_exists_and_forms_are_not_nested(self):
+        root = Path(__file__).parent / "webui" / "static"
+        source = (root / "strings.js").read_text(encoding="utf-8")
+        def unique(pairs):
+            self.assertEqual(len(pairs), len(dict(pairs)), "Translation IDs must be unique")
+            return dict(pairs)
+        messages = json.loads(source.split("const it = ", 1)[1].split(";\n  const en", 1)[0], object_pairs_hook=unique)
+        ids, missing, nested = set(), [], []
+        class Page(HTMLParser):
+            form = False
+            def handle_starttag(self, tag, attrs):
+                for key, value in attrs:
+                    if key == "id":
+                        if value in ids:
+                            nested.append("Duplicate ID: " + value)
+                        ids.add(value)
+                    if key.startswith("data-i18n") and value not in messages:
+                        missing.append(value)
+                if tag == "form":
+                    if self.form:
+                        nested.append("Nested form")
+                    self.form = True
+            def handle_endtag(self, tag):
+                if tag == "form":
+                    self.form = False
+        Page().feed((root / "index.html").read_text(encoding="utf-8"))
+        self.assertEqual(missing, [])
+        self.assertEqual(nested, [])
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_parity_feedback_capabilities_and_deploy_confirmation(self):
+        self.run_scenario(r'''
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'parity.js'),'utf8'), {document,window,Map,Set,Error,String,Number,Boolean,Array,URL});
+        const api=window.pywebview.api;
+        saved.messages=[{role:'assistant',content:'Old reply'}];
+        api.prepare_feedback=async(...args)=>{calls.push(['feedback',...args]);return {ok:true,text:'Prepared follow-up'};};
+        api.model_capabilities=async()=>({ok:true,metadata:{capabilities:['tools'],context_length:32768}});
+        api.check_updates=async()=>{
+          window.app.onEvent([{type:'job_done',job_id:'u1',operation:'updates',result:{differences:[],download:'https://example.com/source.zip'}}]);
+          return {ok:true,job_id:'u1'};
+        };
+        api.deploy_vercel=async(...args)=>{calls.push(['deploy',...args]);return {ok:true,job_id:'d1'};};
+        api.cancel_job=async id=>{calls.push(['cancel',id]);return {ok:true};};
+        await window.listeners.pywebviewready();
+        window.parityui.openFeedback('chat-a',0); elements.get('feedback-text').value='Use exact numbers';
+        await elements.get('feedback-form').listeners.submit({preventDefault(){}});
+        assert.equal(elements.get('prompt').value,'Prepared follow-up');
+        assert(!calls.some(item=>item[0]==='chat-a'));
+        await window.parityui.capabilities();
+        assert.match(elements.get('capabilities-result').textContent,/Reported/);
+        await elements.get('check-updates').listeners.click();
+        assert.match(elements.get('update-result').textContent,/matches upstream/);
+        assert.equal(elements.get('check-updates').disabled,false);
+        await elements.get('deploy-form').listeners.submit({preventDefault(){}});
+        assert(!calls.some(item=>item[0]==='deploy'));
+        elements.get('deploy-confirm').checked=true; document.getElementById('deploy-folder').value='C:/site'; document.getElementById('deploy-project').value='site';
+        await elements.get('deploy-form').listeners.submit({preventDefault(){}});
+        await new Promise(resolve=>setImmediate(resolve));
+        assert(calls.some(item=>item[0]==='deploy'&&item[1]==='C:/site'));
+        await elements.get('deploy-stop').listeners.click();
+        assert.deepEqual(calls.at(-1),['cancel','d1']);
+        window.app.onEvent([{type:'job_done',operation:'deploy',job_id:'d1',result:{url:'javascript:alert(1)'}}]);
+        assert.equal(elements.get('deploy-result').children[0].tagName,'span');
+        ''')
+
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
     def test_locales_translate_controls_but_never_model_or_user_text(self):
         self.run_scenario(r'''
@@ -183,6 +250,14 @@ class StaticTests(unittest.TestCase):
         elements.get('prompt').value='Colibri request';
         await elements.get('composer').listeners.submit({preventDefault(){}});
         assert(calls.some(item=>item[2]==='served'&&item[4]==='Colibri'));
+        window.pywebview.api.create_project=async (...args)=>{calls.push(['project',...args]);return {ok:true,project:{id:'p'}};};
+        document.getElementById('project-name').value='Colibri project';
+        document.getElementById('project-instructions').value='Keep the setup';
+        document.getElementById('project-folder').value='';
+        document.getElementById('project-use-env').checked=true;
+        await elements.get('project-form').listeners.submit({preventDefault(){}});
+        const environment=calls.find(item=>item[0]==='project').at(-1);
+        assert.equal(environment.backend,'Colibri'); assert.equal(environment.model,'served');
         ''')
 
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")

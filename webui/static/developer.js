@@ -201,6 +201,8 @@ window.devui = (() => {
     if (!task || event.task_id !== task.id) return;
     switch (event.type) {
       case "status": status(event.text); activityLine("info", event.text); break;
+      case "hybrid_stage": case "hybrid_warning": status(event.text); activityLine("info", event.text); break;
+      case "hybrid_review": activityLine("info", event.text); break;
       case "loading": status(event.text); break;
       case "metrics": status(event.text); element("dev-step").textContent = (event.text.match(/Step \d+\/\d+/) || [""])[0]; break;
       case "tool_start": {
@@ -270,7 +272,7 @@ window.devui = (() => {
       remember("aiassist-dev-project", project);
       const steps = Number(document.querySelector('input[name="dev-steps"]:checked')?.value || 20);
       const context = Number(element("context").value) || 16384;
-      const result = await call("run_agent", chatId, text, project, element("dev-plan").checked, steps, Math.max(2048, context));
+      const result = await call("run_agent", chatId, text, project, element("dev-plan").checked, steps, Math.max(2048, context), Boolean(element("dev-quality").checked));
       task = {id: result.task_id, chatId, running: true, activity: null, current: null};
       const bubble = node("div", "dev-task-bubble");
       bubble.append(node("pre", "", text));

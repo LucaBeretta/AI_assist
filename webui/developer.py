@@ -30,6 +30,15 @@ class DeveloperTasks:
         with self.lock:
             return any(task["record"]["model"] == name and not task["finished"].is_set() for task in self.tasks.values())
 
+    def uses_colibri(self):
+        with self.lock:
+            return any(task.get("hybrid") and not task["finished"].is_set() for task in self.tasks.values())
+
+    def manages_model(self, name):
+        with self.lock:
+            return any(task.get("manages_memory") and task["record"]["model"] == name
+                       and not task["finished"].is_set() for task in self.tasks.values())
+
     def status(self, chat_id):
         with self.lock:
             task = next((item for item in self.tasks.values() if item["chat_id"] == chat_id), None)
@@ -47,6 +56,8 @@ class DeveloperTasks:
             options["task_id"] = identity
             task = {"chat_id": chat_id, "record": deepcopy(record), "cancel": threading.Event(),
                     "finished": threading.Event(), "pending": {},
+                    "hybrid": bool(options.get("hybrid")),
+                    "manages_memory": bool((options.get("hybrid") or {}).get("manage_memory")),
                     "status": {"active": True, "step": 0, "max_steps": options.get("max_steps", 20), "metrics": {}}}
             self.tasks[identity] = task
             thread = threading.Thread(target=self._run, args=(identity, task, options), daemon=True,
@@ -122,6 +133,8 @@ class DeveloperTasks:
         return {"ok": True, "task_id": identity, "active": active}
 
     def _run(self, identity, task, options):
+        options = dict(options)
+        hybrid = options.pop("hybrid", None)
         loading = ModelLoadProgress(self.bridge.emit, options["model"], task["cancel"],
                                     task_id=identity, chat_id=task["chat_id"])
         with self.lock:
@@ -144,14 +157,27 @@ class DeveloperTasks:
             self.bridge.emit("context_usage", task_id=identity, chat_id=task["chat_id"], **value)
         try:
             loading.start(self.running_details)
-            result = coding_agent.run_agent(
-                on_event=emit, on_context=context, cancel_event=task["cancel"],
-                approve_action=lambda action: self._wait(identity, task, "action", {"action": action}),
-                approve_plan=lambda text: self._wait(identity, task, "plan", {"text": text}), **options)
-            if task["cancel"].is_set():
+            def worker(messages, events):
+                return coding_agent.run_agent(
+                    on_event=events, on_context=context, cancel_event=task["cancel"],
+                    approve_action=lambda action: self._wait(identity, task, "action", {"action": action}),
+                    approve_plan=lambda text: self._wait(identity, task, "plan", {"text": text}),
+                    **{**options, "messages": messages})
+            if hybrid:
+                from hybrid_engine import run_hybrid
+                from hybrid_ui import memory_callbacks
+                from colibri_backend import ColibriClient
+                state, before, prepare, cleanup = memory_callbacks(hybrid, options["host"], options["model"], task["cancel"])
+                result = run_hybrid(worker,
+                    lambda messages: ColibriClient(state["url"], hybrid["key"]).review(messages, hybrid["review_model"], task["cancel"]),
+                    options["messages"], options["project_root"], emit, task["cancel"],
+                    before_worker=before, before_review=prepare, after_review=cleanup, max_file_bytes=options["file_limit"])
+            else:
+                result = worker(options["messages"], emit)
+            if task["cancel"].is_set() and not hybrid:
                 raise coding_agent.AgentCancelled("Developer task cancelled.")
-            self.save_result(task["record"], {**result, "metrics": deepcopy(task["status"]["metrics"])})
-            kind, extra = "agent_done", {"text": result["assistant_text"]}
+            self.save_result(task["record"], {**result, "stopped": task["cancel"].is_set(), "metrics": deepcopy(task["status"]["metrics"])})
+            kind, extra = "agent_stopped" if task["cancel"].is_set() else "agent_done", {"text": result["assistant_text"]}
         except coding_agent.AgentCancelled as error:
             kind, extra = "agent_stopped", {"text": str(error)}
         except Exception as error:

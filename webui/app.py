@@ -1,9 +1,7 @@
 """Small JSON API over the existing engine and chat store."""
 
 from copy import deepcopy
-from functools import wraps
 import importlib
-import inspect
 import logging
 import re
 import shutil
@@ -38,6 +36,9 @@ from status_bar import snapshot_values, generation_rate, is_cloud_model, is_loca
 from webui.local_files import write_utf8
 from webui.prompts import PromptStore
 from webui.colibri import ColibriService
+from webui.api_utils import json_method as _json_method
+from webui.jobs import Jobs
+from webui.parity import ParityApi, hybrid_settings
 
 
 log = logging.getLogger(__name__)
@@ -79,19 +80,7 @@ def inference_message(message):
     return item
 
 
-def _json_method(method):
-    @wraps(method)
-    def guarded(*args, **kwargs):
-        try:
-            return method(*args, **kwargs)
-        except Exception as error:
-            return {"ok": False, "error": str(error)}
-    # pywebview inspects getfullargspec rather than unwrapping decorators.
-    guarded.__signature__ = inspect.signature(method)
-    return guarded
-
-
-class Api:
+class Api(ParityApi):
     def __init__(self, bridge, store=None, engine=None, hardware=None, desktop=None, colibri=None):
         self._bridge = bridge
         self._store = store if store is not None else ChatStore()
@@ -117,6 +106,8 @@ class Api:
         self._status = StatusPush(self.status_snapshot, self._bridge.emit)
         self._prompts = PromptStore(self._store.directory)
         self._colibri = colibri if colibri is not None else ColibriService(self._store.directory)
+        self._jobs = Jobs(self._bridge.emit)
+        self._hybrid = hybrid_settings(self._store.directory)
 
     @_json_method
     def set_web_preferences(self, values):
@@ -515,7 +506,8 @@ class Api:
         return {"ok": True, "engine": backend, "host": colibri["host"] if backend == "Colibri" else self._engine.ollama_url(),
                 "models": colibri["models"] if backend == "Colibri" else models,
                 "loaded": loaded, "settings": deepcopy(self._settings), "colibri": colibri,
-                "ollama": {"models": models, "loaded": loaded, "error": ollama_error}, "interrupted": interrupted}
+                "ollama": {"models": models, "loaded": loaded, "error": ollama_error}, "interrupted": interrupted,
+                "hybrid": deepcopy(self._hybrid)}
 
     def _warn_vram(self, loaded):
         if len(loaded) < 2:
@@ -655,7 +647,7 @@ class Api:
         return any(item["chat_id"] == chat_id for item in self._streams.values()) or self._developer.busy(chat_id)
 
     @_json_method
-    def run_agent(self, chat_id, text, project=None, plan_first=False, max_steps=20, context=4096):
+    def run_agent(self, chat_id, text, project=None, plan_first=False, max_steps=20, context=4096, quality_review=None):
         if not isinstance(text, str) or not text.strip() or len(text) > 1000000:
             raise ValueError("Enter a Developer task between 1 and 1,000,000 characters.")
         if type(plan_first) is not bool or type(max_steps) is not int or not 1 <= max_steps <= 30:
@@ -664,9 +656,29 @@ class Api:
             raise ValueError("Choose a Developer context between 2048 and 1048576.")
         with self._lock:
             record = self._version_record(chat_id)
+            if quality_review is not None and type(quality_review) is not bool:
+                raise ValueError("Quality review must be true or false.")
+            use_review = self._hybrid["enabled"] if quality_review is None else quality_review
+            if self._developer.manages_model(record["model"]):
+                raise ValueError("Wait for the current quality review memory handoff to finish.")
+            hybrid = None
+            if use_review:
+                if not self._hybrid["review_model"]:
+                    raise ValueError("Choose a Colibri reviewer in Settings first.")
+                self._require_colibri_idle()
+                if self._hybrid["manage_memory"] and (self._developer.uses_model(record["model"])
+                        or any(item["record"]["model"] == record["model"] for item in self._streams.values())):
+                    raise ValueError("Stop this model's other streams before enabling memory handoff.")
+                hybrid = {**self._hybrid, "url": self._colibri.url, "key": self._colibri._key,
+                          "directory": self._colibri.folder(), "follow_report": not self._colibri._explicit_url}
+                if (hybrid["manage_memory"] and is_local(hybrid["url"])
+                        and is_local(self._engine.ollama_url()) and not hybrid["directory"]):
+                    raise ValueError("Choose the local Colibri folder or turn off automatic memory handoff.")
             root = developer_tools._project_root(project or record["project_path"])
             if self._developer.uses_project(root):
                 raise ValueError("Another Developer task is already changing this project.")
+            if self._jobs.busy("deploy:" + str(root)):
+                raise ValueError("Wait for deployment before changing this project.")
             if not record["model"]:
                 raise ValueError("Choose a Developer model first.")
             if record.get("backend", record["environment"]["backend"]) == "Colibri":
@@ -689,6 +701,7 @@ class Api:
                 project_root=str(root), messages=history, plan_first=plan_first, max_steps=max_steps,
                 context_length=context, file_limit=chat_attachments.file_limit(self._store.directory),
                 checkpoint_store=self._checkpoints,
+                hybrid=hybrid,
                 keep_alive=f"{self._settings['idle_unload_minutes']}m" if self._settings["idle_unload_minutes"] else -1)
 
     @_json_method
@@ -717,7 +730,7 @@ class Api:
                 if current.get(key) != before.get(key):
                     raise RuntimeError("This chat changed while the Developer task was running.")
             current["agent_history"] = result["messages"]
-            current["last_response"] = {"kind": "dev", "status": "done", "metrics": result.get("metrics", {})}
+            current["last_response"] = {"kind": "dev", "status": "stopped" if result.get("stopped") else "done", "metrics": result.get("metrics", {})}
             current.pop("_agent_history_stale", None)
             current["messages"].append({"role": "assistant", "content": result["assistant_text"]})
             self._save_chat(current)
@@ -1079,6 +1092,10 @@ class Api:
             backend = backend if backend is not None else record.get("backend", record["environment"]["backend"])
             if backend not in {"Ollama", "Colibri"}:
                 raise ValueError("Choose Ollama or Colibri.")
+            if backend == "Colibri" and (self._jobs.busy("colibri") or self._developer.uses_colibri()):
+                raise ValueError("Wait for the Colibri operation or quality review to finish.")
+            if backend == "Ollama" and self._developer.manages_model(model):
+                raise ValueError("Wait for the current quality review memory handoff to finish.")
             if self._busy(chat_id):
                 raise ValueError("This chat already has an active stream.")
             if record["messages"] and record["messages"][-1].get("partial"):
@@ -1312,6 +1329,7 @@ class Api:
             self._closed = True
             streams = list(self._streams.values())
             tasks = self._developer.close()
+            jobs = self._jobs.close()
             pulls = list(self._pulls.values())
             for job in pulls:
                 job["cancel"].set()
@@ -1329,6 +1347,8 @@ class Api:
         for stream in streams:
             stream["finished"].wait(max(0, deadline - time.monotonic()))
         for finished in tasks:
+            finished.wait(max(0, deadline - time.monotonic()))
+        for finished in jobs:
             finished.wait(max(0, deadline - time.monotonic()))
         for job in pulls:
             job["finished"].wait(max(0, deadline - time.monotonic()))
