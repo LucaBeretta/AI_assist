@@ -421,7 +421,28 @@ window.i18n = (() => {
   "Paired devices": "Dispositivi associati",
   "Pairing records do not prove a device is online. No remote telemetry is requested.": "L’associazione non indica che un dispositivo sia online. Non viene richiesta telemetria remota.",
   "paired · live telemetry unavailable": "associato · telemetria live non disponibile",
-  "{v0} more": "altri {v0}"
+  "{v0} more": "altri {v0}",
+  "Hourly check-in": "Riepilogo orario",
+  "Enable hourly quiet-time check-ins": "Attiva il riepilogo orario nei momenti di quiete",
+  "Windows only: measures microphone sound levels locally. No audio is saved or sent.": "Solo Windows: misura localmente il livello sonoro del microfono. Non salva né invia audio.",
+  "Listening for quiet locally; no audio is saved or sent.": "Rilevamento della quiete locale: nessun audio salvato o inviato.",
+  "Off by default. Preview does not turn on quiet detection.": "Disattivato per impostazione predefinita. L’anteprima non attiva il rilevamento della quiete.",
+  "Preview now": "Anteprima ora",
+  "Gathering your local check-in…": "Preparo il riepilogo locale…",
+  "{v0} chats updated in the last hour": "{v0} chat aggiornate nell’ultima ora",
+  "Local model reflection": "Riflessione del modello locale",
+  "Next step": "Prossimo passo",
+  "Work": "Lavoro",
+  "Device": "Computer",
+  "App updates": "Aggiornamenti app",
+  "Was this useful?": "È stato utile?",
+  "Not quite": "Non del tutto",
+  "Yes": "Sì",
+  "Feedback saved on this device.": "Feedback salvato su questo computer.",
+  "Not checked yet · check only when you choose.": "Non ancora controllato: la verifica parte solo su tua richiesta.",
+  "Last check was blocked by your privacy settings.": "L’ultima verifica è stata bloccata dalle impostazioni di privacy.",
+  "Last check could not be completed.": "Non è stato possibile completare l’ultima verifica.",
+  "Your app files differ from the latest GitHub copy.": "I file dell’app differiscono dall’ultima copia su GitHub."
 };
   const en = Object.fromEntries(Object.keys(it).map(key => [key, key]));
   const messages = {en, it};

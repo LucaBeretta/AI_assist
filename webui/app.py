@@ -43,6 +43,7 @@ from webui.privacy import PrivacyApi
 from app_core.privacy import privacy_status
 from compute_telemetry import TelemetrySampler
 from webui.compute import ComputePoller
+from app_core.hourly_status import HourlyStatusReport
 import network_gate
 
 
@@ -115,6 +116,47 @@ class Api(PrivacyApi, ParityApi):
         self._hybrid = hybrid_settings(self._store.directory)
         self._init_privacy()
         self._compute = ComputePoller(TelemetrySampler(self._engine.ollama_url()), self._bridge.emit)
+        self._last_update = None
+        self._hourly = HourlyStatusReport(self._store, self._hourly_context, self._hourly_event)
+
+    def _hourly_context(self):
+        with self._lock:
+            record = self._load_chat(self._status_chat) if self._status_chat else None
+            backend = record["backend"] if record else "Ollama"
+            host = self._engine.ollama_url()
+            with self._developer.lock: busy = bool(self._streams or self._developer.tasks)
+            return {"backend": backend, "host": host if is_local(host) else "http://localhost:11434",
+                    "model": record["model"] if record else "", "local": is_local(host), "busy": busy,
+                    "connection": backend, "updates": self._hourly_update_line()}
+
+    def _hourly_update_line(self):
+        updates = self._last_update
+        return ("Last check was blocked by your privacy settings." if updates and "blocked" in updates.get("error", "").lower()
+            else "Last check could not be completed." if updates and updates.get("error")
+            else "Your app files differ from the latest GitHub copy." if updates and updates.get("differences")
+            else "Up to date · " + updates.get("revision", "")[:8] if updates
+            else "Not checked yet · check only when you choose.")
+
+    def _hourly_event(self, kind, **data):
+        if not self._closed:
+            if kind == "hourly_report": self._desktop.request_activation()
+            self._bridge.emit(kind, **data)
+
+    @_json_method
+    def hourly_state(self):
+        return self._hourly.state()
+
+    @_json_method
+    def set_hourly_checkin(self, enabled):
+        return self._hourly.set_enabled(enabled)
+
+    @_json_method
+    def preview_hourly_checkin(self):
+        return self._hourly.refresh()
+
+    @_json_method
+    def rate_hourly_checkin(self, value):
+        return self._hourly.rate(value)
 
     @_json_method
     def set_compute_active(self, active):
@@ -1344,6 +1386,7 @@ class Api(PrivacyApi, ParityApi):
             self._bridge.emit("error", error=str(error))
 
     def _close(self, timeout=2):
+        self._hourly.close()
         self._compute.close()
         self._close_privacy()
         self._status.close()
@@ -1415,6 +1458,7 @@ def main():
         def loaded():
             desktop.set_theme(saved_theme(store.directory))
             getattr(api, "_start_privacy", lambda: None)()
+            if hasattr(api, "_hourly"): api._hourly.start()
             bridge.start()
             instance.start(desktop.request_activation)
             api._start_status()

@@ -662,6 +662,7 @@ window.app = (() => {
       window.welcomeui?.onEvent(event);
       if (window.securityui?.onEvent(event)) continue;
       if (window.computeui?.onEvent(event)) continue;
+      if (window.hourlyui?.onEvent(event)) continue;
       if (window.parityui?.onEvent(event)) continue;
       if (event.type === "model_loading" || event.type === "model_loaded") {
         const text = event.type === "model_loading"
@@ -730,6 +731,7 @@ window.app = (() => {
     window.workspaceui?.openSettings();
     window.parityui?.openSettings();
     window.securityui?.openSettings();
+    window.hourlyui?.openSettings();
     openDialog("settings-dialog");
   }
 

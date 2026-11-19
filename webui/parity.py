@@ -41,7 +41,14 @@ class ParityApi:
         root = Path(__file__).resolve().parent.parent
         def work(progress, cancel):
             with network_gate.task("Check AI Assist source files for updates", "The GitHub repository and revision; no chats or project content."):
-                return check_update(root)
+                try:
+                    self._last_update = check_update(root)
+                except Exception as error:
+                    self._last_update = {"error": str(error)}
+                    raise
+                finally:
+                    self._hourly.update_updates(self._hourly_update_line())
+                return self._last_update
         with self._lock:
             return self._jobs.start("updates", work, key="updates")
 

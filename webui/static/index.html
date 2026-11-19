@@ -17,6 +17,7 @@
   <script defer src="parity.js"></script>
   <script defer src="security.js"></script>
   <script defer src="compute.js"></script>
+  <script defer src="hourly.js"></script>
 </head>
 <body>
 <div class="app">
@@ -378,6 +379,11 @@
     <label class="setting-row"><span data-i18n="Lift temporarily"></span><select id="firewall-minutes"><option value="5">5 min</option><option value="15">15 min</option><option value="60">60 min</option></select><button id="firewall-lift" class="btn" type="button" data-i18n="Lift"></button></label>
     <details><summary data-i18n="Connection log"></summary><ol id="connection-log" class="connection-log"></ol></details>
   </section>
+  <section class="setting-group"><h3 data-i18n="Hourly check-in"></h3>
+    <label class="check-row"><input id="hourly-enabled" type="checkbox"><span data-i18n="Enable hourly quiet-time check-ins"></span></label>
+    <p class="setting-hint" data-i18n="Windows only: measures microphone sound levels locally. No audio is saved or sent."></p><p id="hourly-status" class="setting-hint" role="status"></p>
+    <button id="hourly-preview" class="btn" type="button" data-i18n="Preview now"></button>
+  </section>
   <section class="setting-group"><h3 data-i18n="Updates"></h3>
       <p class="setting-hint" data-i18n="Checks upstream source files. Local changes can also appear as differences."></p>
       <button id="check-updates" class="btn" type="button" data-i18n="Check for updates"></button><div id="update-result" class="setting-hint" role="status"></div></section>
@@ -475,6 +481,14 @@
   <pre id="deploy-output" class="command-result" role="status"></pre><div id="deploy-result"></div>
   <div class="dialog-actions"><button id="deploy-close" class="btn ghost" type="button" data-i18n="Close"></button><button id="deploy-stop" class="btn" type="button" data-i18n="Cancel operation"></button><button id="deploy-submit" class="btn primary" type="submit" data-i18n="Deploy to production"></button></div>
 </form></dialog>
+<dialog id="hourly-dialog" class="dialog" aria-labelledby="hourly-title">
+  <div class="dialog-head"><h2 id="hourly-title" data-i18n="Hourly check-in"></h2><button id="hourly-close" class="icon-btn" type="button" aria-label="Close" data-i18n-aria-label="Close">×</button></div>
+  <section class="setting-group"><h3 data-i18n="Work"></h3><p id="hourly-work"></p></section>
+  <section class="setting-group"><h3 data-i18n="Device"></h3><p id="hourly-device" class="pre-wrap"></p></section>
+  <section class="setting-group"><h3 data-i18n="App updates"></h3><p id="hourly-updates"></p><button id="hourly-check-updates" class="btn" type="button" data-i18n="Check for updates"></button></section>
+  <section class="setting-group"><h3 id="hourly-reflection-title" data-i18n="Next step"></h3><p id="hourly-reflection"></p></section>
+  <p id="hourly-message" class="setting-hint" role="status"></p><div class="dialog-actions"><span data-i18n="Was this useful?"></span><button id="hourly-not-useful" class="btn" type="button" data-i18n="Not quite"></button><button id="hourly-useful" class="btn" type="button" data-i18n="Yes"></button></div>
+</dialog>
 <dialog id="internet-dialog" class="dialog" aria-labelledby="internet-title">
   <div class="dialog-head"><h2 id="internet-title"></h2></div>
   <p class="setting-hint" data-i18n="Nothing has been sent yet. Block is the default; Enter, Esc or closing blocks the request."></p>

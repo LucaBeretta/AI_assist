@@ -65,6 +65,20 @@ vm.runInNewContext(fs.readFileSync(process.argv[1], 'utf8'), {document, window, 
 
 class StaticTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_hourly_preview_does_not_enable_audio_and_model_reflection_is_plain_text(self):
+        self.run_scenario(r'''
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'hourly.js'),'utf8'),{document,window,Map,Set,Error,String,Number,Boolean,Array,Date});
+        window.pywebview.api.preview_hourly_checkin=async()=>{calls.push(['preview']);return {ok:true,enabled:false,collecting:true};};
+        window.pywebview.api.set_hourly_checkin=async value=>{calls.push(['enable',value]);return {ok:true,enabled:value};};
+        await elements.get('hourly-preview').listeners.click();
+        assert(!calls.some(item=>item[0]==='enable'));
+        window.app.onEvent([{type:'hourly_report',report:{threads:1,topics:['Project'],system:'RAM',ollama:'ready',updates:'Not checked',reflection:'<script>bad</script>',reflected_by_model:true}}]);
+        assert.equal(elements.get('hourly-reflection').textContent,'<script>bad</script>');
+        assert.equal(elements.get('hourly-dialog').open,true);
+        assert.equal(elements.get('hourly-enabled').checked,undefined);
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
     def test_compute_pauses_when_hidden_and_does_not_invent_missing_metrics(self):
         self.run_scenario(r'''
         vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'compute.js'),'utf8'),{document,window,Map,Set,Error,String,Number,Boolean,Array,Date});
