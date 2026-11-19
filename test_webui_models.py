@@ -47,6 +47,23 @@ class ModelApiTests(unittest.TestCase):
             self.assertEqual(fetch.call_count, 2)
         self.assertFalse(self.api.recommend_models("yes")["ok"])
 
+    def test_catalog_and_variant_pages_share_one_gated_task_and_are_cached(self):
+        import network_gate
+        self.api._hardware = {"server_local": True, "gpus": []}
+        seen = []
+        def catalog():
+            seen.append(("catalog", network_gate.in_task()))
+            return [{"name": "family"}]
+        def advise(hardware, rows):
+            seen.append(("variants", network_gate.in_task()))
+            return [{"name": "family:7b"}]
+        with patch("model_library.fetch_popular_models", side_effect=catalog),              patch("model_advisor.recommend_models", side_effect=advise):
+            first = self.api.recommend_models()
+            second = self.api.recommend_models()
+        self.assertEqual(seen, [("catalog", True), ("variants", True)])
+        self.assertEqual(first["recommendations"], [{"name": "family:7b"}])
+        self.assertEqual(second["recommendations"], first["recommendations"])
+
     def test_pull_progress_success_stop_and_failure(self):
         def pull(host, name, emit, cancel):
             emit({"status": "downloading", "completed": 4, "total": 10})

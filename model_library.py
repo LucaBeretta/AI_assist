@@ -1,5 +1,6 @@
 """Live Ollama model discovery and streamed downloads, using the standard library."""
 
+import contextlib
 from html.parser import HTMLParser
 import http.client
 import json
@@ -90,9 +91,10 @@ class _PageParser(HTMLParser):
 def _read_page(url):
     request = urllib.request.Request(url, headers={"User-Agent": "AI-Assist-Desktop/1.0"})
     try:
-        with network_gate.task("Read Ollama's online model list",
-                               sends="A request for one page of ollama.com. No chats or files are sent."), \
-                urllib.request.urlopen(request, timeout=25) as response:
+        # Inside a caller's task (several pages for one recommendation) one approval covers every page.
+        page_task = contextlib.nullcontext() if network_gate.in_task() else network_gate.task(
+            "Read Ollama's online model list", sends="A request for one page of ollama.com. No chats or files are sent.")
+        with page_task, urllib.request.urlopen(request, timeout=25) as response:
             data = response.read(_MAX_PAGE_BYTES + 1)
         if len(data) > _MAX_PAGE_BYTES:
             raise RuntimeError("Ollama's model page is too large to read.")

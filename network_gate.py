@@ -273,6 +273,11 @@ def status():
     return {"installed": _installed, "online": online}
 
 
+def in_task():
+    """True inside a live task on this thread: its approvals already cover nested requests."""
+    return _current_task() is not None
+
+
 @contextlib.contextmanager
 def task(purpose, sends="", minutes=10):
     """Say why the code in this block may go online. Approvals given inside it end with it."""

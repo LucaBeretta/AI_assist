@@ -344,16 +344,22 @@ class Api(SharingApi, PrivacyApi, ParityApi):
         catalog, catalog_error = [], None
         if hardware.get("server_local", True):
             # One read per session, shared by every screen; a refusal is remembered until the person asks again.
+            # The list and each family's sizes are several ollama.com pages: one task, so one approval.
             with self._catalog_lock:
                 if refresh or (self._catalog is None and self._catalog_error is None):
                     try:
-                        self._catalog, self._catalog_error = model_library.fetch_popular_models(), None
+                        with network_gate.task("Read Ollama's online model list",
+                                               sends="Requests for a few pages of ollama.com (the model list and "
+                                                     "model sizes). No chats or files are sent."):
+                            catalog = model_library.fetch_popular_models()
+                            self._catalog = model_advisor.recommend_models(hardware, catalog)
+                        self._catalog_error = None
                     except (OSError, ValueError, RuntimeError) as error:
                         # Blocked by the internet gate or offline: this computer's hardware is still worth showing.
                         self._catalog, self._catalog_error = None, str(error)
-                catalog, catalog_error = list(self._catalog or []), self._catalog_error
-        return {"ok": True, "hardware": hardware, "recommendations": model_advisor.recommend_models(hardware, catalog),
-                "catalog_error": catalog_error}
+                recommendations, catalog_error = list(self._catalog or []), self._catalog_error
+            return {"ok": True, "hardware": hardware, "recommendations": recommendations, "catalog_error": catalog_error}
+        return {"ok": True, "hardware": hardware, "recommendations": [], "catalog_error": None}
 
     @staticmethod
     def _model_name(name):
