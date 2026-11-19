@@ -74,7 +74,8 @@ def worker(options, log_path, report_path):
     if not options.worker.startswith("ai_assist_tests_") or actual != options.worker:
         raise RuntimeError("Refusing GUI tests: the worker is not on the isolated desktop.")
     import unittest
-    suite = unittest.defaultTestLoader.discover(str(Path(__file__).resolve().parent), pattern=options.pattern)
+    suite = (unittest.defaultTestLoader.loadTestsFromNames(options.test) if options.test else
+             unittest.defaultTestLoader.discover(str(Path(__file__).resolve().parent), pattern=options.pattern))
     with log_path.open("w", encoding="utf-8", buffering=1) as output, redirect_stdout(output), redirect_stderr(output):
         result = unittest.TextTestRunner(stream=output, verbosity=2).run(suite)
         report = report_result(result, actual)
@@ -85,6 +86,7 @@ def worker(options, log_path, report_path):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pattern", default="test_*.py")
+    parser.add_argument("--test", action="append", default=[], help="Run a specific unittest ID; repeat to select multiple tests.")
     parser.add_argument("--timeout", type=int, default=300)
     parser.add_argument("--worker", help=argparse.SUPPRESS)
     options = parser.parse_args()
@@ -113,6 +115,8 @@ def main():
         startup.dwFlags = 0x80  # STARTF_FORCEOFFFEEDBACK; no change to the user's cursor.
         args = [sys.executable, "-E", str(Path(__file__).resolve()), "--worker", identity,
                 "--pattern", options.pattern]
+        for name in options.test:
+            args.extend(["--test", name])
         command = ctypes.create_unicode_buffer(subprocess.list2cmdline(args))
         if not kernel.CreateProcessW(sys.executable, command, None, None, False,
                                      0x08000000, None, str(root), ctypes.byref(startup), ctypes.byref(process)):

@@ -4,12 +4,14 @@ from contextlib import ExitStack
 from copy import deepcopy
 from pathlib import Path
 import gc
+from itertools import count
 import os
 import tempfile
 import threading
 import time
 import tkinter as tk
 import unittest
+from types import SimpleNamespace
 from unittest.mock import ANY, patch
 
 from AIassist import AIAssistantGUI
@@ -511,26 +513,35 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         self.assertIn("Could not use this folder", self.app.status_label.cget("text"))
 
     def test_stream_is_visible_before_completion_and_final_message_appears_once(self):
-        release = threading.Event()
+        release, partial_sent, finished = threading.Event(), threading.Event(), threading.Event()
         self.worker_releases.append(release)
+        self.worker_finished.append(finished)
 
         def stream(messages, model, on_chunk, on_metrics, **options):
-            time.sleep(.06)
-            on_chunk("Hello ")
-            release.wait(3)
-            on_chunk("world")
-            on_metrics(dict(eval_count=10, eval_duration=2000000000))
-            return "Hello world"
+            try:
+                on_chunk("Hello ")
+                partial_sent.set()
+                # Only the test releases completion after checking the partial UI.
+                release.wait()
+                on_chunk("world")
+                on_metrics(dict(eval_count=10, eval_duration=2000000000))
+                return "Hello world"
+            finally:
+                finished.set()
 
         self.request.side_effect = stream
         self.set_input("Stream a reply")
-        self.app.send_prompt()
-        self.wait_for(lambda: self.app.stream_card is not None, "partial streaming response")
-        self.assertTrue(self.app.is_waiting)
-        self.assertEqual(self.app.stream_text.get("1.0", "end-1c"), "Hello ")
-        self.assertEqual(len(self.app.conversation), 1)
-        release.set()
-        self.wait_for(lambda: not self.app.is_waiting, "completed stream")
+        ticks = count(time.monotonic(), 1)
+        # Cross the engine's batching threshold without depending on wall time.
+        with patch("AIassist.time", SimpleNamespace(monotonic=lambda: next(ticks), sleep=time.sleep)):
+            self.app.send_prompt()
+            self.assertTrue(partial_sent.wait(3), "The fake engine did not emit its first chunk")
+            self.wait_for(lambda: self.app.stream_card is not None, "partial streaming response")
+            self.assertTrue(self.app.is_waiting)
+            self.assertEqual(self.app.stream_text.get("1.0", "end-1c"), "Hello ")
+            self.assertEqual(len(self.app.conversation), 1)
+            release.set()
+            self.wait_for(lambda: not self.app.is_waiting, "completed stream")
         self.assertIsNone(self.app.stream_card)
         self.assertEqual(self.app.conversation[-1]["content"], "Hello world")
         self.assertEqual(len(self.app.conversation), 2)
