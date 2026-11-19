@@ -1,6 +1,7 @@
 """Pinned files are confined, bounded and counted in actual requests."""
 
 import unittest
+import threading
 from unittest.mock import patch
 
 import coding_agent
@@ -38,6 +39,34 @@ class PinTests(unittest.TestCase):
         self.assertEqual(self.api.open_chat(self.chat)["pinned_files"], [])
         for path in ("../outside.py", ".env"):
             self.assertFalse(self.api.pin_file(self.chat, path)["ok"])
+
+    def test_folder_can_be_set_before_first_task_and_old_pins_are_not_retargeted(self):
+        (self.project / "a.py").write_text("source", encoding="utf-8")
+        fresh = self.api.new_chat(project_path=str(self.project))["chat"]
+        self.assertEqual(fresh["messages"], [])
+        self.assertTrue(self.api.pin_file(fresh["id"], "a.py")["ok"])
+        self.assertTrue(self.api.set_chat_project(fresh["id"], str(self.project))["ok"])
+        self.assertEqual(self.store.load(fresh["id"])["environment"]["pinned_paths"], ["a.py"])
+        other = self.store.directory / "other"
+        other.mkdir()
+        result = self.api.set_chat_project(fresh["id"], str(other))
+        self.assertEqual(result["chat"]["environment"]["pinned_paths"], [])
+        self.assertFalse(self.api.set_chat_project(fresh["id"], str(other / "missing"))["ok"])
+        self.assertFalse(self.api.new_chat(project_path=str(other / "missing"))["ok"])
+
+    def test_folder_change_is_refused_during_a_stream(self):
+        release = threading.Event()
+        self.addCleanup(release.set)
+        def request(*args, on_chunk, **kwargs):
+            on_chunk("partial")
+            release.wait(3)
+            return "partial"
+        self.engine.request_ollama = request
+        stream = self.api.send(self.chat, "hello", "fake:7b", None)["stream_id"]
+        self.events.wait("token", stream)
+        self.assertFalse(self.api.set_chat_project(self.chat, str(self.project))["ok"])
+        release.set()
+        self.events.wait("done", stream)
 
     def test_new_chat_same_environment_preserves_the_folder_behind_pins(self):
         (self.project / "a.py").write_text("source for the new chat", encoding="utf-8")

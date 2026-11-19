@@ -323,6 +323,19 @@ class Api:
             for item in developer_tools.list_project_files(project)]}
 
     @_json_method
+    def set_chat_project(self, chat_id, folder):
+        root = developer_tools._project_root(folder)
+        with self._lock:
+            self._require_idle(chat_id)
+            record = self._load_chat(chat_id)
+            if record["project_path"] != str(root):
+                record["environment"]["pinned_paths"] = []
+                record["project_files"] = []
+            record["project_path"] = str(root)
+            record["_agent_history_stale"] = True
+            return {"ok": True, "chat": self._save_chat(record)}
+
+    @_json_method
     def pin_file(self, chat_id, path):
         with self._lock:
             self._require_idle(chat_id)
@@ -728,9 +741,10 @@ class Api:
             return {"ok": True, "chat": record, "messages": record["messages"], "versions": chat_versions.versions(record)}
 
     @_json_method
-    def new_chat(self, incognito=False, project_id=None):
+    def new_chat(self, incognito=False, project_id=None, project_path=None):
         if type(incognito) is not bool:
             raise ValueError("Incognito must be true or false.")
+        root = developer_tools._project_root(project_path) if project_path is not None else None
         with self._lock:
             if self._closed:
                 raise RuntimeError("The web UI is closing.")
@@ -744,6 +758,11 @@ class Api:
                 record["context_length"] = record["environment"]["context_length"]
                 record["project_path"] = project["folder"] or ""
                 record["project_files"] = deepcopy(record["environment"]["pinned_paths"])
+            if root is not None:
+                if record["project_path"] != str(root):
+                    record["environment"]["pinned_paths"] = []
+                    record["project_files"] = []
+                record["project_path"] = str(root)
             if incognito:
                 record["incognito"] = True
                 record["environment"]["memory_ids"] = []
