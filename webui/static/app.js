@@ -330,6 +330,11 @@ window.app = (() => {
         node.append(working);
       }
       node.addEventListener("click", () => openChat(record.id).catch(showError));
+      node.addEventListener("contextmenu", event => showMenu(event, [
+        ["Open", () => { showView("chat"); openChat(record.id).catch(showError); }],
+        ["Rename…", () => startRename(record.id)],
+        ["Delete", () => deleteChat(record.id), "danger"],
+      ]));
       item.append(node);
       return item;
     });
@@ -392,6 +397,12 @@ window.app = (() => {
       const item = document.createElement("li");
       const node = button(project.name, "project-item", () => selectProject(project.id === selectedProject ? null : project.id));
       node.setAttribute("aria-pressed", project.id === selectedProject ? "true" : "false");
+      node.addEventListener("contextmenu", event => showMenu(event, [
+        ["Open", () => selectProject(project.id)],
+        ["New chat in project", async () => { await selectProject(project.id); newChat().catch(showError); }],
+        ["Edit project…", () => openProjectDialog(project)],
+        ["Delete project", () => deleteProject(project), "danger"],
+      ]));
       item.append(node);
       return item;
     });
@@ -772,12 +783,7 @@ window.app = (() => {
   element("project-close").addEventListener("click", () => selectProject(null));
   element("project-browse").addEventListener("click", () => browseFolder("project-folder"));
   element("project-cancel").addEventListener("click", () => closeDialog("project-dialog"));
-  element("project-delete").addEventListener("click", async () => {
-    const project = editingProject;
-    if (!project || (window.confirm && !window.confirm(`Delete the project "${project.name}"? Its chats are kept and move back to Recent.`))) return;
-    try { await call("delete_project", project.id); closeDialog("project-dialog"); await selectProject(null); }
-    catch (error) { showError(error); }
-  });
+  element("project-delete").addEventListener("click", () => { if (editingProject) deleteProject(editingProject); });
   element("project-form").addEventListener("submit", async event => {
     event.preventDefault();
     const folder = element("project-folder").value.trim() || null;
@@ -843,33 +849,68 @@ window.app = (() => {
     } catch (error) { showError(error); }
     if (lastState?.interrupted?.length) status(`${lastState.interrupted.length} chat(s) have an interrupted reply: open them to keep or discard it.`);
   });
+  // ---------- right-click menu ----------
+  function showMenu(event, items) {
+    event.preventDefault();
+    const menu = element("popup-menu");
+    menu.replaceChildren(...items.map(([label, run, kind]) => {
+      const item = button(label, "popup-item" + (kind ? " " + kind : ""), () => { hideMenu(); run(); });
+      item.setAttribute("role", "menuitem");
+      return item;
+    }));
+    menu.hidden = false;
+    const width = menu.offsetWidth || 200, height = menu.offsetHeight || 120;
+    menu.style.left = Math.min(event.clientX, window.innerWidth - width - 8) + "px";
+    menu.style.top = Math.min(event.clientY, window.innerHeight - height - 8) + "px";
+    menu.firstChild?.focus?.();
+  }
+  function hideMenu() { element("popup-menu").hidden = true; }
+  if (document.addEventListener) {
+    document.addEventListener("click", event => { if (!element("popup-menu").contains?.(event.target)) hideMenu(); });
+    document.addEventListener("keydown", event => { if (event.key === "Escape") hideMenu(); }, true);
+    window.addEventListener("blur", hideMenu);
+  }
+
   // ---------- rename / delete / export ----------
-  element("rename-chat").addEventListener("click", () => {
-    const record = chats.get(selected);
+  let renameTarget = null;
+  function startRename(id) {
+    const record = chats.get(id);
     if (!record) return;
+    renameTarget = id;
     element("rename-input").value = record.title;
     openDialog("rename-dialog");
     element("rename-input").select?.();
-  });
-  element("rename-cancel").addEventListener("click", () => closeDialog("rename-dialog"));
-  element("rename-form").addEventListener("submit", async event => {
-    event.preventDefault();
-    try {
-      const result = await call("rename_chat", selected, element("rename-input").value);
-      closeDialog("rename-dialog");
-      chats.set(selected, {...chats.get(selected), title: result.chat.title});
-      renderChats(); renderMessages();
-    } catch (error) { showError(error); }
-  });
-  element("delete-chat").addEventListener("click", async () => {
-    const record = chats.get(selected);
+  }
+  async function deleteChat(id) {
+    const record = chats.get(id);
     if (!record) return;
     if (window.confirm && !window.confirm(`Delete "${record.title}"? This removes the chat and its attachments from this computer.`)) return;
     try {
-      const result = await call("delete_chat", selected);
+      const result = await call("delete_chat", id);
       status(result.warnings?.length ? result.warnings.join(" ") : "Chat deleted.");
     } catch (error) { showError(error); }
+  }
+  async function deleteProject(project) {
+    if (window.confirm && !window.confirm(`Delete the project "${project.name}"? Its chats are kept and move back to Recent.`)) return;
+    try {
+      await call("delete_project", project.id);
+      closeDialog("project-dialog");
+      if (selectedProject === project.id) await selectProject(null); else await refreshProjects();
+    } catch (error) { showError(error); }
+  }
+  element("rename-chat").addEventListener("click", () => startRename(selected));
+  element("rename-cancel").addEventListener("click", () => closeDialog("rename-dialog"));
+  element("rename-form").addEventListener("submit", async event => {
+    event.preventDefault();
+    const id = renameTarget;
+    try {
+      const result = await call("rename_chat", id, element("rename-input").value);
+      closeDialog("rename-dialog");
+      chats.set(id, {...chats.get(id), title: result.chat.title});
+      renderChats(); renderMessages();
+    } catch (error) { showError(error); }
   });
+  element("delete-chat").addEventListener("click", () => deleteChat(selected));
   element("export-chats").addEventListener("click", async () => {
     try {
       const result = await call("export_chats");
