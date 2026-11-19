@@ -81,3 +81,18 @@ def save_file_limit(path, limit):
     if limit not in FILE_LIMIT_CHOICES:
         raise ValueError("Choose one of the offered file limits.")
     write_json(path, {"file_limit": limit})
+
+
+def load_hourly_report(path):
+    data = read_json(path) if path is not None else {}
+    enabled = data.get("enabled") is True
+    feedback = data.get("feedback")
+    if feedback not in ("useful", "not_useful"):
+        feedback = ""
+    return {"enabled": enabled, "feedback": feedback}
+
+
+def save_hourly_report(path, enabled, feedback=""):
+    if type(enabled) is not bool or feedback not in ("", "useful", "not_useful"):
+        raise ValueError("Choose a valid hourly report setting.")
+    write_json(path, {"enabled": enabled, "feedback": feedback})

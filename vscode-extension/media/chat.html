@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src {{cspSource}} data:; style-src {{cspSource}}; script-src 'nonce-{{nonce}}' {{cspSource}};">
+  <link rel="stylesheet" href="{{styleUri}}">
+  <title>AI Assist Local Agent</title>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+      <div class="brand-copy">
+        <div class="eyebrow">AI ASSIST <span class="local-pill"><i></i> LOCAL</span></div>
+        <div class="subhead">Coding workspace</div>
+      </div>
+      <button id="new-chat" class="icon-button" type="button" title="New conversation" aria-label="New conversation">+</button>
+    </header>
+
+    <section class="toolbar" aria-label="Conversation and model controls">
+      <label class="sr-only" for="chat-picker">Conversation</label>
+      <select id="chat-picker" aria-label="Conversation"><option value="">New conversation</option></select>
+      <div class="model-row">
+        <label class="sr-only" for="model-picker">Local model</label>
+        <select id="model-picker" aria-label="Local Ollama model"><option value="">Loading local models…</option></select>
+        <button id="refresh-models" class="refresh-button" type="button" title="Refresh local models" aria-label="Refresh local models">↻</button>
+      </div>
+    </section>
+
+    <div id="status" class="status-line" role="status"><span class="status-dot"></span><span id="status-text">Connecting to AI Assist…</span></div>
+
+    <section id="conversation" class="conversation" aria-label="Chat messages" aria-live="polite">
+      <div id="welcome" class="welcome">
+        <div class="welcome-orbit"><span></span><span></span><span></span></div>
+        <p class="eyebrow">YOUR LOCAL CODING PARTNER</p>
+        <h1>What are we<br><em>building today?</em></h1>
+        <p class="welcome-copy">Ask about this project, plan a change, or let the agent work through it with you.</p>
+        <div class="suggestions">
+          <button type="button" data-prompt="Explain how this project is organized.">Explain this project</button>
+          <button type="button" data-prompt="Find a bug or fragile edge case in this workspace.">Find a bug</button>
+          <button type="button" data-prompt="Suggest the smallest useful improvement for this project.">Suggest an improvement</button>
+        </div>
+      </div>
+      <div id="messages" class="messages"></div>
+      <div id="activity" class="activity" hidden></div>
+      <div id="approval-list" class="approval-list"></div>
+    </section>
+
+    <footer class="composer-wrap">
+      <div class="composer">
+        <textarea id="prompt" rows="1" placeholder="Message your local coding agent…" aria-label="Message your local coding agent"></textarea>
+        <div class="composer-bottom">
+          <span class="composer-hint">Enter to send · Shift+Enter for a new line</span>
+          <button id="send" type="button" aria-label="Send message"><span>Send</span><b>↗</b></button>
+          <button id="stop" type="button" hidden>Stop</button>
+        </div>
+      </div>
+      <p class="privacy-note"><span>◆</span> Local Ollama inference · loaded model placement shown above. File edits and commands ask first.</p>
+    </footer>
+  </main>
+  <script nonce="{{nonce}}" src="{{scriptUri}}"></script>
+</body>
+</html>

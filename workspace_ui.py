@@ -16,6 +16,7 @@ from background_saves import BackgroundSaves
 from deploy_dialog import DeployDialog
 from html_preview import HtmlPreviews, is_html
 from chat_store import ChatStore
+from hourly_status import HourlyStatusReport
 from coding_agent import FILE_LIMIT_CHOICES, estimate_tokens, run_agent
 from developer_tools import build_project_context, extract_code_blocks, fetch_model_capabilities, list_project_files, read_project_file
 from message_widgets import render_message
@@ -168,6 +169,7 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         self.root.bind("<Control-Shift-l>", lambda event: self.appearance.toggle())
         self.refresh_theme_controls()
         self.update_checker = UpdateChecker(self)
+        self.hourly_status = HourlyStatusReport(self)
 
     def configure_styles(self):
         super().configure_styles()
@@ -320,6 +322,7 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         self.settings_menu.add_command(label="AI backend: " + self.backend + "...", command=self.open_backend)
         self.settings_menu.add_separator()
         self.settings_menu.add_command(label="Check for updates...", command=lambda: self.update_checker.open())
+        self.settings_menu.add_command(label="Hourly status...", command=lambda: self.hourly_status.open())
         self.settings_menu.add_command(label="Connection log...", command=self.open_connection_log)
         self.settings_menu.add_command(label="Firewall lock...", command=self.open_firewall_lock)
         self.menubar.add_cascade(label="Settings", menu=self.settings_menu)
@@ -1667,6 +1670,8 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         for record in list(self.failed_saves.values()):
             self.queue_save(record)
         self.closing = True
+        if hasattr(self, "hourly_status"):
+            self.hourly_status.close()
         self.close_hybrid()
         self.chat_cancel.set()
         if self.deploy_dialog is not None:

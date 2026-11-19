@@ -126,6 +126,15 @@ class PathsAndSettingsTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 settings.save_file_limit(path, 5)
 
+    def test_hourly_report_is_opt_in_and_feedback_is_local(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder, "hourly.settings")
+            self.assertEqual(settings.load_hourly_report(path), {"enabled": False, "feedback": ""})
+            settings.save_hourly_report(path, True, "useful")
+            self.assertEqual(settings.load_hourly_report(path), {"enabled": True, "feedback": "useful"})
+            with self.assertRaises(ValueError):
+                settings.save_hourly_report(path, 1)
+
 
 class ConversationRuleTests(unittest.TestCase):
     def test_title_comes_from_the_first_user_message(self):
