@@ -11,9 +11,10 @@ import tempfile
 import uuid
 import zipfile
 
+from app_core.conversation import NEW_CHAT_TITLE, title_from
+from app_core.paths import data_directory, ensure_private_directory
 
-NEW_CHAT_TITLE = "New chat"
-_TITLE_LENGTH = 72
+
 _MAX_CHAT_BYTES = 64 * 1024 * 1024
 _CHAT_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 _MODES = {"chat", "dev"}
@@ -70,18 +71,12 @@ class ChatStore:
 
     def __init__(self, directory=None):
         if directory is None:
-            override = os.environ.get("AI_ASSIST_DATA_DIR")
-            local_data = os.environ.get("LOCALAPPDATA")
-            if override:
-                directory = Path(override)
-            elif local_data:
-                directory = Path(local_data) / "AI Assist" / "chats"
-            else:
-                directory = Path.home() / ".aiassist" / "chats"
+            directory = data_directory()
         self.directory = Path(directory).expanduser().resolve()
         self.errors = []
         try:
-            self.directory.mkdir(parents=True, exist_ok=True)
+            # A folder created here is private to this user on macOS and Linux.
+            ensure_private_directory(self.directory)
         except OSError as error:
             raise ChatStoreError(f"Could not create the saved chats folder: {error}") from error
 
@@ -321,11 +316,7 @@ class ChatStore:
                     record["title"] = existing["title"]
                 record["_manual_title"] = True
         if record["title"] == NEW_CHAT_TITLE and not record.get("_manual_title", False):
-            first_prompt = next((message["content"] for message in record["messages"]
-                                 if message["role"] == "user"), "")
-            title = " ".join(first_prompt.split())
-            if title:
-                record["title"] = title if len(title) <= _TITLE_LENGTH else title[:_TITLE_LENGTH - 1] + "…"
+            record["title"] = title_from(record["messages"]) or record["title"]
         record["updated_at"] = _utc_now()
         temporary_path = None
         try:

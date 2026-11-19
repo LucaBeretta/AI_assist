@@ -11,16 +11,15 @@ import threading
 import time
 import tkinter as tk
 from tkinter import font as tkfont
-import urllib.parse
 
+from app_core.ollama import placement  # noqa: F401  (long-standing name)
+from app_core.privacy import FIREWALL_WARNINGS, is_cloud_model, privacy_status  # noqa: F401
+from app_core.privacy import is_local_url as is_local  # noqa: F401  (long-standing name)
 import network_gate
 
 MONO_CANDIDATES = ("Cascadia Mono", "Cascadia Code", "Consolas", "SF Mono", "Menlo",
                    "JetBrains Mono", "DejaVu Sans Mono", "Liberation Mono", "Courier New")
 AGENT_MAX_STEPS = 12
-FIREWALL_WARNINGS = {"lifted": "firewall lifted until {until}", "partial": "firewall lock incomplete",
-                     "changed": "firewall lock changed", "disabled": "firewall lock off",
-                     "firewall off": "windows firewall off"}
 
 
 def mono_family(root):
@@ -41,32 +40,6 @@ def short_tokens(count):
         return str(count)
     value = count / 1000
     return f"{value:.1f}k" if value < 10 and round(value, 1) != int(value) else f"{round(value):.0f}k"
-
-
-def placement(detail):
-    """Where Ollama placed a running model: gpu, cpu, or the GPU share."""
-    if not detail or not detail.get("size"):
-        return ""
-    share = detail.get("size_vram", 0) / detail["size"]
-    if share >= 0.98:
-        return "gpu"
-    if share <= 0.02:
-        return "cpu"
-    return f"gpu {share:.0%} · cpu"
-
-
-def is_local(url):
-    try:
-        host = urllib.parse.urlsplit(url if "://" in url else "http://" + url).hostname
-    except ValueError:
-        return False
-    return host in ("localhost", "127.0.0.1", "::1")
-
-
-def is_cloud_model(name):
-    """Ollama's cloud models run on Ollama's servers: names end in -cloud or :cloud."""
-    name = (name or "").lower()
-    return name.endswith("-cloud") or name.endswith(":cloud")
 
 
 def generation_rate(metrics):
@@ -169,26 +142,8 @@ class StatusBar:
                 url = app.ollama_url() if hasattr(app, "ollama_url") else ""
             except (RuntimeError, ValueError):
                 url = ""
-        gate = network_gate.status()
-        if gate["installed"] and gate["online"]:
-            privacy, privacy_role = f"online now: {gate['online']}", "amber"
-        elif is_cloud_model(model):
-            privacy = "cloud model: each request needs approval" if gate["installed"] else "cloud model: prompts leave this computer"
-            privacy_role = "amber"
-        elif url and not is_local(url):
-            privacy, privacy_role = "remote server", "amber"
-        else:
-            privacy = "local only · internet locked" if gate["installed"] else "local only"
-            privacy_role = "success"
         lock = getattr(getattr(app, "firewall", None), "lock", None)
-        summary = getattr(lock, "summary", None) or {}
-        state = summary.get("state")
-        if state == "on":
-            privacy += " · firewall on"
-        elif state in FIREWALL_WARNINGS and summary.get("has_rules"):
-            until = summary.get("lift_until")
-            privacy += " · " + FIREWALL_WARNINGS[state].format(until=time.strftime("%H:%M", time.localtime(until)) if until else "")
-            privacy_role = "amber"
+        privacy, privacy_role = privacy_status(network_gate.status(), model, url, getattr(lock, "summary", None))
         return {
             "engine": f"{engine.lower()} {state}", "engine_role": "success" if state == "ready" else "muted",
             "model": model_text, "context": context_text, "fraction": fraction,
