@@ -22,6 +22,7 @@ from response_metrics import metrics_summary, response_metrics
 from shared_memory import MAX_NOTES, SharedMemory, memory_note
 from appearance import DARK_THEMES, Appearance
 from status_bar import StatusBar, mono_family
+from compute_dashboard import ComputeDashboard
 from developer_panel import DeveloperPanelMixin
 from feedback_ui import FeedbackMixin
 from hybrid_ui import HybridMixin, QUALITY_GUIDANCE
@@ -144,6 +145,7 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         self.shared_memory = None
         self.memory_window = None
         self.deploy_dialog = None
+        self.compute_dashboard = None
         self.html_previews = HtmlPreviews()
         try:
             self.chat_store = ChatStore()
@@ -280,6 +282,10 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
                                         c["sidebar"], c["ink"], c["sidebar_hover"], anchor="w")
         self.memory_button.config(pady=6, padx=12, font=(self.mono, 10))
         self.memory_button.pack(fill="x", padx=14, pady=2)
+        compute_button = self.button(self.sidebar, "\u203a compute dashboard", self.open_compute_dashboard,
+                                     c["sidebar"], c["ink"], c["sidebar_hover"], anchor="w")
+        compute_button.config(pady=6, padx=12, font=(self.mono, 10))
+        compute_button.pack(fill="x", padx=14, pady=2)
         tk.Label(self.sidebar, text="RECENT", bg=c["sidebar"], fg=c["sidebar_muted"],
                  font=(self.mono, 8), anchor="w").pack(fill="x", padx=24, pady=(20, 6))
         self.history_search = tk.StringVar(self.root)
@@ -328,6 +334,7 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         self.settings_menu.add_command(label="Check for updates...", command=lambda: self.update_checker.open())
         self.settings_menu.add_command(label="Connection log...", command=self.open_connection_log)
         self.settings_menu.add_command(label="Firewall lock...", command=self.open_firewall_lock)
+        self.settings_menu.add_command(label="Compute dashboard...", command=self.open_compute_dashboard)
         self.menubar.add_cascade(label="Settings", menu=self.settings_menu)
         self.root.configure(menu=self.menubar)
         self.main_frame = tk.Frame(self.root, bg=c["background"])
@@ -1262,6 +1269,22 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         self.set_status("Saved to shared memory. Available in other chats and after restart.")
         return True
 
+    def open_compute_dashboard(self):
+        """Show real local telemetry and explicitly unverified paired-node status."""
+        if self.closed or self.closing:
+            return
+        if self.compute_dashboard is not None and not self.compute_dashboard.closed:
+            self.compute_dashboard.focus()
+            return
+        def trusted_records():
+            # Enrollment records only, not proof that a peer is currently online.
+            # Do not open any sockets or enable sharing by reading these records.
+            if self.chat_store is None:
+                return {}
+            from peer_pairing import TrustStore
+            return TrustStore(self.chat_store.directory.parent / "pairing")._read("paired_servers.json")
+        self.compute_dashboard = ComputeDashboard(self, peer_records=trusted_records)
+
     def open_shared_memory(self):
         if self.closing:
             return
@@ -1726,6 +1749,8 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
             self.saver.stop()
         self.html_previews.close()
         self.capabilities_view.close()
+        if self.compute_dashboard is not None:
+            self.compute_dashboard.close()
         if hasattr(self, "status_bar"):
             self.status_bar.close()
         super().close()
