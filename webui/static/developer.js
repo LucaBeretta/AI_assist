@@ -279,13 +279,7 @@ window.devui = (() => {
   }
 
   // ---------- wiring ----------
-  function show(visible) {
-    element("dev-view").hidden = !visible;
-    element("chat-view").hidden = visible;
-    element("nav-dev").setAttribute("aria-current", visible ? "page" : "false");
-    element("nav-chats").setAttribute("aria-current", visible ? "false" : "page");
-    if (visible) { loadCheckpoints(); element("dev-task").focus?.(); }
-  }
+  function onShow() { loadCheckpoints(); element("dev-task").focus?.(); }
 
   element("dev-project").value = recall("aiassist-dev-project") || "";
   element("dev-project").addEventListener("change", () => { chatId = null; loadCheckpoints(); });
@@ -295,8 +289,6 @@ window.devui = (() => {
   });
   element("dev-stop").addEventListener("click", stop);
   element("dev-refresh-checkpoints").addEventListener("click", loadCheckpoints);
-  element("nav-dev").addEventListener("click", () => show(true));
-  element("nav-chats").addEventListener("click", () => show(false));
   controls();
-  return {onEvent, show, isRunning: () => Boolean(task?.running), stop};
+  return {onEvent, onShow, isRunning: () => Boolean(task?.running), stop};
 })();

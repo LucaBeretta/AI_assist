@@ -518,6 +518,7 @@ window.app = (() => {
         continue;
       }
       if (appEvent(event)) continue;
+      if (window.modelsui?.onEvent(event)) continue;  // downloads and model list changes
       if (event.task_id) { window.devui?.onEvent(event); continue; }  // Developer task events
       if (!event.stream_id) { if (event.type === "error") showError(new Error(event.error)); continue; }
       const stream = streams.get(event.stream_id) || {id: event.stream_id, chat_id: event.chat_id, text: "", active: true, operation:event.operation || "chat"};
@@ -712,5 +713,26 @@ window.app = (() => {
     } catch (error) { showError(error); }
     if (lastState?.interrupted?.length) status(`${lastState.interrupted.length} chat(s) have an interrupted reply: open them to keep or discard it.`);
   });
-  return {onEvent};
+  // ---------- views (Chats / Developer / Models) ----------
+  const views = {chat: ["chat-view", "nav-chats"], dev: ["dev-view", "nav-dev"], models: ["models-view", "nav-models"]};
+  function showView(name) {
+    for (const [key, [view, nav]] of Object.entries(views)) {
+      element(view).hidden = key !== name;
+      element(nav).setAttribute("aria-current", key === name ? "page" : "false");
+    }
+    if (name === "dev") window.devui?.onShow?.();
+    if (name === "models") window.modelsui?.onShow?.();
+  }
+  element("nav-chats").addEventListener("click", () => showView("chat"));
+  element("nav-dev").addEventListener("click", () => showView("dev"));
+  element("nav-models").addEventListener("click", () => showView("models"));
+  element("open-models").addEventListener("click", () => showView("models"));
+
+  function selectModel(name) {
+    element("model").value = name;
+    controls();
+    if (selected && window.pywebview?.api?.set_chat_model) call("set_chat_model", selected, name).catch(showError);
+  }
+
+  return {onEvent, showView, selectModel, refreshModels: () => refreshModels().catch(showError)};
 })();

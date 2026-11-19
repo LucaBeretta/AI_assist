@@ -9,6 +9,7 @@
   <script defer src="markdown.js"></script>
   <script defer src="app.js"></script>
   <script defer src="developer.js"></script>
+  <script defer src="models.js"></script>
 </head>
 <body>
 <div class="app">
@@ -32,6 +33,9 @@
         </button>
         <button id="nav-dev" class="nav-item" type="button" aria-current="false">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5"></path></svg>Developer
+        </button>
+        <button id="nav-models" class="nav-item" type="button" aria-current="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"></rect><path d="M9 9h6v6H9z"></path></svg>Models
         </button>
       </nav>
 
@@ -100,6 +104,7 @@
             </button>
             <input id="attach-input" class="sr-only" type="file" multiple tabindex="-1" aria-hidden="true">
             <label class="model-pick"><span class="sr-only">Model</span><select id="model" aria-label="Model"></select></label>
+            <button id="open-models" class="btn ghost small-btn" type="button" title="See all models, your hardware and downloads">Models…</button>
             <label title="Context length in tokens (empty = automatic)"><span class="sr-only">Context length</span><input id="context" class="ctx-input" type="number" min="2048" max="1048576" step="1" value="16384" placeholder="auto"></label>
             <span class="grow"></span>
             <details id="context-menu" class="ctx">
@@ -180,6 +185,43 @@
               <div id="dev-checkpoints" class="checkpoints"></div>
             </section>
           </aside>
+        </div>
+      </div>
+      <div id="models-view" class="view" hidden>
+        <header class="header">
+          <h1 class="strong">Models</h1>
+          <div class="header-actions">
+            <span id="models-status" class="dev-hint" role="status" aria-live="polite"></span>
+            <button id="models-refresh" class="icon-btn" type="button" aria-label="Check hardware and recommendations again">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"></path></svg>
+            </button>
+          </div>
+        </header>
+        <div class="models-scroll">
+          <div class="models-page">
+            <section aria-labelledby="hw-title">
+              <h2 id="hw-title" class="models-h">This computer</h2>
+              <div id="hw-summary" class="hw-grid"></div>
+              <div id="hw-notes"></div>
+            </section>
+            <section aria-labelledby="installed-title">
+              <h2 id="installed-title" class="models-h">Installed</h2>
+              <div id="models-installed" class="model-list"></div>
+            </section>
+            <section aria-labelledby="rec-title">
+              <h2 id="rec-title" class="models-h">Recommended for this computer</h2>
+              <div id="models-recommended" class="model-grid"></div>
+            </section>
+            <section aria-labelledby="other-title">
+              <h2 id="other-title" class="models-h">Another model</h2>
+              <form id="pull-other" class="pull-other">
+                <label class="sr-only" for="pull-other-name">Model tag</label>
+                <input id="pull-other-name" class="mono" placeholder="e.g. qwen3:14b (from ollama.com/library)" spellcheck="false">
+                <button id="pull-other-button" class="btn" type="submit">Download</button>
+                <span id="pull-other-progress"></span>
+              </form>
+            </section>
+          </div>
         </div>
       </div>
     </main>
