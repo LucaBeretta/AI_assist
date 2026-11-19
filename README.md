@@ -2,6 +2,18 @@
 
 A local Ollama workspace with saved chats, a developer agent, code previews, model capabilities, and hardware-aware downloads. Built with Python and Tkinter, plus a browser-based [web workspace (preview)](#web-workspace-preview); no pip packages are required.
 
+## Compute monitor integration (experimental)
+
+A separate integration branch, `integration/compute-dashboard-web`, combines the modern web workspace and the local compute dashboard. **It is not merged into the workstation branch.**
+
+- **Browser:** Start `python web_workspace.py`, sign in with its one-time launch link, and open **Compute** in the navigation. CPU/GPU/RAM and local Ollama model metrics refresh approximately every five seconds while that view is visible. The web server is bound to loopback only and requires its existing session token for `GET /api/compute`.
+- **Desktop:** Start `python AIassist.py`, then choose **Compute monitor** in the sidebar or Settings.
+- **Mac second display:** Double-click `Start Compute Dashboard.command` (or run `python3 launch_compute_dashboard.py`). This opens the standalone, no-scroll compute monitor, remembers the external screen where you left it, and does not start the full app.
+- **LAN security:** Existing pairing records are shown as *saved but not live*. No trusted remote telemetry or distributed inference transport is claimed. LAN sharing stays off unless you explicitly activate it in the separate experimental pairing tool.
+- **Tests:** `python -m unittest discover -v`. The integration branch also defines `.github/workflows/compute-integration.yml` for Windows, macOS and Linux. Check the workflow result rather than assuming all platforms passed.
+
+The compute panel is intended for monitoring. It cannot edit projects, execute remote commands or automatically connect to other devices.
+
 ## Requirements
 
 - Python 3 with Tkinter available.
