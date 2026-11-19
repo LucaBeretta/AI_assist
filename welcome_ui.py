@@ -140,10 +140,7 @@ class WelcomeGuide:
         self.render()
 
     def find_model(self):
-        self.app.open_downloads()
-        dialog = self.app.download_dialog
-        if dialog is not None and not dialog.closed and hasattr(dialog, "advisor"):
-            dialog.notebook.select(dialog.advisor.frame)
+        self.app.open_model_suggestions()
 
     def close(self):
         if self.window.winfo_exists():

@@ -42,6 +42,7 @@ import urllib.parse
 
 from app_core import backups, ollama, settings
 from app_core.chat_service import ChatService, ServiceError
+from app_core.explain import explain
 from app_core.privacy import is_cloud_model, privacy_status
 from app_core.providers import configured_provider
 from chat_store import ChatStoreError
@@ -439,6 +440,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Security-Policy", policy)
 
     def send_json(self, status, payload):
+        if status >= 400 and "error" in payload and "help" not in payload:
+            # What happened and what to do, in plain words, for problems people can fix.
+            explained = explain(payload["error"])
+            if explained:
+                payload = dict(payload, help=explained)
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.security_headers(API_POLICY)
@@ -584,6 +590,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     event = events.get(timeout=self.HEARTBEAT_SECONDS)
                 except queue.Empty:
                     event = {"type": "waiting"}
+                if event["type"] == "error" and explain(event["error"]):
+                    event = dict(event, help=explain(event["error"]))
                 if event["type"] == "done":
                     saved = event["chat"]
                     last = saved["messages"][-1] if saved["messages"] else None

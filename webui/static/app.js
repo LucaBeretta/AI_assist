@@ -39,7 +39,8 @@ const store = createStore({
   view: "chats", navOpen: false, inspectorOpen: !narrow.matches && inspectorPreference(),
   theme: loadPreference("aiassist.theme", "system"),
   status: null, statusError: null,
-  models: [], modelsError: null, modelsLoading: false, selectedModel: loadPreference("aiassist.model", ""),
+  models: [], modelsError: null, modelsHelp: null, modelsLoading: false, selectedModel: loadPreference("aiassist.model", ""),
+  sendHelp: null,
   context: "default",
   chats: [], chatsLoading: true, chatsError: null, chatQuery: "",
   chat: null, chatLoading: false, chatError: null,
@@ -148,9 +149,10 @@ const ctx = {
       const names = result.models.map((/** @type {any} */ model) => model.name);
       let selected = store.get().selectedModel;
       if (!names.includes(selected)) selected = names[0] || "";
-      store.set({ models: result.models, modelsError: null, selectedModel: selected, modelsLoading: false });
+      store.set({ models: result.models, modelsError: null, modelsHelp: null, selectedModel: selected, modelsLoading: false });
     } catch (error) {
-      store.set({ modelsError: error instanceof Error ? error.message : String(error), modelsLoading: false });
+      store.set({ modelsError: error instanceof Error ? error.message : String(error), modelsLoading: false,
+        modelsHelp: error instanceof ApiError ? error.help : null });
     }
   },
 
@@ -246,7 +248,7 @@ const ctx = {
     const state = store.get();
     if (state.streaming) return false;
     let chat = state.chat;
-    store.set({ sendError: null });
+    store.set({ sendError: null, sendHelp: null });
     try {
       if (!chat) {
         chat = (await api.request("POST", "/api/chats", { model: state.selectedModel })).chat;
@@ -293,14 +295,15 @@ const ctx = {
             : event.local ? "Saved to shared memory." : "Answer complete.");
         } else if (event.type === "error") {
           finished = true;
-          store.set({ sendError: event.error });
+          store.set({ sendError: event.error, sendHelp: event.help || null });
           announce(`The answer failed: ${event.error}`);
         }
       });
       if (!finished) store.set({ sendError: "The connection closed before the answer finished. Your message was saved; send it again when ready." });
     } catch (error) {
       if (!(error instanceof ApiError && error.status === 401)) {
-        store.set({ sendError: error instanceof Error ? error.message : String(error) });
+        store.set({ sendError: error instanceof Error ? error.message : String(error),
+          sendHelp: error instanceof ApiError ? error.help : null });
       }
     }
     if (frame) window.cancelAnimationFrame(frame);

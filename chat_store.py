@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import re
 import tempfile
+import threading
 import uuid
 import zipfile
 
@@ -67,6 +68,11 @@ class ChatStore:
 
     The optional ``_manual_title`` flag preserves an explicit rename, including
     a rename back to "New chat", across application restarts.
+
+    Each chat read is remembered with its file's stamp (modification time,
+    size and file id), so listing again reads only files that changed. Records
+    returned by ``list_chats`` share their message lists with that memory:
+    treat them as read-only, and use ``load`` for a chat to change.
     """
 
     def __init__(self, directory=None):
@@ -74,6 +80,9 @@ class ChatStore:
             directory = data_directory()
         self.directory = Path(directory).expanduser().resolve()
         self.errors = []
+        # Saves run on a worker thread while the window lists chats: the memory needs a lock.
+        self._cache = {}
+        self._cache_lock = threading.Lock()
         try:
             # A folder created here is private to this user on macOS and Linux.
             ensure_private_directory(self.directory)
@@ -194,10 +203,14 @@ class ChatStore:
             raise ChatStoreError(message) from error
         query = query.casefold().strip()
         chats = []
+        present = {path.stem for path in paths}
+        with self._cache_lock:
+            for identity in [identity for identity in self._cache if identity not in present]:
+                del self._cache[identity]
         for path in paths:
             previous_errors = len(self.errors)
             try:
-                chat = self.load(path.stem)
+                chat = dict(self._remembered(path.stem))
             except (ChatStoreError, FileNotFoundError) as error:
                 if len(self.errors) == previous_errors:
                     self._note_error(f"Skipped {path.name}: {error}")
@@ -291,6 +304,33 @@ class ChatStore:
             raise ChatStoreError(f"Could not write the backup: {error}") from error
         return len(chats)
 
+    @staticmethod
+    def _stamp(path):
+        status = path.stat()
+        return status.st_mtime_ns, status.st_size, status.st_ino
+
+    def _remembered(self, chat_id):
+        """A chat from memory while its file is unchanged; otherwise read (and remember) it.
+        The stamp is taken before reading, so a file replaced meanwhile is read again next time."""
+        path = self._path(chat_id)
+        try:
+            stamp = self._stamp(path)
+        except FileNotFoundError as error:
+            with self._cache_lock:
+                self._cache.pop(chat_id, None)
+            raise FileNotFoundError(f"Saved chat {chat_id} does not exist.") from error
+        except OSError:
+            stamp = None
+        with self._cache_lock:
+            cached = self._cache.get(chat_id)
+        if stamp is not None and cached is not None and cached[0] == stamp:
+            return cached[1]
+        record = self.load(chat_id)
+        if stamp is not None:
+            with self._cache_lock:
+                self._cache[chat_id] = (stamp, record)
+        return record
+
     def load(self, chat_id):
         """Read one chat, raising a diagnostic error for damaged files."""
         path = self._path(chat_id)
@@ -317,7 +357,7 @@ class ChatStore:
         record = self._validate(chat)
         path = self._path(record["id"])
         if path.exists():
-            existing = self.load(record["id"])
+            existing = self._remembered(record["id"])
             record["created_at"] = existing["created_at"]
             # An older copy must not lose an explicit rename flag on save.
             if existing.get("_manual_title"):
@@ -358,6 +398,8 @@ class ChatStore:
 
     def _write(self, record, path):
         temporary_path = None
+        with self._cache_lock:
+            self._cache.pop(record["id"], None)
         try:
             payload = json.dumps(record, ensure_ascii=False, allow_nan=False, indent=2) + "\n"
             if len(payload.encode("utf-8")) > _MAX_CHAT_BYTES:
@@ -370,6 +412,13 @@ class ChatStore:
                 target.flush()
                 os.fsync(target.fileno())
             os.replace(temporary_path, path)
+            try:
+                # Remember a private copy: callers keep and change the record they get back.
+                remembered = (self._stamp(path), deepcopy(record))
+                with self._cache_lock:
+                    self._cache[record["id"]] = remembered
+            except OSError:
+                pass
         except (OSError, TypeError, ValueError, UnicodeError, RecursionError) as error:
             raise ChatStoreError(f"Could not save chat {record['id']}: {error}") from error
         finally:
@@ -391,6 +440,8 @@ class ChatStore:
     def delete(self, chat_id):
         """Delete only the selected UUID file; an already absent file is fine."""
         path = self._path(chat_id)
+        with self._cache_lock:
+            self._cache.pop(chat_id, None)
         try:
             path.unlink(missing_ok=True)
         except OSError as error:

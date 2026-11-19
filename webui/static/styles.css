@@ -199,6 +199,9 @@ button.chip { cursor: pointer; }
 .message-body { overflow-wrap: anywhere; min-width: 0; }
 .message-body > :last-child { margin-bottom: 0; }
 .message-body.is-plain { white-space: pre-wrap; }
+.error-help { display: grid; gap: var(--space-1); justify-items: start; }
+.error-help p { margin: 0; }
+.error-help strong { font-size: var(--text-md); }
 .writing { display: inline-flex; gap: 4px; align-items: center; }
 .writing span { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: pulse 1.2s infinite ease-in-out; }
 .writing span:nth-child(2) { animation-delay: 0.15s; }

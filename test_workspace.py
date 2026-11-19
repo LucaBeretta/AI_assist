@@ -955,16 +955,61 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         native_tool = next(item for item in saved["agent_history"] if item["role"] == "tool")
         self.assertEqual(native_tool, {"role": "tool", "tool_name": "read_file", "content": self.original_code})
 
+    def test_an_error_is_explained_in_plain_words_with_its_fix(self):
+        self.request.side_effect = RuntimeError("Could not connect to Ollama at http://localhost:11434. "
+                                                "Start Ollama or run 'ollama serve', then try again.")
+        self.set_input("Hello")
+        self.app.send_button.invoke()
+        self.wait_for(lambda: not self.app.is_waiting, "failed request")
+        texts = [widget.cget("text") for widget in descendants(self.app.message_frame)
+                 if isinstance(widget, (tk.Label, tk.Button))]
+        self.assertIn("Ollama is not answering", texts)
+        self.assertIn("Details:", texts)
+        self.assertTrue(self.app.status_label.cget("text").startswith("Ollama is not answering. Could not connect"))
+        button = next(widget for widget in descendants(self.app.message_frame)
+                      if isinstance(widget, tk.Button) and widget.cget("text") == "Check again")
+        with patch.object(self.app, "manage_models") as manage:
+            button.invoke()
+        manage.assert_called_once_with("refresh")
+
+    def test_a_model_that_is_not_loaded_says_why_the_first_answer_is_slow(self):
+        self.app.loaded_models = set()
+        self.set_input("Hello")
+        self.app.send_button.invoke()
+        self.assertIn("Loading alpha:8b into memory first", self.app.status_label.cget("text"))
+        self.wait_for(lambda: not self.app.is_waiting, "answer")
+
+    def test_after_the_ai_changes_files_the_status_says_how_to_undo(self):
+        self.enter_project()
+
+        def run(host, model, root, messages, on_event, approve, **options):
+            target = (self.project / "main.py").resolve()
+            options["checkpoint"].before_write(target, target.read_bytes())
+            target.write_bytes(b"print('changed')\n")
+            options["checkpoint"].after_write(target, b"print('changed')\n")
+            return {"messages": messages + [{"role": "assistant", "content": "Done."}], "assistant_text": "Done."}
+
+        with patch("workspace_ui.run_agent", side_effect=run):
+            self.set_input("Change main.py")
+            self.app.send_button.invoke()
+            self.wait_for(lambda: not self.app.is_waiting, "agent finished")
+        self.assertIn("The AI changed 1 file: Changes > Undo the AI's last task puts them back.",
+                      self.app.status_label.cget("text"))
+        self.assertEqual(str(self.app.undo_button.cget("state")), "normal")
+
     def test_a_chat_answers_from_a_folder_of_documents_and_lists_its_sources(self):
         documents_folder = self.folder / "manuals"
         documents_folder.mkdir()
         (documents_folder / "water.md").write_text("To purify water, boil it for one full minute.", encoding="utf-8")
         (documents_folder / ".env").write_text("SECRET=never", encoding="utf-8")
+        self.assertEqual(self.app.documents_button.cget("text"), "Use documents...")
+        self.assertTrue(self.app.documents_button.winfo_manager())
         with patch("workspace_ui.filedialog.askdirectory", return_value=str(documents_folder)):
-            self.app.chat_menu.invoke("Use documents from a folder...")
+            self.app.documents_button.invoke()
         self.wait_for(lambda: not self.app.documents_indexing, "documents read")
         self.assertIn("Documents ready: 1 file from manuals", self.app.status_label.cget("text"))
         self.assertIn("Documents: manuals", self.app.chat_subtitle.cget("text"))
+        self.assertEqual(self.app.documents_button.cget("text"), "Documents: manuals")
         self.set_input("How long should I boil water to purify it?")
         self.app.send_button.invoke()
         self.wait_for(lambda: not self.app.is_waiting, "answer with documents")

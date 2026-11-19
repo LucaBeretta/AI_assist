@@ -10,6 +10,29 @@ const SUGGESTIONS = [
   ["Think it through", "Help me think through a decision. Start by asking what I am deciding."],
   ["Learn something", "Help me learn something new. Ask what topic I want to explore."],
 ];
+// Fixes that only the desktop app can do: say where to go instead.
+const DESKTOP_FIXES = {
+  get_started: "Open the desktop app's Settings > Get started.",
+  find_model: "Use Find & download models in the desktop app, or choose another installed model above.",
+  documents: "Choose the folder again in the desktop app (Chat options > Use documents from a folder).",
+};
+
+/**
+ * What happened and what to do, above an error's details.
+ * @param {any} ctx @param {any} help
+ */
+export function errorHelp(ctx, help) {
+  if (!help) return null;
+  return h("div", { class: "error-help" },
+    h("strong", null, help.title), h("p", null, help.help),
+    help.action === "refresh"
+      ? h("button", { class: "button button-small button-primary", type: "button",
+        onClick: () => { ctx.loadModels(); ctx.loadStatus(); ctx.announce("Checking again."); } }, "Check again")
+      : DESKTOP_FIXES[/** @type {keyof typeof DESKTOP_FIXES} */ (help.action)]
+        ? h("p", { class: "muted" }, DESKTOP_FIXES[/** @type {keyof typeof DESKTOP_FIXES} */ (help.action)]) : null,
+    h("span", { class: "muted" }, "Details:"));
+}
+
 const CONTEXTS = [["default", "Server default"], ["4096", "4k context"], ["8192", "8k context"], ["16384", "16k context"],
   ["32768", "32k context"], ["65536", "64k context"], ["131072", "128k context"]];
 
@@ -127,7 +150,8 @@ export function createChatView(ctx) {
       h("h2", { id: "empty-title" }, "What are we working on?"),
       h("p", { class: "muted" }, "A question, a rough idea, a fresh start. Your models run on this computer, and nothing goes online from here."),
       state.modelsError ? h("div", { class: "notice is-amber", role: "alert" }, icon("lock"),
-        h("div", null, h("strong", null, "No models answered. "), state.modelsError)) : null,
+        h("div", null, state.modelsHelp ? errorHelp(ctx, state.modelsHelp) : h("strong", null, "No models answered. "),
+          state.modelsError)) : null,
       h("div", { class: "suggestions" }, SUGGESTIONS.map(([label, prompt]) =>
         h("button", { class: "suggestion", type: "button", disabled: !ready,
           onClick: () => { textarea.value = prompt; grow(); textarea.focus(); } },
@@ -173,6 +197,7 @@ export function createChatView(ctx) {
       if (state.sendError) {
         messages.appendChild(h("div", { class: "message is-error", role: "alert" },
           h("div", { class: "message-header" }, h("span", { class: "message-role" }, "request failed")),
+          errorHelp(ctx, state.sendHelp),
           h("div", { class: "message-body" }, state.sendError)));
       }
       body.scrollTop = body.scrollHeight;

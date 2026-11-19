@@ -235,6 +235,12 @@ class ChatService:
                 return
         messages = chat_messages(record["messages"], shared, documents_context)
         provider = self.provider_factory()
+        try:
+            loaded = model in provider.running()
+        except (RuntimeError, ValueError, OSError):
+            loaded = True  # Unknown: say nothing rather than guess.
+        if not loaded:
+            emit({"type": "status", "text": f"Loading {model} into memory. The first answer can take up to a minute."})
         parts = []
 
         def chunk(piece):

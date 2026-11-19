@@ -5,6 +5,7 @@ import cProfile
 from pathlib import Path
 import pstats
 import tempfile
+import time
 
 from chat_store import ChatStore
 from workspace_ui import _history_matches
@@ -19,7 +20,18 @@ def history_workflows(chats, messages):
                 content=f"Message {number}: " + "Example source and explanation. " * 40)
                 for number in range(messages)]
             store.save(record)
+        started = time.perf_counter()
         records = store.list_chats()
+        first = time.perf_counter() - started
+        # The window lists chats again each time one is opened or created.
+        started = time.perf_counter()
+        store.list_chats()
+        again = time.perf_counter() - started
+        started = time.perf_counter()
+        ChatStore(folder).list_chats()
+        restart = time.perf_counter() - started
+        print(f"Listing {chats} chats: first {first * 1000:.0f} ms, again {again * 1000:.0f} ms, "
+              f"after a restart {restart * 1000:.0f} ms")
         for query in ("conversation", "message", "absent", "explanation"):
             for record in records:
                 _history_matches(record, query)
