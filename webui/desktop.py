@@ -5,10 +5,20 @@ import threading
 
 
 class Desktop:
-    def __init__(self, create_window=None):
+    def __init__(self, create_window=None, folder_dialog=None):
         self._create_window = create_window
         self._preview = None
         self._lock = threading.RLock()
+        self._folder_dialog = folder_dialog
+        self.main_window = None
+
+    def choose_folder(self):
+        if self._folder_dialog is not None:
+            return self._folder_dialog()
+        if self.main_window is None:
+            raise RuntimeError("The main window is not ready for a folder dialog.")
+        webview = importlib.import_module("webview")
+        return self.main_window.create_file_dialog(webview.FOLDER_DIALOG)
 
     def open_preview(self, uri):
         with self._lock:

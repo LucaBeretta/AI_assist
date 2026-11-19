@@ -6,6 +6,7 @@ import importlib
 import inspect
 import logging
 import re
+import shutil
 from pathlib import Path
 import sys
 import threading
@@ -503,6 +504,81 @@ class Api:
             return {"ok": True, "chats": sorted(chats, key=lambda item: item["updated_at"], reverse=True)}
 
     @_json_method
+    def rename_chat(self, id, title):
+        if not isinstance(title, str) or not title.strip() or len(title) > 300:
+            raise ValueError("A chat title needs 1 to 300 characters.")
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("The web UI is closing.")
+            record = self._load_chat(id)
+            record.update(title=title.strip(), _manual_title=True)
+            record = self._save_chat(record)
+        self._bridge.emit("chat_changed", chat_id=id)
+        return {"ok": True, "chat": record}
+
+    @_json_method
+    def delete_chat(self, id):
+        with self._lock:
+            self._require_idle(id)
+            record = self._load_chat(id)
+            directory = self._store.directory / id
+            if not record.get("incognito") and directory.exists():
+                chat_attachments.folder(self._store.directory, id)
+                if not directory.is_dir() or directory.resolve().parent != self._store.directory:
+                    raise ValueError("Invalid chat attachment folder.")
+            warnings = []
+            if record.get("incognito"):
+                self._incognito.pop(id, None)
+            else:
+                self._store.delete(id)
+                if directory.exists():
+                    try:
+                        shutil.rmtree(directory)
+                    except OSError as error:
+                        warnings.append(f"Chat deleted, but attachment cleanup failed: {error}")
+            self._unsaved = {key: value for key, value in self._unsaved.items() if value["chat_id"] != id}
+        self._bridge.emit("chat_deleted", chat_id=id)
+        return {"ok": True, "warnings": warnings}
+
+    @_json_method
+    def search_chats(self, query):
+        if not isinstance(query, str) or len(query) > 5000:
+            raise ValueError("Search must be text up to 5,000 characters.")
+        with self._lock:
+            records = self._store.list_chats() + list(self._incognito.values())
+            matches = []
+            needle = query.casefold().strip()
+            for record in sorted(records, key=lambda item: item["updated_at"], reverse=True):
+                contents = [" ".join(item["content"].split()) for item in record["messages"]]
+                text = next((text for text in contents if needle in text.casefold()), None)
+                if text is None and needle and needle not in record["title"].casefold():
+                    continue
+                text = text if text is not None else (contents[0] if contents else "")
+                offset = max(0, text.casefold().find(needle) - 40)
+                snippet = ("…" if offset else "") + text[offset:offset + 180]
+                matches.append({"id": record["id"], "title": record["title"], "snippet": snippet,
+                                "incognito": bool(record.get("incognito"))})
+        return {"ok": True, "chats": matches}
+
+    @_json_method
+    def export_chats(self):
+        if self._closed:
+            raise RuntimeError("The web UI is closing.")
+        selection = self._desktop.choose_folder()
+        if not selection:
+            return {"ok": True, "cancelled": True}
+        folder = Path(selection[0] if isinstance(selection, (list, tuple)) else selection).expanduser().resolve()
+        if not folder.is_dir():
+            raise ValueError("Choose an existing backup folder.")
+        destination = folder / ("ai-assist-backup-" + uuid.uuid4().hex[:12] + ".zip")
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("The web UI is closing.")
+            count = self._store.export_all(destination)
+            errors = list(self._store.errors)
+        return {"ok": True, "path": str(destination), "count": count, "errors": errors}
+
+    @_json_method
     def open_chat(self, id):
         with self._lock:
             record = self._load_chat(id)
@@ -979,8 +1055,10 @@ def main():
         # An absolute file URI does not enable pywebview's internal HTTP server.
         page = Path(__file__).resolve().parent / "static" / "index.html"
         bridge = Bridge(lambda script: window.evaluate_js(script), autostart=False)
-        api = Api(bridge)
+        desktop = Desktop()
+        api = Api(bridge, desktop=desktop)
         window = webview.create_window("AI Assist — Web", page.as_uri(), js_api=api, text_select=True)
+        desktop.main_window = window
         def loaded():
             bridge.start()
         window.events.loaded += loaded
