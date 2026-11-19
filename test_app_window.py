@@ -76,7 +76,9 @@ class OpenTests(unittest.TestCase):
         self.assertIn("http://127.0.0.1:9/#launch=x", seen)
 
     def test_without_a_suitable_browser_the_caller_uses_a_tab(self):
-        with patch.object(app_window, "find_app_browser", return_value=None):
+        # Neither the default browser (Edge on GitHub's Windows machines) nor a search finds one.
+        with patch.object(app_window, "default_browser_path", return_value=None), \
+                patch.object(app_window, "find_app_browser", return_value=None):
             self.assertFalse(app_window.open_app_window("http://127.0.0.1:8765/", popen=lambda *a, **k: self.fail("started")))
 
 

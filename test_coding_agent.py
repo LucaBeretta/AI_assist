@@ -44,7 +44,9 @@ class AgentTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name) / "project"
+        # Resolved, as the app's project root always is: a temporary folder can be a short
+        # 8.3 name (C:\Users\RUNNER~1\... on GitHub's Windows machines).
+        self.root = Path(self.temporary.name).resolve() / "project"
         self.root.mkdir()
         self.events = []
         self.approvals = []
@@ -65,7 +67,7 @@ class AgentTests(unittest.TestCase):
         return [message["content"] for message in result["messages"] if message["role"] == "tool"]
 
     def test_reads_and_lists_without_approval_and_preserves_input_messages(self):
-        (self.root / "main.py").write_text("one\ntwo\nthree\n", encoding="utf-8", newline="")
+        (self.root / "main.py").write_bytes(b"one\ntwo\nthree\n")  # write_text's newline= needs Python 3.10
         result, chat = self.run_responses([
             tool_response("list_files", {}),
             tool_response("read_file", {"path": "main.py", "start_line": 2, "end_line": 2}),
