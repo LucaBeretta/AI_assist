@@ -14,7 +14,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-import AIassist
+import tk_app
 import ollama_engine
 from coding_agent import FILE_LIMIT_CHOICES, run_agent
 from test_agent_support import isolate_agent_data
@@ -157,7 +157,7 @@ class StopAndLimitUITests(unittest.TestCase):
         self.root.withdraw()
         self.errors = []
         self.root.report_callback_exception = lambda *error: self.errors.append(error)
-        self.app = AIassist.AIAssistantGUI(self.root)
+        self.app = tk_app.AIAssistantGUI(self.root)
         self.addCleanup(self.close)
         self.wait_for(lambda: not self.app.startup_pending and not self.app.busy(), "startup")
 

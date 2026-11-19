@@ -11,7 +11,7 @@ import tkinter as tk
 import unittest
 from unittest.mock import patch
 
-import AIassist
+import tk_app
 import ollama_engine
 from model_library import DownloadCancelled
 
@@ -75,7 +75,7 @@ class DownloadUITests(unittest.TestCase):
         ]
         for item in self.patches:
             item.start()
-        self.app = AIassist.AIAssistantGUI(self.root)
+        self.app = tk_app.AIAssistantGUI(self.root)
         self.wait(lambda: not getattr(self.app, "startup_pending", False) and not self.app_busy())
         self.app.model_name.set("existing:8b")
         self.app.select_model()

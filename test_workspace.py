@@ -14,7 +14,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import ANY, patch
 
-from AIassist import AIAssistantGUI
+from tk_app import AIAssistantGUI
 
 
 def model_metadata(host, model):
@@ -533,7 +533,7 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         self.set_input("Stream a reply")
         ticks = count(time.monotonic(), 1)
         # Cross the engine's batching threshold without depending on wall time.
-        with patch("AIassist.time", SimpleNamespace(monotonic=lambda: next(ticks), sleep=time.sleep)):
+        with patch("tk_app.time", SimpleNamespace(monotonic=lambda: next(ticks), sleep=time.sleep)):
             self.app.send_prompt()
             self.assertTrue(partial_sent.wait(3), "The fake engine did not emit its first chunk")
             self.wait_for(lambda: self.app.stream_card is not None, "partial streaming response")

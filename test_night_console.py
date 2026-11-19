@@ -12,7 +12,7 @@ import tkinter as tk
 import unittest
 from unittest.mock import patch
 
-import AIassist
+import tk_app
 import ollama_engine
 from appearance import DARK_THEMES, toggled_theme
 from status_values import generation_rate, is_cloud_model, is_local, placement, short_tokens
@@ -88,7 +88,7 @@ class NightConsoleUITests(unittest.TestCase):
         self.root.withdraw()
         self.errors = []
         self.root.report_callback_exception = lambda *error: self.errors.append(error)
-        self.app = AIassist.AIAssistantGUI(self.root)
+        self.app = tk_app.AIAssistantGUI(self.root)
         self.addCleanup(self.close)
         self.wait_for(lambda: not self.app.startup_pending and not self.app.busy(), "startup")
 

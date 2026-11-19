@@ -51,10 +51,20 @@ class WebLaunchTests(unittest.TestCase):
         root = Path(__file__).parent
         # -S excludes installed pywebview, so this also exercises the real CLI
         # dependency diagnostic without ever constructing a GUI root.
-        result = subprocess.run([sys.executable, "-S", str(root / "AIassist.py"), "--web"],
-                                cwd=root, capture_output=True, text=True, timeout=15)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("The web UI needs pywebview", result.stderr)
+        for flags in ([], ["--web"]):
+            with self.subTest(flags=flags):
+                result = subprocess.run([sys.executable, "-S", str(root / "AIassist.py"), *flags],
+                                        cwd=root, capture_output=True, text=True, timeout=15)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("The web UI needs pywebview", result.stderr)
+
+    def test_default_and_explicit_web_flags_use_the_same_entry_point(self):
+        import AIassist
+        for flags in ([], ["--web"]):
+            with self.subTest(flags=flags), patch("AIassist.redirect_missing_streams") as redirect, patch("webui.app.main", return_value=7) as run:
+                self.assertEqual(AIassist.main(flags), 7)
+                redirect.assert_called_once_with()
+                run.assert_called_once_with()
 
     def test_private_setups_install_the_same_requirements(self):
         root = Path(__file__).parent

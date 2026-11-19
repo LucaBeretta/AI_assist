@@ -15,7 +15,7 @@ import tkinter as tk
 import unittest
 from unittest.mock import patch
 
-from AIassist import AIAssistantGUI
+from tk_app import AIAssistantGUI
 from colibri_panel import card_text, comparison_text, download_text
 from colibri_launcher import transfer_metrics
 from test_colibri_launcher import CATALOG, FakeGateway, completion, join_workers, make_fake_colibri

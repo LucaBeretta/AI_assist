@@ -248,7 +248,7 @@ class ColibriTests(unittest.TestCase):
 
 class BackendGuiTests(unittest.TestCase):
     def test_colibri_startup_chat_and_switch_back_to_ollama(self):
-        from AIassist import AIAssistantGUI
+        from tk_app import AIAssistantGUI
         with tempfile.TemporaryDirectory() as directory, ExitStack() as mocks:
             Path(directory, "backend.settings").write_text(json.dumps({"backend": "Colibri", "url": "http://localhost:8000/v1"}))
             mocks.enter_context(patch.dict(os.environ, {"AI_ASSIST_DATA_DIR": directory, "COLIBRI_URL": "", "COLI_API_KEY": ""}))
