@@ -1,55 +1,50 @@
-# Compute network dashboard — initial implementation
+# Compute network dashboard — compact second-screen view
 
-Branch: \`architecture-modernization\`.
+Branch: `architecture-modernization`
 
-## Delivered
+## Available now
 
-The existing Tkinter app now exposes **Compute dashboard...** from the left sidebar and Settings menu. The independent window refreshes on a background thread, with a five-second polling target and a manual refresh button. It closes on application shutdown.
+Open **Compute dashboard...** from the AI Assist sidebar or Settings menu. The window has a **fixed, no-scroll, responsive 3-over-2 panel layout** designed for small external screens (default 800 × 480, minimum window size 480 × 320).
 
-The UI reports:
-- Local CPU name, logical cores, and utilization where OS counters are accessible.
-- Installed and available system RAM.
-- NVIDIA GPU load and used/total VRAM via nvidia-smi where available; other GPU detections provide capacity estimates only, with utilization explicitly **unavailable**.
-- Installed and loaded models from a **loopback-only** Ollama server. It never probes configured remote Ollama servers in the local telemetry sampler.
-- Locally stored paired-device metadata, with each peer explicitly labeled **paired · live telemetry unavailable**, never falsely shown as online or producing actual performance data.
+- **Top row:** live local CPU, GPU, and RAM gauges, 30-sample history traces and short hardware details.
+- **Bottom row:** locally installed/loaded Ollama models, plus saved paired-device identities.
+- **Header:** manual Refresh and Full screen; `F11` enters/exits fullscreen and `Esc` exits fullscreen. `Ctrl+R` refreshes.
+- **Footer:** local-only privacy status and measurement age; metrics older than 15 seconds are marked stale.
 
-It never starts LAN sharing, initiates discovery, or downloads a model. It does not transmit prompts or files. No secrets are shown in the paired-device inventory.
+The layout uses Tkinter Canvas rendering: all panels remain in the current viewport, and long names are shortened instead of creating scrolling regions. GPU load and memory stats come from `nvidia-smi` where available; otherwise some GPU capacity data may be available but utilization is marked unknown. CPU and RAM readings are collected per platform. The Ollama model endpoint is queried over **loopback only**. Polling occurs on a worker thread approximately every 5 seconds.
 
-**Security note:** The enrolled-peer metadata is loaded only from the default \`pairing\` directory next to the chat data directory. A user who chose a different \`--data-dir\` for the pairing CLI won't see those peers until a proper device-registry configuration is added. A pairing record does not establish online presence or authenticated telemetry permission.
+## Security boundaries
 
-## Architecture
+The UI **does not** start LAN discovery, expose a listener, enable network sharing or poll remote nodes. Paired devices are shown as **saved, telemetry unavailable**, never guessed as online. No tokens, certificate secrets, prompts, or file contents appear in device rows. The manual-sharing policy remains in force: sharing is **off by default** and must be activated explicitly in a later integration.
 
-- \`compute_telemetry.py\`: read-only metrics sampler independent of Tkinter.
-- \`compute_dashboard.py\`: separate Tkinter view, worker-thread polling and pure formatting.
-- \`workspace_ui.py\`: small sidebar and settings hooks, one dashboard instance per application, safe close handling.
-- \`test_compute_dashboard.py\`: headless unit tests for formatting, privacy boundaries and local-only model polling.
+## Files
 
-The existing \`status_bar.py\`, \`model_advisor.py\`, and \`hardware_panel.py\` are reused or left intact; this does not alter the inference path.
+- `compute_dashboard.py`: graphical fixed-grid Canvas view and pure `dashboard_layout` geometry.
+- `compute_telemetry.py`: read-only local hardware/model sampler.
+- `workspace_ui.py`: sidebar and menu entry points, plus shutdown cleanup.
+- `test_compute_dashboard.py`: formatting, privacy, and local-only sampling tests.
+- `test_compute_dashboard_layout.py`: headless layout, rendering, missing-data, and no-scroll regression tests.
 
-## Run
+## Validate on your machine
 
-From the architecture branch:
+From the project folder on this branch:
 
-\`\`\`bash
-python -m unittest -v test_compute_dashboard test_compute_routing test_peer_pairing test_sharing_control
+```sh
+python -m unittest -v test_compute_dashboard test_compute_dashboard_layout
 python -m unittest discover -v
 python AIassist.py
-\`\`\`
+```
 
-Open **Compute dashboard...** in the left sidebar.
+In AI Assist, click **Compute dashboard...** and use `F11` to view it on the second screen. Verify at 480 × 320, 800 × 480, and fullscreen resolution, including font scaling on Windows/macOS/Linux.
 
-**Validation status:** The code is committed but the full test suite and GUI have not been run on supported operating systems in this development session. Unit tests in \`test_peer_pairing.py\` include optional cryptography-dependent tests.
+**Verification status:** Source and regression tests are committed. Full suite execution and cross-platform visual validation have **not** been performed in this session.
 
-## Still required for a fully live network dashboard
+## Still missing
 
-1. Add an inference-only **authenticated telemetry endpoint** to the explicitly enabled paired-node service. Require TLS certificate pinning, token verification, size limits, read-only permission and user opt-in.
-2. Define versioned, minimal telemetry JSON with timestamp, CPU, RAM, GPU, loaded models, queue load and measured inference throughput. Never include prompts, local paths, private keys, access tokens or arbitrary shell/file capabilities.
-3. Display sampled metrics only after verifying node identity and authorization. Mark disconnected/stale nodes accurately. Add timeouts, authentication failure handling and revocation.
-4. Build responsive charts for histories and per-model benchmarks; current view is live text metrics, not a high-frequency time-series visualization.
-5. Add real two-device validation on Windows/macOS/Linux, with explicit consent controls and a local-only baseline.
+- Authenticated live remote telemetry, session throughput and cross-device load.
+- Actual distributed inference and hardware routing controls in the GUI.
+- More than the first GPU's graphical gauge (other GPUs can be added later via selection).
+- True GPU utilization on systems that lack `nvidia-smi`, including Apple Metal-specific GPU usage.
+- Hardware-specific fullscreen checks, readable text at 480 × 320 on HiDPI scaled displays, and deployment/testing on the actual second screen.
 
-Keep LAN inference hosting **manually activated** and **off by default** throughout.
-
-## Open product question
-
-Should the next milestone prioritize authenticated remote telemetry, or an enhanced, no-scroll graphical dashboard for a small second screen? Neither should create an automatic sharing listener.
+The graphical view deliberately avoids fake readings and remains useful while the network features are unfinished.
