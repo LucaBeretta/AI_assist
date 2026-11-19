@@ -15,6 +15,7 @@ cut short by a shutdown does not leave them off.
 import base64
 import ipaddress
 import json
+import ntpath
 import os
 from pathlib import Path
 import queue
@@ -189,10 +190,11 @@ def summarize(status, programs, lift_until=None, now=None):
         return dict(summary, state="unavailable", detail=status["unavailable"])
     if "error" in status:
         return dict(summary, detail=f"Could not read Windows Firewall: {status['error']}")
-    rules = {os.path.normcase(str(rule.get("program"))): rule for rule in status["rules"] if isinstance(rule, dict)}
-    wanted = {os.path.normcase(program) for program in programs}
+    # Firewall rules always hold Windows paths, whatever system reads them.
+    rules = {ntpath.normcase(str(rule.get("program"))): rule for rule in status["rules"] if isinstance(rule, dict)}
+    wanted = {ntpath.normcase(program) for program in programs}
     for program in programs:
-        rule = rules.get(os.path.normcase(program))
+        rule = rules.get(ntpath.normcase(program))
         rows.append({"path": program, "covered": rule is not None,
                      "active": bool(rule and rule.get("enabled") == "True" and _blocks_internet(rule))})
     for key, rule in rules.items():
@@ -201,7 +203,7 @@ def summarize(status, programs, lift_until=None, now=None):
                          "gone": True})
     enabled = [rule for rule in rules.values() if rule.get("enabled") == "True"]
     summary.update(has_rules=bool(rules), can_turn_on=bool(programs),
-                   ollama_locked=any(os.path.basename(path) == "ollama.exe" and rule.get("enabled") == "True"
+                   ollama_locked=any(ntpath.basename(path) == "ollama.exe" and rule.get("enabled") == "True"
                                      and _blocks_internet(rule) for path, rule in rules.items()))
     off = [str(profile.get("name")) for profile in status["profiles"] if profile.get("enabled") != "True"]
     ignored = [str(profile.get("name")) for profile in status["profiles"] if profile.get("local_rules") == "False"]
