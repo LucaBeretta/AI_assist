@@ -455,7 +455,8 @@ window.i18n = (() => {
   "Target LAN IPv4 address": "Indirizzo IPv4 LAN del dispositivo",
   "Port": "Porta",
   "Pair device": "Abbina dispositivo",
-  "PIN expired. Generate a new one.": "PIN scaduto. Generane uno nuovo."
+  "PIN expired. Generate a new one.": "PIN scaduto. Generane uno nuovo.",
+  "{v0} downloaded.": "{v0} scaricato."
 };
   const en = Object.fromEntries(Object.keys(it).map(key => [key, key]));
   const messages = {en, it};

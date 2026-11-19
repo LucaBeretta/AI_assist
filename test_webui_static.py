@@ -65,6 +65,25 @@ vm.runInNewContext(fs.readFileSync(process.argv[1], 'utf8'), {document, window, 
 
 class StaticTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_models_finish_reenables_download_and_fast_done_stays_finished(self):
+        self.run_scenario(r'''
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'models.js'),'utf8'),{document,window,Map,Set,Error,String,Number,Boolean,Array});
+        window.pywebview.api.pull_model=async()=>({ok:true,pull_id:'normal'});
+        document.getElementById('pull-other-name').value='normal';
+        elements.get('pull-other').listeners.submit({preventDefault(){}});
+        await new Promise(resolve=>setImmediate(resolve));
+        assert.equal(elements.get('pull-other-button').disabled,true);
+        window.app.onEvent([{type:'pull_done',pull_id:'normal',model:'normal'}]);
+        assert.equal(elements.get('pull-other-button').disabled,false);
+        window.pywebview.api.pull_model=async()=>{window.app.onEvent([{type:'pull_done',pull_id:'fast',model:'fast'}]);return {ok:true,pull_id:'fast'};};
+        elements.get('pull-other-name').value='fast';
+        elements.get('pull-other').listeners.submit({preventDefault(){}});
+        await new Promise(resolve=>setImmediate(resolve));
+        assert.equal(elements.get('pull-other-button').disabled,false);
+        assert.equal(elements.get('pull-other-progress').children.length,0);
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
     def test_reading_sharing_settings_never_enables_the_listener(self):
         self.run_scenario(r'''
         vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'sharing.js'),'utf8'),{document,window,Map,Set,Error,String,Number,Boolean,Array,Date,Object});

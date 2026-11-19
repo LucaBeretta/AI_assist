@@ -9,6 +9,7 @@ window.modelsui = (() => {
   let advice = null;          // last recommend_models result
   let installed = [];
   let loaded = {};
+  const finishedPulls = new Set();
 
   async function call(method, ...args) {
     const result = await window.pywebview.api[method](...args);
@@ -130,6 +131,7 @@ window.modelsui = (() => {
     if (pull) return;
     try {
       const result = await call("pull_model", name);
+      if (finishedPulls.has(result.pull_id)) return;
       pull = {id: result.pull_id, model: name, completed: 0, total: 0, status: t("starting")};
       note(t("Downloading {v0}…", {v0: (name)}));
       renderAll();
@@ -151,13 +153,17 @@ window.modelsui = (() => {
   function renderAll() { renderInstalled(); renderRecommendations(); renderPullOther(); }
 
   function onEvent(event) {
+    if (["pull_done", "pull_stopped", "pull_error"].includes(event.type)) {
+      finishedPulls.add(event.pull_id);
+      if (finishedPulls.size > 32) finishedPulls.delete(finishedPulls.values().next().value);
+    }
     switch (event.type) {
       case "pull_progress":
         if (!pull || pull.id !== event.pull_id) pull = {id: event.pull_id, model: event.model};
         Object.assign(pull, {completed: event.completed || 0, total: event.total || 0, status: event.status});
         renderRecommendations(); renderPullOther();
         return true;
-      case "pull_done": pull = null; note(`${event.model} downloaded.`); refresh(); return true;
+      case "pull_done": pull = null; note(t("{v0} downloaded.", {v0: event.model})); renderAll(); refresh(); return true;
       case "pull_stopped": pull = null; note(t("Download stopped.")); renderAll(); return true;
       case "pull_error": pull = null; note(event.error || t("Download failed.")); renderAll(); return true;
       case "models_changed": refresh(); window.app?.refreshModels(); return true;
