@@ -182,6 +182,8 @@ def select_saved_screen(saved, screens):
     """Use same monitor ID, or match stable geometry; never invent one."""
     if not isinstance(saved, dict) or not screens:
         return None
+    if not _valid_rect(saved):
+        return None
     old_id = saved.get("id")
     if isinstance(old_id, str):
         found = next((screen for screen in screens if screen["id"] == old_id), None)
@@ -210,19 +212,21 @@ def choose_restored_geometry(saved, screens):
     target = select_saved_screen(old_screen, screens)
     width = record["width"] if _valid_rect(record) else 800
     height = record["height"] if _valid_rect(record) else 480
+    matched = target is not None
     if target is None:
         target = primary
-    width = max(1, min(max(WINDOW_MIN_WIDTH, width), target["width"] - 24))
-    height = max(1, min(max(WINDOW_MIN_HEIGHT, height), target["height"] - 54))
-    if target is not primary or (record is not None and select_saved_screen(old_screen, screens) is target):
-        if _valid_rect(record) and isinstance(old_screen, dict):
-            rel_x = record["x"] - old_screen.get("x", 0)
-            rel_y = record["y"] - old_screen.get("y", 0)
-            x = max(target["x"], min(target["x"] + target["width"] - width,
-                                     target["x"] + rel_x))
-            y = max(target["y"], min(target["y"] + target["height"] - height,
-                                     target["y"] + rel_y))
-            return {"x": x, "y": y, "width": width, "height": height}
+    width = min(width, max(1, target["width"] - 24))
+    height = min(height, max(1, target["height"] - 54))
+    # Restore relative position only when the matching monitor is connected
+    # and the old screen rectangle passes strict type validation.
+    if matched and _valid_rect(record) and _valid_rect(old_screen):
+        rel_x = record["x"] - old_screen["x"]
+        rel_y = record["y"] - old_screen["y"]
+        x = max(target["x"], min(target["x"] + target["width"] - width,
+                                 target["x"] + rel_x))
+        y = max(target["y"], min(target["y"] + target["height"] - height,
+                                 target["y"] + rel_y))
+        return {"x": x, "y": y, "width": width, "height": height}
     return {"x": target["x"] + (target["width"] - width) // 2,
             "y": target["y"] + (target["height"] - height) // 2,
             "width": width, "height": height}
