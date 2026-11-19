@@ -24,12 +24,28 @@ FAKE_COLI = textwrap.dedent('''\
     import json, os, sys, time
     here = os.path.dirname(os.path.abspath(__file__))
     state_path = os.path.join(here, "state.json")
+    # Status polls read state.json while setup writes it: a save replaces the whole file at
+    # once, and both sides retry briefly when Windows reports the file busy.
     def load():
+        for attempt in range(100):
+            try:
+                with open(state_path, encoding="utf-8") as handle:
+                    return json.load(handle)
+            except (OSError, ValueError):
+                time.sleep(0.02)
         with open(state_path, encoding="utf-8") as handle:
             return json.load(handle)
     def save(state):
-        with open(state_path, "w", encoding="utf-8") as handle:
+        temporary = "%s.%d.tmp" % (state_path, os.getpid())
+        with open(temporary, "w", encoding="utf-8") as handle:
             json.dump(state, handle)
+        for attempt in range(100):
+            try:
+                os.replace(temporary, state_path)
+                return
+            except PermissionError:
+                time.sleep(0.02)
+        os.replace(temporary, state_path)
     state = load()
     args = sys.argv[1:]
     # One numbered file per call: status polls run while setup runs, and two processes

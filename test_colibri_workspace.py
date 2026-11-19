@@ -123,9 +123,18 @@ class ColibriWorkspaceTests(unittest.TestCase):
         return json.loads((self.colibri / "c" / "state.json").read_text())
 
     def write_state(self, **changes):
+        # Replaced at once, like the fake coli's own saves, so a running poll never reads half a file.
         state = self.state()
         state.update(changes)
-        (self.colibri / "c" / "state.json").write_text(json.dumps(state))
+        temporary = self.colibri / "c" / "state.json.test.tmp"
+        temporary.write_text(json.dumps(state))
+        for attempt in range(100):
+            try:
+                os.replace(temporary, self.colibri / "c" / "state.json")
+                return
+            except PermissionError:  # a poll has it open on Windows
+                time.sleep(0.02)
+        os.replace(temporary, self.colibri / "c" / "state.json")
 
     def switch_to_colibri(self):
         self.app.engine_choice.set("Colibri")
@@ -224,7 +233,7 @@ class ColibriWorkspaceTests(unittest.TestCase):
             with patch("colibri_panel.messagebox.askyesno", return_value=True):
                 panel.choose(next(row for row, _ in panel.card_buttons if row["id"] == "qwen36-35b"))
             self.wait_for(lambda: panel.installing is None and not panel.loading, "fake install", timeout=20)
-            self.assertEqual(self.state()["model"], "qwen36-35b")
+            self.assertEqual(self.state()["model"], "qwen36-35b", panel.message.cget("text"))
             self.assertEqual(json.loads((self.colibri / "c" / "setup.json").read_text())["ctx"], 0)
             self.assertIn("Qwen3.6-35B is set up and starting", panel.message.cget("text"))
             replacement = FakeGateway([], model="qwen36-35b")
