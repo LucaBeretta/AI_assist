@@ -45,6 +45,8 @@ class Sessions:
         self.lock = threading.Lock()
         self.codes = {}
         self.tokens = []
+        self.monitor_codes = {}
+        self.monitor_tokens = []
 
     def new_launch_code(self):
         code = secrets.token_urlsafe(24)
@@ -66,6 +68,36 @@ class Sessions:
             token = secrets.token_urlsafe(32)
             self.tokens = (self.tokens + [token])[-MAX_SESSIONS:]
             return token
+
+    def new_monitor_code(self):
+        """A short-lived single-use code for a read-only monitor window."""
+        code = secrets.token_urlsafe(24)
+        with self.lock:
+            now = self.clock()
+            self.monitor_codes = {key: until for key, until in self.monitor_codes.items() if until > now}
+            self.monitor_codes[code] = now + LAUNCH_SECONDS
+        return code
+
+    def exchange_monitor(self, code):
+        if not isinstance(code, str) or not code:
+            return None
+        with self.lock:
+            now = self.clock()
+            match = next((key for key in self.monitor_codes
+                          if hmac.compare_digest(key.encode(), code.encode())), None)
+            if match is None or self.monitor_codes.pop(match) <= now:
+                return None
+            token = secrets.token_urlsafe(32)
+            self.monitor_tokens = (self.monitor_tokens + [token])[-MAX_SESSIONS:]
+            return token
+
+    def valid_monitor(self, header):
+        if not isinstance(header, str) or not header.startswith("Bearer "):
+            return False
+        supplied = header[len("Bearer "):].strip().encode()
+        with self.lock:
+            tokens = list(self.monitor_tokens)
+        return any([hmac.compare_digest(token.encode(), supplied) for token in tokens])
 
     def valid(self, header):
         """True for ``Bearer <token>`` with a token this server issued."""
