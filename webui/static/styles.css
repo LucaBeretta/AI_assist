@@ -199,6 +199,13 @@ button.chip { cursor: pointer; }
 .message-body { overflow-wrap: anywhere; min-width: 0; }
 .message-body > :last-child { margin-bottom: 0; }
 .message-body.is-plain { white-space: pre-wrap; }
+.message.is-editing { outline: 2px dashed var(--accent); outline-offset: 2px; }
+.icon-button.is-on { color: var(--accent); }
+.list-item-title .icon { width: 14px; height: 14px; margin-right: 4px; vertical-align: -2px; color: var(--accent); }
+.shortcuts { border-collapse: collapse; width: 100%; margin: var(--space-2) 0; }
+.shortcuts th, .shortcuts td { text-align: left; padding: var(--space-1) var(--space-2); border-bottom: 1px solid var(--border); font-weight: normal; }
+.shortcuts th { width: 1%; white-space: nowrap; }
+kbd { font-family: var(--font-mono); font-size: var(--text-xs); padding: 1px 6px; border: 1px solid var(--border-strong); border-radius: 4px; background: var(--surface-2); white-space: nowrap; }
 .reviews { max-width: var(--reading-width); margin: var(--space-4) auto 0; display: grid; gap: var(--space-4); }
 .review { display: grid; gap: var(--space-2); padding: var(--space-4) var(--space-5); border: 2px solid var(--accent);
   border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow); }

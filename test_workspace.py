@@ -478,6 +478,29 @@ class WorkspaceIntegrationTests(unittest.TestCase):
             self.app.delete_chat()
         self.assertEqual(self.app.shared_memory.context("CSV", self.app.history_records), "")
 
+    def test_a_pinned_chat_stays_at_the_top_of_the_history(self):
+        self.app.conversation.append(dict(role="user", content="Pin me"))
+        self.app.persist_current()
+        pinned_id = self.app.current_chat["id"]
+        self.app.start_new_chat()
+        self.app.conversation.append(dict(role="user", content="Newer chat"))
+        self.app.persist_current()
+        newer_id = self.app.current_chat["id"]
+        self.app.open_chat(pinned_id)
+        self.assertEqual(self.app.chat_menu.entrycget(self.app.pin_menu_index, "label"), "Pin to top")
+        self.app.toggle_pin()
+        self.assertTrue(self.load_saved(pinned_id)["pinned"])
+        self.assertEqual(self.app.chat_menu.entrycget(self.app.pin_menu_index, "label"), "Unpin")
+        self.app.open_chat(newer_id)
+        self.app.conversation.append(dict(role="assistant", content="A newer save"))
+        self.app.persist_current()
+        self.app.refresh_history()
+        titles = [button.cget("text") for button in self.app.history_buttons]
+        self.assertEqual(titles[0], "★ Pin me")
+        self.app.open_chat(pinned_id)
+        self.app.toggle_pin()
+        self.assertNotIn("pinned", self.load_saved(pinned_id))
+
     def test_new_file_review_opens_save_picker_and_cancel_releases_agent(self):
         decision = dict(approved=False, event=threading.Event(), action=dict(kind="write_file",
             path="new.py", destination=str(self.project / "new.py"), content="pass\n", exists=False))

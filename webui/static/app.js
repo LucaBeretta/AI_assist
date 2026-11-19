@@ -40,7 +40,7 @@ const store = createStore({
   theme: loadPreference("aiassist.theme", "system"),
   status: null, statusError: null,
   models: [], modelsError: null, modelsHelp: null, modelsLoading: false, selectedModel: loadPreference("aiassist.model", ""),
-  sendHelp: null, reviews: [], tick: 0, chatUndo: false,
+  sendHelp: null, reviews: [], tick: 0, chatUndo: false, editing: null,
   context: "default",
   chats: [], chatsLoading: true, chatsError: null, chatQuery: "",
   chat: null, chatLoading: false, chatError: null,
@@ -68,7 +68,9 @@ function toast(text, kind = "info") {
 
 /**
  * A modal dialog. Escape and the backdrop cancel; focus returns to where it was.
- * @param {{title: string, body?: string, confirm: string, danger?: boolean, input?: {label: string, value: string, maxLength?: number}}} options
+ * `info` dialogs only show `content` and have a single button.
+ * @param {{title: string, body?: string, confirm: string, danger?: boolean, info?: boolean, content?: Node,
+ *   input?: {label: string, value: string, maxLength?: number}}} options
  * @returns {Promise<string | boolean | null>}
  */
 function openDialog(options) {
@@ -80,9 +82,10 @@ function openDialog(options) {
   const form = h("form", { method: "dialog" },
     h("h2", { id: "dialog-title" }, options.title),
     options.body ? h("p", { class: "muted" }, options.body) : null,
+    options.content || null,
     input ? h("label", { class: "field", for: "dialog-input" }, h("span", { class: "field-label" }, options.input?.label || ""), input) : null,
     h("div", { class: "dialog-actions" },
-      h("button", { class: "button", value: "cancel", formnovalidate: true }, "Cancel"), confirm));
+      options.info ? null : h("button", { class: "button", value: "cancel", formnovalidate: true }, "Cancel"), confirm));
   replace(dialog, form);
   return new Promise((resolve) => {
     dialog.addEventListener("close", () => {
@@ -196,7 +199,7 @@ const ctx = {
   /** @param {string} id */
   async openChat(id) {
     if (store.get().streaming) { toast("Stop the current answer before opening another chat."); return; }
-    store.set({ view: "chats", navOpen: false, chatLoading: true, chatError: null, sendError: null });
+    store.set({ view: "chats", navOpen: false, chatLoading: true, chatError: null, sendError: null, editing: null });
     try {
       const { chat, undo } = await api.get(`/api/chats/${id}`);
       const names = store.get().models.map((/** @type {any} */ model) => model.name);
@@ -211,7 +214,7 @@ const ctx = {
   /** A fresh, empty conversation; saved when the first message is sent. */
   startNewChat() {
     if (store.get().streaming) { toast("Stop the current answer before starting a new chat."); return; }
-    store.set({ view: "chats", chat: null, navOpen: false, sendError: null, chatError: null, context: "default" });
+    store.set({ view: "chats", chat: null, navOpen: false, sendError: null, chatError: null, context: "default", editing: null });
     chatView.focusComposer();
   },
 
@@ -227,6 +230,28 @@ const ctx = {
     } catch (error) { failed(error, "Could not rename the chat"); }
   },
 
+  /** Keep a chat at the top of the list, or let it move with the others again. @param {any} chat */
+  async togglePin(chat) {
+    const pinned = !chat.pinned;
+    try {
+      const result = await api.request("PATCH", `/api/chats/${chat.id}`, { pinned });
+      const open = store.get().chat;
+      if (open?.id === chat.id) store.set({ chat: { ...open, pinned: result.chat.pinned } });
+      ctx.loadChats(store.get().chatQuery);
+      announce(pinned ? "Pinned to the top of your chats." : "Unpinned.");
+    } catch (error) { failed(error, "Could not pin the chat"); }
+  },
+
+  /** The keyboard shortcuts, in a dialog. */
+  showShortcuts() {
+    const rows = [["Alt+N", "New chat"], ["/", "Search chats"], ["Enter", "Send"], ["Shift+Enter", "New line"],
+      ["↑", "Edit your last message (in an empty message box)"], ["Alt+R", "Regenerate the last answer"],
+      ["Alt+P", "Pin or unpin the open chat"], ["Esc", "Cancel editing, close a panel or dialog"], ["?", "Show these shortcuts"]];
+    openDialog({ title: "Keyboard shortcuts", confirm: "Close", info: true,
+      content: h("table", { class: "shortcuts" }, h("tbody", null, rows.map(([keys, action]) =>
+        h("tr", null, h("th", { scope: "row" }, h("kbd", null, keys)), h("td", null, action))))) });
+  },
+
   /** @param {any} chat */
   async deleteChat(chat) {
     const sure = await openDialog({ title: "Delete this chat?", body: `“${chat.title}” will be removed from saved chats and from shared-memory recall. This cannot be undone.`, confirm: "Delete chat", danger: true });
@@ -240,15 +265,16 @@ const ctx = {
   },
 
   /**
-   * Send a message and stream the answer into the open chat.
-   * @param {string} text
-   * @returns {Promise<boolean>} whether the message was accepted
+   * Send a message and stream the answer into the open chat. With `editFrom` (the index of
+   * one of the person's messages), it replaces that message and everything after it.
+   * @param {string} text @param {number | null} [editFrom]
+   * @returns {Promise<boolean>} whether the message was accepted (and kept)
    */
-  async send(text) {
+  async send(text, editFrom = null) {
     const state = store.get();
     if (state.streaming) return false;
     let chat = state.chat;
-    store.set({ sendError: null, sendHelp: null });
+    store.set({ sendError: null, sendHelp: null, editing: null });
     try {
       if (!chat) {
         chat = (await api.request("POST", "/api/chats", { model: state.selectedModel })).chat;
@@ -272,8 +298,11 @@ const ctx = {
     };
     let accepted = false;
     let finished = false;
+    let restored = false;
+    const body = { content: text, model: state.selectedModel, context_length: context,
+      ...(editFrom === null ? {} : { edit_from: editFrom }) };
     try {
-      await api.stream(`/api/chats/${chatId}/messages`, { content: text, model: state.selectedModel, context_length: context }, (event) => {
+      await api.stream(`/api/chats/${chatId}/messages`, body, (event) => {
         if (event.type === "chunk") {
           pending += event.text;
           if (!frame) frame = window.requestAnimationFrame(flush);
@@ -285,17 +314,22 @@ const ctx = {
         else if (event.type === "status") update({ status: event.text });
         else if (event.type === "user") {
           accepted = true;
-          if (current?.id === chatId) store.set({ chat: { ...current, messages: [...current.messages, event.message] } });
+          // An edit or regenerate replaces the messages from its index on.
+          const kept = typeof event.index === "number" ? current?.messages.slice(0, event.index) : current?.messages;
+          if (current?.id === chatId) store.set({ chat: { ...current, messages: [...kept, event.message] } });
         } else if (event.type === "metrics") store.set({ lastMetrics: event.metrics });
         else if (event.type === "done") {
           finished = true;
-          const messages = current?.id === chatId && event.message ? [...current.messages, event.message] : current?.messages;
+          restored = Boolean(event.restored);
+          const messages = current?.id === chatId && event.message && !restored ? [...current.messages, event.message] : current?.messages;
           if (current?.id === chatId) store.set({ chat: { ...current, ...event.chat, messages } });
-          announce(event.stopped ? (event.message ? "Stopped. The partial answer was kept." : "Stopped before the model answered.")
-            : event.local ? "Saved to shared memory." : "Answer complete.");
+          announce(restored ? "Stopped before the model answered. The chat is back as it was."
+            : event.stopped ? (event.message ? "Stopped. The partial answer was kept." : "Stopped before the model answered.")
+              : event.local ? "Saved to shared memory." : "Answer complete.");
         } else if (event.type === "error") {
           finished = true;
-          store.set({ sendError: event.error, sendHelp: event.help || null });
+          restored = Boolean(event.restored);
+          store.set({ sendError: event.error + (restored ? " The chat is back as it was." : ""), sendHelp: event.help || null });
           announce(`The answer failed: ${event.error}`);
         }
       });
@@ -308,9 +342,24 @@ const ctx = {
     }
     if (frame) window.cancelAnimationFrame(frame);
     store.set({ streaming: null });
+    if (restored && store.get().chat?.id === chatId) {
+      const sendError = store.get().sendError;
+      const sendHelp = store.get().sendHelp;
+      await ctx.openChat(chatId);
+      store.set({ sendError, sendHelp });
+    }
     ctx.loadChats();
     ctx.loadStatus();
-    return accepted;
+    return accepted && !restored;
+  },
+
+  /** Answer the last message again; the earlier answer is replaced. */
+  async regenerate() {
+    const chat = store.get().chat;
+    if (!chat || chat.mode !== "chat" || store.get().streaming) return;
+    const index = chat.messages.map((/** @type {any} */ m) => m.role).lastIndexOf("user");
+    if (index < 0) return;
+    await ctx.send(chat.messages[index].content, index);
   },
 
   /**
@@ -660,9 +709,20 @@ scrim.addEventListener("click", () => store.set({ navOpen: false, inspectorOpen:
 window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => store.set({ theme: store.get().theme }));
 document.addEventListener("keydown", (event) => {
   const typing = event.target instanceof HTMLElement && event.target.closest("input, textarea, select, [contenteditable]");
-  if (event.altKey && !event.ctrlKey && !event.metaKey && event.key.toLowerCase() === "n") {
+  const alt = event.altKey && !event.ctrlKey && !event.metaKey;
+  const open = store.get().chat;
+  if (alt && event.key.toLowerCase() === "n") {
     event.preventDefault();
     ctx.startNewChat();
+  } else if (alt && event.key.toLowerCase() === "r" && store.get().view === "chats" && open?.mode === "chat" && !dialog.open) {
+    event.preventDefault();
+    ctx.regenerate();
+  } else if (alt && event.key.toLowerCase() === "p" && store.get().view === "chats" && open && !dialog.open) {
+    event.preventDefault();
+    ctx.togglePin(open);
+  } else if (event.key === "?" && !typing && !dialog.open) {
+    event.preventDefault();
+    ctx.showShortcuts();
   } else if (event.key === "Escape" && (store.get().navOpen || (store.get().inspectorOpen && narrow.matches)) && !dialog.open) {
     store.set({ navOpen: false, inspectorOpen: !narrow.matches && store.get().inspectorOpen });
   } else if (event.key === "/" && !typing && !dialog.open) {

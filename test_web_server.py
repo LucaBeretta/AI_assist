@@ -153,6 +153,76 @@ class ChatServiceTests(ServiceCase):
         self.service.release(chat["id"])
         self.service.prepare(chat["id"], "Now", "alpha:8b", "Ollama")
 
+    def send_from(self, chat_id, text, edit_from, cancel=None):
+        events = []
+        self.service.prepare(chat_id, text, "alpha:8b", "Ollama", edit_from)
+        self.service.send(chat_id, text, "alpha:8b", "Ollama", events.append, cancel or threading.Event(), None, edit_from)
+        return events
+
+    def conversation(self, chat_id):
+        return [(m["role"], m["content"]) for m in self.store.load(chat_id)["messages"]]
+
+    def test_editing_a_message_replaces_it_and_everything_after_it(self):
+        chat = self.service.create("alpha:8b")
+        self.send(chat["id"], "First question")
+        self.provider = ScriptedProvider(chunks=("Second answer",))
+        self.send(chat["id"], "Second question")
+        self.provider = ScriptedProvider(chunks=("New answer",))
+        events = self.send_from(chat["id"], "First question, better", 0)
+        self.assertEqual((events[0]["type"], events[0]["index"]), ("user", 0))
+        self.assertEqual(self.conversation(chat["id"]), [("user", "First question, better"), ("assistant", "New answer")])
+        # The model saw only the edited conversation, not the replaced turns.
+        sent = [m["content"] for m in self.provider.calls[-1]["messages"] if m["role"] != "system"]
+        self.assertEqual(sent, ["First question, better"])
+
+    def test_regenerate_answers_the_last_message_again(self):
+        chat = self.service.create("alpha:8b")
+        self.send(chat["id"], "Name a colour")
+        self.provider = ScriptedProvider(chunks=("Blue",))
+        self.send_from(chat["id"], "Name a colour", 0)
+        self.assertEqual(self.conversation(chat["id"]), [("user", "Name a colour"), ("assistant", "Blue")])
+
+    def test_a_failed_or_early_stopped_regenerate_keeps_the_earlier_answer(self):
+        chat = self.service.create("alpha:8b")
+        self.send(chat["id"], "Name a colour")
+        before = self.conversation(chat["id"])
+        self.provider = ScriptedProvider(error="Not enough memory")
+        events = self.send_from(chat["id"], "Name a colour", 0)
+        self.assertEqual(events[-1], {"type": "error", "error": "Not enough memory", "restored": True})
+        self.assertEqual(self.conversation(chat["id"]), before)
+        self.provider = ScriptedProvider(chunks=(), hold=True)
+        cancel = threading.Event()
+        threading.Timer(0.3, cancel.set).start()
+        events = self.send_from(chat["id"], "Name a colour", 0, cancel)
+        self.assertEqual((events[-1]["type"], events[-1]["stopped"], events[-1]["restored"]), ("done", True, True))
+        self.assertEqual(self.conversation(chat["id"]), before)
+
+    def test_only_the_persons_own_messages_can_be_edited(self):
+        chat = self.service.create("alpha:8b")
+        self.send(chat["id"], "Hi")
+        for edit_from in (1, 2, -1, True, "0", 0.0):
+            with self.subTest(edit_from=edit_from), self.assertRaises(ServiceError) as caught:
+                self.service.prepare(chat["id"], "Hi again", "alpha:8b", "Ollama", edit_from)
+            self.assertEqual(caught.exception.status, 409)
+        self.assertEqual(self.service.active, set())
+
+    def test_pinned_chats_come_first_and_a_stale_save_keeps_the_pin(self):
+        older = self.service.create("alpha:8b")
+        self.service.rename(older["id"], "Older")
+        newer = self.service.create("alpha:8b")
+        self.service.rename(newer["id"], "Newer")
+        stale = self.store.load(older["id"])
+        self.service.set_pinned(older["id"], True)
+        self.service.rename(newer["id"], "Newer")  # now the most recent, yet below the pinned chat
+        self.assertEqual([(chat["title"], chat["pinned"]) for chat in self.service.list()], [("Older", True), ("Newer", False)])
+        stale["draft"] = "typed before the pin"
+        self.store.save(stale)  # an older copy, as a long answer or agent task would save
+        self.assertTrue(self.store.load(older["id"])["pinned"])
+        self.service.set_pinned(older["id"], False)
+        self.assertNotIn("pinned", self.store.load(older["id"]))
+        with self.assertRaises(ServiceError):
+            self.service.set_pinned(older["id"], "yes")
+
     def test_list_rename_delete_and_search(self):
         first = self.service.create("alpha:8b")
         self.send(first["id"], "Bananas are yellow")
@@ -334,6 +404,19 @@ class ApiTests(ServerCase):
         self.assertEqual([chat["id"] for chat in listed["chats"]], [chat_id])
         _, renamed = self.call("PATCH", f"/api/chats/{chat_id}", {"title": "Greeting"})
         self.assertEqual(renamed["chat"]["title"], "Greeting")
+        _, pinned = self.call("PATCH", f"/api/chats/{chat_id}", {"pinned": True})
+        self.assertEqual((pinned["chat"]["pinned"], pinned["chat"]["title"]), (True, "Greeting"))
+        for bad in ({}, {"pinned": "yes"}):
+            self.assertEqual(self.call("PATCH", f"/api/chats/{chat_id}", bad)[0].status, 400)
+        # Regenerate: the same text from the last message replaces the answer.
+        self.provider = ScriptedProvider(chunks=("Hi again",))
+        _, events = self.call("POST", f"/api/chats/{chat_id}/messages", {"content": "Hi", "model": "alpha:8b", "edit_from": 0})
+        self.assertEqual((events[1]["index"], events[-1]["message"]["content"], events[-1]["chat"]["message_count"]),
+                         (0, "Hi again", 2))
+        for bad, status in ((1, 409), ("0", 400), (True, 400)):
+            with self.subTest(edit_from=bad):
+                response, _ = self.call("POST", f"/api/chats/{chat_id}/messages", {"content": "Hi", "model": "alpha:8b", "edit_from": bad})
+                self.assertEqual(response.status, status)
         _, fetched = self.call("GET", f"/api/chats/{chat_id}")
         self.assertEqual(len(fetched["chat"]["messages"]), 2)
         response, _ = self.call("DELETE", f"/api/chats/{chat_id}")

@@ -8,9 +8,11 @@
 - The user's message is saved before the request; the answer is saved only
   when it completed, or, after Stop, as the partial text received so far.
 - A failed request saves no answer.
+- Edit and resend, and regenerate: ``edit_from`` names one of the person's
+  messages; it and everything after it are replaced by the new message and
+  its answer. Regenerating sends the same text from the last message.
 
-Developer chats are read-only here: running the agent needs its reviewed
-approvals, which stay in the desktop window for now.
+Developer chats are sent to the developer agent instead (app_core.agent_service).
 """
 
 from copy import deepcopy
@@ -33,6 +35,13 @@ class ServiceError(Exception):
     def __init__(self, message, status=400):
         super().__init__(message)
         self.status = status
+
+
+def _marked(event, restored):
+    """Say in ``event`` that the chat went back to how it was before an edit or regenerate."""
+    if restored is not None:
+        event["restored"] = True
+    return event
 
 
 class _Emitter:
@@ -91,7 +100,8 @@ class ChatService:
     def summary(record):
         return {key: record.get(key) for key in ("id", "title", "mode", "model", "backend", "updated_at",
                                                     "created_at", "project_path", "context_length", "library_path")} | {
-            "backend": record.get("backend", "Ollama"), "message_count": len(record.get("messages", []))}
+            "backend": record.get("backend", "Ollama"), "message_count": len(record.get("messages", [])),
+            "pinned": bool(record.get("pinned"))}
 
     def list(self, query="", mode=None):
         query = (query or "").casefold().strip()
@@ -107,7 +117,8 @@ class ChatService:
                         or any(query in message["content"].casefold() for message in record["messages"])):
                     continue
             result.append(self.summary(record))
-        return result
+        # Pinned chats first; each group stays newest first.
+        return sorted(result, key=lambda summary: not summary["pinned"])
 
     def get(self, chat_id):
         try:
@@ -134,6 +145,15 @@ class ChatService:
             self._remember(saved)
             return saved
 
+    def set_pinned(self, chat_id, pinned):
+        if type(pinned) is not bool:
+            raise ServiceError("pinned must be true or false.")
+        with self.lock:
+            self.get(chat_id)
+            saved = self.store.set_pinned(chat_id, pinned)
+            self._remember(saved)
+            return saved
+
     def delete(self, chat_id):
         with self.lock:
             if chat_id in self.active:
@@ -149,13 +169,23 @@ class ChatService:
 
     # ------------------------------------------------------------ sending
 
-    def prepare(self, chat_id, text, model, backend):
+    @staticmethod
+    def check_edit(record, edit_from):
+        """``edit_from`` must name one of the person's messages in ``record``."""
+        if edit_from is None:
+            return
+        messages = record["messages"]
+        if type(edit_from) is not int or not 0 <= edit_from < len(messages) or messages[edit_from]["role"] != "user":
+            raise ServiceError("That message can no longer be edited. Reload the chat and try again.", 409)
+
+    def prepare(self, chat_id, text, model, backend, edit_from=None):
         """Validate a send before any answer streams; raises ServiceError."""
         if not isinstance(text, str) or not text.strip():
             raise ServiceError("Write a message first.")
         if len(text) > MAX_MESSAGE_CHARS:
             raise ServiceError(f"Messages are limited to {MAX_MESSAGE_CHARS:,} characters.")
         record = self.get(chat_id)
+        self.check_edit(record, edit_from)
         if record["mode"] != "chat":
             raise ServiceError("This is a developer chat: send the request to the developer agent, which shows "
                                "every edit and command for your approval.", 409)
@@ -179,15 +209,16 @@ class ChatService:
         with self.lock:
             self.active.discard(chat_id)
 
-    def send(self, chat_id, text, model, backend, on_event, cancel_event, context_length=None):
+    def send(self, chat_id, text, model, backend, on_event, cancel_event, context_length=None, edit_from=None):
         """Stream one answer. ``prepare`` must have succeeded for this chat.
 
-        Events: ``user``, ``chunk``, ``metrics``, then exactly one ``done`` or
-        ``error``. ``done`` carries the saved record (``stopped`` when the person
-        pressed Stop)."""
+        Events: ``user`` (with the message's ``index``), ``chunk``, ``metrics``,
+        then exactly one ``done`` or ``error``. ``done`` carries the saved record
+        (``stopped`` when the person pressed Stop). With ``edit_from``, the
+        messages from that index on are replaced."""
         emit = _Emitter(on_event)
         try:
-            self._send(chat_id, text.strip(), model, backend, emit, cancel_event, context_length)
+            self._send(chat_id, text.strip(), model, backend, emit, cancel_event, context_length, edit_from)
         except ServiceError as error:
             emit({"type": "error", "error": str(error)}, terminal=True)
         except (ChatStoreError, OSError, ValueError) as error:
@@ -196,9 +227,14 @@ class ChatService:
             with self.lock:
                 self.active.discard(chat_id)
 
-    def _send(self, chat_id, text, model, backend, emit, cancel_event, context_length):
+    def _send(self, chat_id, text, model, backend, emit, cancel_event, context_length, edit_from=None):
         with self.lock:
             record = self.get(chat_id)
+            self.check_edit(record, edit_from)
+            previous = deepcopy(record["messages"])
+            if edit_from is not None:
+                # The edited message and everything after it are replaced.
+                record["messages"] = record["messages"][:edit_from]
             try:
                 note = memory_note(text, record["messages"])
             except ValueError as error:
@@ -213,7 +249,7 @@ class ChatService:
                 record["messages"] += [{"role": "user", "content": text},
                                        {"role": "assistant", "content": MEMORY_RECEIPT}]
                 saved = self._save(record)
-                emit({"type": "user", "message": record["messages"][-2]})
+                emit({"type": "user", "message": record["messages"][-2], "index": len(record["messages"]) - 2})
                 emit({"type": "done", "chat": saved, "stopped": False, "local": True}, terminal=True)
                 return
             record["messages"].append({"role": "user", "content": text})
@@ -222,7 +258,18 @@ class ChatService:
                 record["context_length"] = context_length
             record = self._save(record)
             others = self.records()
-        emit({"type": "user", "message": record["messages"][-1]})
+        emit({"type": "user", "message": record["messages"][-1], "index": len(record["messages"]) - 1})
+
+        def restore():
+            """After an edit or regenerate that produced nothing, the chat goes back to how it was,
+            so a failed or early-stopped regenerate never loses the earlier answer."""
+            if edit_from is None:
+                return None
+            with self.lock:
+                latest = self.get(chat_id)
+                latest["messages"] = previous
+                return self._save(latest)
+
         shared = (self.shared_memory.context(text, others, chat_id) if self.shared_memory else "")
         found, documents_context = [], ""
         if record.get("library_path"):
@@ -232,7 +279,8 @@ class ChatService:
                 found = folder.search(text)
                 documents_context = documents.context_message(found, record["library_path"])
             except documents.LibraryError as error:
-                emit({"type": "error", "error": f"The chat's document folder could not be used: {error}"}, terminal=True)
+                emit(_marked({"type": "error", "error": f"The chat's document folder could not be used: {error}"},
+                             restore()), terminal=True)
                 return
         messages = chat_messages(record["messages"], shared, documents_context)
         provider = self.provider_factory()
@@ -260,10 +308,11 @@ class ChatService:
                                          on_metrics=metrics, cancel_event=cancel_event),
             parts, cancel_event)
         if error and not stopped:
-            emit({"type": "error", "error": error}, terminal=True)
+            emit(_marked({"type": "error", "error": error}, restore()), terminal=True)
             return
         if stopped and not (answer or "").strip():
-            emit({"type": "done", "chat": deepcopy(record), "stopped": True}, terminal=True)
+            restored = restore()
+            emit(_marked({"type": "done", "chat": restored or deepcopy(record), "stopped": True}, restored), terminal=True)
             return
         footer = documents.sources_footer(found)
         if footer:

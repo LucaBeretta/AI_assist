@@ -363,6 +363,8 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         self.chat_subtitle.pack(fill="x", pady=(2, 0))
         self.chat_menu = tk.Menu(self.root, tearoff=False)
         self.chat_menu.add_command(label="Rename chat", command=self.rename_chat)
+        self.chat_menu.add_command(label="Pin to top", command=self.toggle_pin)
+        self.pin_menu_index = self.chat_menu.index("end")
         self.chat_menu.add_command(label="Export chat...", command=self.export_chat)
         self.chat_menu.add_command(label="Back up all chats...", command=self.backup_chats)
         self.chat_menu.add_command(label="Restore chats from a backup...", command=self.open_backups)
@@ -546,6 +548,8 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         self.chat_actions.config(state="normal" if (self.current_chat or self.history_records) and not busy else "disabled")
         for label in ("Rename chat", "Export chat...", "Delete chat"):
             self.chat_menu.entryconfigure(label, state="normal" if self.current_chat else "disabled")
+        self.chat_menu.entryconfigure(self.pin_menu_index, state="normal" if self.current_chat else "disabled",
+                                      label="Unpin" if (self.current_chat or {}).get("pinned") else "Pin to top")
         ordinary = self.current_mode == "chat" and self.chat_store is not None and not self.documents_indexing
         self.chat_menu.entryconfigure("Use documents from a folder...", state="normal" if ordinary else "disabled")
         self.documents_button.config(state="normal" if ordinary and not busy else "disabled")
@@ -817,9 +821,11 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
                                     + list(self.failed_saves.values())
                                     + [record for record in self.history_records if record["id"] not in pending_ids])
         query = self.history_search.get().strip().casefold()
-        records = [record for record in self.history_records if _history_matches(record, query)]
+        # Pinned chats first; each group keeps its newest-first order.
+        records = sorted((record for record in self.history_records if _history_matches(record, query)),
+                         key=lambda record: not record.get("pinned"))
         signature = (query, (self.current_chat or {}).get("id"), self.history_limit, len(records),
-                     tuple((item["id"], item["title"], item["mode"]) for item in records[:self.history_limit]))
+                     tuple((item["id"], item["title"], item["mode"], bool(item.get("pinned"))) for item in records[:self.history_limit]))
         if signature == self.rendered_history:
             return
         self.rendered_history = signature
@@ -827,7 +833,7 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
             child.destroy()
         self.history_buttons = []
         for record in records[:self.history_limit]:
-            title = ("</> " if record["mode"] == "dev" else "") + record["title"]
+            title = ("★ " if record.get("pinned") else "") + ("</> " if record["mode"] == "dev" else "") + record["title"]
             button = self.button(self.sidebar_content, title, lambda identity=record["id"]: self.open_chat(identity),
                                  self.COLORS["sidebar"], self.COLORS["ink"], self.COLORS["sidebar_hover"], anchor="w", justify="left", wraplength=202)
             button.config(font=("Segoe UI", 9), padx=12, pady=8)
@@ -932,6 +938,27 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
                 self.update_heading()
             except (OSError, ValueError) as error:
                 self.set_status(str(error), error=True)
+
+    def toggle_pin(self):
+        """Keep this chat at the top of the list, or let it move with the others again."""
+        if self.busy() or not self.current_chat:
+            return
+        record = dict(self.current_chat)
+        pinned = not record.get("pinned")
+        if pinned:
+            record["pinned"] = True
+        else:
+            record.pop("pinned", None)
+        try:
+            self.current_chat = record
+            self.queue_save(record)
+        except (OSError, ValueError) as error:
+            self.set_status(str(error), error=True)
+            return
+        self.history_records = [record if item["id"] == record["id"] else item for item in self.history_records]
+        self.refresh_history(reload=False)
+        self.update_controls()
+        self.set_status("Pinned: this chat stays at the top of the list." if pinned else "Unpinned.")
 
     def export_chat(self):
         if not self.current_chat:
