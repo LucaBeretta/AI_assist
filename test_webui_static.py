@@ -117,6 +117,18 @@ class StaticTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_loading_feedback_is_visible_only_for_the_selected_chat(self):
+        self.run_scenario(r'''
+        await window.listeners.pywebviewready();
+        window.app.onEvent([{type:'model_loading',chat_id:'chat-a',model:'cold',elapsed_seconds:12.4}]);
+        assert.equal(elements.get('status').textContent,'Loading cold… 12 s');
+        window.app.onEvent([{type:'model_loading',chat_id:'chat-b',model:'other',elapsed_seconds:20}]);
+        assert.equal(elements.get('status').textContent,'Loading cold… 12 s');
+        window.app.onEvent([{type:'model_loaded',chat_id:'chat-a',model:'cold',load_seconds:15.25}]);
+        assert.match(elements.get('status').textContent, /cold ready in 15\./);
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
     def test_inactive_chat_events_never_replace_selected_chat_or_draft(self):
         self.run_scenario(r'''
         const other = {id:'chat-b',title:'Chat B',model:'fake:7b',messages:[{role:'assistant',content:'B reply'}]};

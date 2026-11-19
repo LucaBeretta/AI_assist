@@ -5,12 +5,14 @@ import threading
 import uuid
 
 import coding_agent
+from webui.model_loading import ModelLoadProgress
 
 
 class DeveloperTasks:
-    def __init__(self, bridge, save_result):
+    def __init__(self, bridge, save_result, running_details):
         self.bridge = bridge
         self.save_result = save_result
+        self.running_details = running_details
         self.lock = threading.RLock()
         self.tasks = {}
         self.closed = False
@@ -102,19 +104,28 @@ class DeveloperTasks:
             active = task is not None and not task["finished"].is_set()
             if active:
                 task["cancel"].set()
+                if "loading" in task:
+                    task["loading"].close()
         return {"ok": True, "task_id": identity, "active": active}
 
     def _run(self, identity, task, options):
+        loading = ModelLoadProgress(self.bridge.emit, options["model"], task["cancel"],
+                                    task_id=identity, chat_id=task["chat_id"])
+        with self.lock:
+            task["loading"] = loading
         def emit(event):
             event = deepcopy(event)
             kind = event.pop("type")
             event.pop("task_id", None)
+            if kind in {"assistant", "tool_start", "metrics", "plan"}:
+                loading.first_output()
             self.bridge.emit(kind, task_id=identity, chat_id=task["chat_id"], **event)
         def context(value):
             with self.lock:
                 task["context"] = deepcopy(value)
             self.bridge.emit("context_usage", task_id=identity, chat_id=task["chat_id"], **value)
         try:
+            loading.start(self.running_details)
             result = coding_agent.run_agent(
                 on_event=emit, on_context=context, cancel_event=task["cancel"],
                 approve_action=lambda action: self._wait(identity, task, "action", {"action": action}),
@@ -127,6 +138,7 @@ class DeveloperTasks:
             kind, extra = "agent_stopped", {"text": str(error)}
         except Exception as error:
             kind, extra = "agent_error", {"error": str(error)}
+        loading.close()
         with self.lock:
             task["finished"].set()
             task["pending"].clear()
@@ -139,4 +151,6 @@ class DeveloperTasks:
             tasks = list(self.tasks.values())
             for task in tasks:
                 task["cancel"].set()
+                if "loading" in task:
+                    task["loading"].close()
             return [task["finished"] for task in tasks]

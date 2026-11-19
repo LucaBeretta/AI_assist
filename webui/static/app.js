@@ -188,6 +188,12 @@ window.app = (() => {
     for (const event of Array.isArray(batch) ? batch : [batch]) {
       if (event.type === "ready") { refreshModels().catch(showError); continue; }
       if (event.type === "status") { status(event.text); continue; }
+      if (event.type === "model_loading" || event.type === "model_loaded") {
+        if (event.chat_id === selected) status(event.type === "model_loading"
+          ? `Loading ${event.model}… ${Math.floor(event.elapsed_seconds)} s`
+          : `${event.model} ready in ${event.load_seconds.toFixed(1)} s`);
+        continue;
+      }
       if (!event.stream_id) { if (event.type === "error") showError(new Error(event.error)); continue; }
       const stream = streams.get(event.stream_id) || {id: event.stream_id, chat_id: event.chat_id, text: "", active: true, operation:event.operation || "chat"};
       streams.set(event.stream_id, stream);
