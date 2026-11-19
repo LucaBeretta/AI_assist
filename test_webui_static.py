@@ -63,6 +63,70 @@ vm.runInNewContext(fs.readFileSync(process.argv[1], 'utf8'), {document, window, 
 
 class StaticTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_d5_memory_prompts_status_and_backend_selection(self):
+        self.run_scenario(r'''
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'workspace.js'),'utf8'), {document,window,Map,Error,String,Number,Boolean,Array});
+        const api=window.pywebview.api;
+        saved.environment={instructions:'Be precise',memory_ids:[]};
+        api.list_memories=async()=>({ok:true,enabled:true,memories:[{id:'m1',text:'Keep numbers exact'}]});
+        api.set_memory_enabled=async value=>{calls.push(['enabled',value]);return {ok:true};};
+        api.add_memory=async text=>{calls.push(['memory',text]);return {ok:true};};
+        api.list_prompts=async()=>({ok:true,prompts:[{name:'review',text:'Review the current code'}]});
+        api.set_chat_instructions=async(id,text)=>{calls.push(['instructions',id,text]);return {ok:true};};
+        api.set_chat_memories=async(id,ids)=>{calls.push(['memories',id,ids]);return {ok:true};};
+        api.state=async()=>({ok:true,engine:'Ollama',host:'localhost',models:['fake:7b'],colibri:{installed:true,running:true,models:['served']}});
+        await window.listeners.pywebviewready();
+        window.workspaceui.openSettings(); await new Promise(resolve=>setImmediate(resolve));
+        elements.get('memory-enabled').checked=false;
+        await elements.get('memory-enabled').listeners.change();
+        assert.deepEqual(calls.at(-1),['enabled',false]);
+        elements.get('memory-add').listeners.click(); elements.get('text-dialog-input').value='New note';
+        await elements.get('text-dialog-form').listeners.submit({preventDefault(){}});
+        assert.deepEqual(calls.at(-1),['memory','New note']);
+        await window.workspaceui.openInstructions('chat-a'); elements.get('text-dialog-input').value='New rules';
+        await elements.get('text-dialog-form').listeners.submit({preventDefault(){}});
+        assert(calls.some(item=>item[0]==='instructions'&&item[2]==='New rules'));
+        await window.workspaceui.openMemories('chat-a');
+        await elements.get('chat-memory-form').listeners.submit({preventDefault(){}});
+        assert.equal(calls.find(item=>item[0]==='memories')[2].length,0);
+        elements.get('prompt').value='/rev'; elements.get('prompt').listeners.input();
+        assert.equal(window.workspaceui.promptKey({key:'Enter',preventDefault(){}}),true);
+        assert.equal(elements.get('prompt').value,'Review the current code');
+        window.app.onEvent([{type:'status',chat_id:'chat-a',ok:true,engine:'ollama ready',model_name:'fake:7b',gpu_fraction:.67,cpu_fraction:.33,privacy_kind:'remote server',fraction:.8}]);
+        assert.equal(elements.get('status-placement').textContent,'67% gpu · 33% cpu');
+        assert.equal(elements.get('status-privacy').className,'privacy is-remote');
+        assert.equal(elements.get('model').children[1].label,'Colibri');
+        elements.get('model').value=JSON.stringify(['Colibri','served']);
+        elements.get('prompt').value='Colibri request';
+        await elements.get('composer').listeners.submit({preventDefault(){}});
+        assert(calls.some(item=>item[2]==='served'&&item[4]==='Colibri'));
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_developer_can_pin_before_any_task_and_code_can_be_saved(self):
+        self.run_scenario(r'''
+        Element.prototype.getAttribute=function(name){return this.attributes[name];};
+        const api=window.pywebview.api;
+        api.new_chat=async()=>({ok:true,chat:{id:'developer'}});
+        api.set_chat_project=async(...args)=>{calls.push(['folder',...args]);return {ok:true};};
+        api.list_project_files=async()=>({ok:true,files:[{path:'main.py',estimated_tokens:20}]});
+        api.list_checkpoints=async()=>({ok:true,checkpoints:[]});
+        api.pin_file=async(...args)=>{calls.push(['pin',...args]);return {ok:true,pinned_files:[{path:'main.py',estimated_tokens:20}]};};
+        api.save_code=async(...args)=>{calls.push(['code',...args]);return {ok:true};};
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'developer.js'),'utf8'), {document,window,Map,Set,Error,String,Number,Boolean,Array});
+        await window.devui.setProject('C:/project');
+        assert.deepEqual(calls.at(-1),['folder','developer','C:/project']);
+        const pin=elements.get('dev-files').children[0].children.at(-1);
+        assert.equal(pin.disabled,false); await pin.listeners.click();
+        assert.deepEqual(calls.at(-1),['pin','developer','main.py']);
+        const code=new Element('pre'); code.textContent='print(1)'; code.firstChild={className:'lang-python'};
+        const action=new Element('button'); action.setAttribute('data-action','save'); action.parentElement={nextElementSibling:code};
+        elements.get('messages').listeners.click({target:{closest:()=>action}});
+        await new Promise(resolve=>setImmediate(resolve));
+        assert.deepEqual(calls.at(-1),['code','print(1)','code.py']);
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
     def test_compaction_controls_collapse_archive_and_create_empty_environment_chat(self):
         self.run_scenario(r'''
         saved.messages = Array.from({length:6}, (_,i)=>({role:i%2?'assistant':'user',content:'original-'+i}));

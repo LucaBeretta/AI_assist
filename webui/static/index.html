@@ -7,6 +7,7 @@
   <title>AI Assist</title>
   <link rel="stylesheet" href="styles.css">
   <script defer src="markdown.js"></script>
+  <script defer src="workspace.js"></script>
   <script defer src="app.js"></script>
   <script defer src="developer.js"></script>
   <script defer src="models.js"></script>
@@ -118,6 +119,7 @@
           <div id="attachments" class="chips" hidden></div>
           <label class="sr-only" for="prompt">Message</label>
           <textarea id="prompt" rows="2" required placeholder="Reply to AI Assist…"></textarea>
+          <div id="saved-prompt-menu" class="prompt-menu" role="listbox" aria-label="Saved prompts" hidden></div>
           <div class="composer-bar">
             <button id="attach" class="icon-btn bordered" type="button" aria-label="Attach files" title="Attach files (or paste / drop them)">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5l-8.6 8.6a5 5 0 0 1-7.1-7.1l8.6-8.6a3.3 3.3 0 0 1 4.7 4.7L10 17.7a1.7 1.7 0 0 1-2.4-2.4l7.9-7.9"></path></svg>
@@ -260,8 +262,11 @@
 
   <footer class="statusbar">
     <span id="status" class="status-engine" role="status" aria-live="polite">Connecting…</span>
+    <span id="status-model"></span><span id="status-placement"></span><span id="status-vram"></span>
+    <span class="status-context"><meter id="status-meter" min="0" max="1" value="0"></meter><span id="status-context"></span></span>
+    <span id="status-speed"></span><span id="status-agent"></span>
     <span class="grow"></span>
-    <span class="privacy">local only</span>
+    <span id="status-privacy" class="privacy">local only</span>
   </footer>
 </div>
 
@@ -284,8 +289,20 @@
   </section>
   <section class="setting-group">
     <h3>Shared memory</h3>
+    <label class="check-row"><input id="memory-enabled" type="checkbox"><span>Use shared memory</span></label>
+    <button id="memory-add" class="btn" type="button">Add memory…</button>
     <p id="memory-state" class="setting-hint"></p>
     <div id="memory-list" class="mem-list settings-mem"></div>
+  </section>
+  <section class="setting-group">
+    <h3>Saved prompts</h3>
+    <p class="setting-hint">Type / in the composer to insert a saved prompt.</p>
+    <div id="saved-prompts-list"></div>
+    <form id="saved-prompt-form">
+      <label class="field"><span>Name</span><input id="saved-prompt-name" maxlength="100" required></label>
+      <label class="field"><span>Prompt</span><textarea id="saved-prompt-text" rows="3" required></textarea></label>
+      <button class="btn" type="submit">Save prompt</button>
+    </form>
   </section>
   <section class="setting-group">
     <h3>Data</h3>
@@ -295,6 +312,23 @@
   </section>
 </dialog>
 
+<dialog id="text-dialog" class="dialog" aria-labelledby="text-dialog-title">
+  <form id="text-dialog-form">
+    <div class="dialog-head"><h2 id="text-dialog-title"></h2></div>
+    <label class="field"><span id="text-dialog-label"></span><textarea id="text-dialog-input" rows="6"></textarea></label>
+    <p id="text-dialog-error" class="setting-hint" role="alert"></p>
+    <div class="dialog-actions"><button id="text-dialog-cancel" class="btn ghost" type="button">Cancel</button><button class="btn primary" type="submit">Save</button></div>
+  </form>
+</dialog>
+<dialog id="chat-memory-dialog" class="dialog" aria-labelledby="chat-memory-title">
+  <form id="chat-memory-form">
+    <div class="dialog-head"><h2 id="chat-memory-title">Memories for this chat</h2></div>
+    <p class="setting-hint">Incognito chats never use shared memory.</p>
+    <label class="check-row"><input id="chat-memory-all" type="checkbox"><span>All memories, including future additions</span></label>
+    <div id="chat-memory-list"></div><p id="chat-memory-error" class="setting-hint" role="alert"></p>
+    <div class="dialog-actions"><button id="chat-memory-cancel" class="btn ghost" type="button">Cancel</button><button class="btn primary" type="submit">Save</button></div>
+  </form>
+</dialog>
 <div id="popup-menu" class="popup-menu" role="menu" hidden></div>
 
 <dialog id="rename-dialog" class="dialog" aria-labelledby="rename-title">

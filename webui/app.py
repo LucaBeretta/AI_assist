@@ -553,18 +553,24 @@ class Api:
             return {"ok": True, "settings": deepcopy(self._settings)}
 
     @_json_method
-    def set_chat_model(self, chat_id, model):
+    def set_chat_model(self, chat_id, model, backend=None):
         if not isinstance(model, str) or not model.strip() or len(model) > 300:
             raise ValueError("Choose an installed model.")
         with self._lock:
             self._require_idle(chat_id)
             record = self._load_chat(chat_id)
-        self._require_vision(model, self._request_messages(record), record.get("backend", record["environment"]["backend"]))
+        target_backend = backend if backend is not None else record.get("backend", record["environment"]["backend"])
+        if target_backend not in {"Ollama", "Colibri"}:
+            raise ValueError("Choose Ollama or Colibri.")
+        self._require_vision(model, self._request_messages(record), target_backend)
         with self._lock:
             self._require_idle(chat_id)
             if self._load_chat(chat_id) != record:
                 raise ValueError("This chat changed while model capabilities were checked; try again.")
+            if record["model"] != model or record.get("backend", record["environment"]["backend"]) != target_backend:
+                record["_agent_history_stale"] = True
             record["model"] = record["environment"]["model"] = model
+            record["backend"] = record["environment"]["backend"] = target_backend
             return {"ok": True, "chat": self._save_chat(record)}
 
     def _require_vision(self, model, messages, backend="Ollama"):

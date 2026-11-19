@@ -166,7 +166,7 @@ window.modelsui = (() => {
   async function refresh() {
     try {
       const state = await call("state");
-      installed = state.models || [];
+      installed = state.ollama?.models || (state.engine === "Ollama" ? state.models || [] : []);
       loaded = state.loaded || {};
       renderInstalled();
     } catch (error) { note(error.message); }

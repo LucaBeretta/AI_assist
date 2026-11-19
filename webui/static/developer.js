@@ -256,13 +256,15 @@ window.devui = (() => {
     const project = element("dev-project").value.trim();
     if (!text) return;
     if (!project) { status("Choose a project folder first."); element("dev-project").focus?.(); return; }
-    const model = element("model").value;
+    const choice = window.app?.modelChoice() || {name: element("model").value, backend: "Ollama"};
+    if (choice.backend !== "Ollama") { status("Developer currently requires an Ollama model."); return; }
+    const model = choice.name;
     try {
       if (!chatId) {
         const created = await call("new_chat");
         chatId = created.chat.id;
-        await call("set_chat_model", chatId, model);
       }
+      await call("set_chat_model", chatId, model, "Ollama");
       remember("aiassist-dev-project", project);
       const steps = Number(document.querySelector('input[name="dev-steps"]:checked')?.value || 20);
       const context = Number(element("context").value) || 16384;
@@ -335,7 +337,7 @@ window.devui = (() => {
   function renderPins() {
     const box = element("dev-pins");
     if (!pinned.length) {
-      box.replaceChildren(node("p", "dev-hint", chatId ? "Pin files to send them with every request." : "Pins are available after the first task in this project."));
+      box.replaceChildren(node("p", "dev-hint", "Choose a folder, then pin files to send them with every request."));
       return;
     }
     box.replaceChildren(...pinned.map(item => {
@@ -383,14 +385,20 @@ window.devui = (() => {
   function onShow() { loadCheckpoints(); loadFiles(); loadPins(); element("dev-task").focus?.(); }
 
   element("dev-project").value = recall("aiassist-dev-project") || "";
-  element("dev-project").addEventListener("change", () => { chatId = null; loadCheckpoints(); loadFiles(); loadPins(); });
+  async function setProject(folder) {
+    if (task?.running) throw new Error("Stop the current task before changing its folder.");
+    if (!chatId) chatId = (await call("new_chat", false, null, folder)).chat.id;
+    await call("set_chat_project", chatId, folder);
+    element("dev-project").value = folder; remember("aiassist-dev-project", folder);
+    await loadFiles(); await loadPins(); await loadCheckpoints();
+  }
+  element("dev-project").addEventListener("change", () => setProject(element("dev-project").value.trim()).catch(error => status(error.message)));
   element("dev-file-filter").addEventListener("input", renderFiles);
   element("dev-browse").addEventListener("click", async () => {
     try {
       const result = await call("choose_folder");
       if (result.cancelled) return;
-      element("dev-project").value = result.path;
-      element("dev-project").dispatchEvent(new Event("change"));
+      await setProject(result.path);
     } catch (error) { status(error.message); }
   });
   element("dev-form").addEventListener("submit", run);
@@ -400,5 +408,5 @@ window.devui = (() => {
   element("dev-stop").addEventListener("click", stop);
   element("dev-refresh-checkpoints").addEventListener("click", loadCheckpoints);
   controls();
-  return {onEvent, onShow, isRunning: () => Boolean(task?.running), stop};
+  return {onEvent, onShow, setProject, isRunning: () => Boolean(task?.running), stop};
 })();

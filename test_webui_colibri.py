@@ -74,6 +74,9 @@ class ColibriApiTests(unittest.TestCase):
         chat = self.api.new_chat()["chat"]
         self.assertEqual(chat["backend"], "Colibri")
         self.assertEqual(self.api.status_snapshot()["chat_id"], chat["id"])
+        self.assertTrue(self.api.set_chat_model(chat["id"], "fake:7b", "Ollama")["ok"])
+        self.assertEqual(self.store.load(chat["id"])["backend"], "Ollama")
+        self.assertFalse(self.api.set_chat_model(chat["id"], "fake:7b", "Unknown")["ok"])
 
     def test_stop_keeps_partial_and_errors_are_real_events(self):
         release = threading.Event()

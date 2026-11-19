@@ -300,6 +300,17 @@ code, kbd, pre, .mono { font-family: var(--mono); }
 .status-engine { display: inline-flex; align-items: center; gap: 7px; }
 .status-engine::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
 .privacy { color: var(--green); }
+.privacy.is-remote, .level-warn { color: var(--amber); accent-color: var(--amber); }
+.level-full { color: var(--red); accent-color: var(--red); }
+.status-context { display: inline-flex; align-items: center; gap: 6px; }
+.status-context meter { width: 60px; height: 6px; accent-color: var(--accent); }
+.prompt-menu { position: absolute; bottom: 58px; left: 14px; right: 14px; max-height: 240px; overflow: auto; padding: 6px;
+  border: 1px solid var(--border-2); border-radius: var(--r); background: var(--panel); box-shadow: var(--shadow); z-index: 3; }
+.prompt-menu button { display: block; width: 100%; text-align: left; }
+.prompt-menu [aria-selected="true"] { background: var(--raised-2); color: var(--accent); }
+.composer { position: relative; }
+.statusbar > span { overflow-wrap: anywhere; }
+#chat-memory-list { max-height: 45vh; overflow: auto; }
 
 /* ---------- v2 additions: projects, incognito, versions, edit, attachments, banner, dialogs ---------- */
 .brand-actions { display: flex; gap: 4px; }

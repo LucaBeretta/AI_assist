@@ -103,7 +103,7 @@ window.app = (() => {
     const follow = nearBottom();
     container.replaceChildren(...nodes);
     // markdown.js renders code toolbars disabled; Copy works here, Save/Preview wait for their Api methods.
-    for (const node of container.querySelectorAll?.('.code-actions [data-action="copy"], .code-actions [data-action="preview"]') || []) node.disabled = false;
+    for (const node of container.querySelectorAll?.('.code-actions [data-action]') || []) node.disabled = false;
     renderInterrupted(record);
     renderAttachments(record);
     if (follow) scrollToEnd();
@@ -333,6 +333,8 @@ window.app = (() => {
       node.addEventListener("contextmenu", event => showMenu(event, [
         ["Open", () => { showView("chat"); openChat(record.id).catch(showError); }],
         ["Rename…", () => startRename(record.id)],
+        ["Memories for this chat…", () => window.workspaceui?.openMemories(record.id)],
+        ["Chat instructions…", () => window.workspaceui?.openInstructions(record.id)],
         ["Delete", () => deleteChat(record.id), "danger"],
       ]));
       item.append(node);
@@ -435,7 +437,7 @@ window.app = (() => {
       if (version !== selectionVersion) return;
       const record = chats.get(id);
       element("prompt").value = record.localDraft ?? record.draft ?? "";
-      if (record.model) element("model").value = record.model;
+      if (record.model) element("model").value = modelValue(record.model, record.backend || record.environment?.backend);
       element("context").value = record.context_length ?? "";
     } catch (error) {
       if (version !== selectionVersion) return;
@@ -505,26 +507,49 @@ window.app = (() => {
     lastState = result;
     engineReady = true;
     const previous = element("model").value;
-    const options = result.models.map(name => {
-      const option = document.createElement("option");
-      option.value = name;
-      option.textContent = name;
-      return option;
-    });
-    element("model").replaceChildren(...options);
-    if (result.models.includes(previous)) element("model").value = previous;
+    const groups = [["Ollama", result.ollama?.models || (result.engine === "Ollama" ? result.models : []), true],
+                    ["Colibri", result.colibri?.models || [], Boolean(result.colibri?.running)]];
+    const values = [];
+    element("model").replaceChildren(...groups.map(([backend, names, ready]) => {
+      const group = document.createElement("optgroup");
+      group.label = backend;
+      group.disabled = !ready || !names.length;
+      if (!names.length) {
+        const option = document.createElement("option");
+        option.disabled = true;
+        option.textContent = backend === "Colibri" && !result.colibri?.installed ? "Not installed or no server available" : "No running model available";
+        group.append(option);
+      }
+      for (const name of names) {
+        const option = document.createElement("option");
+        option.value = modelValue(name, backend); option.textContent = name;
+        values.push(option.value); group.append(option);
+      }
+      return group;
+    }));
+    element("model").value = values.includes(previous) ? previous : values[0] || "";
+    window.workspaceui?.onState(result);
     status(`${result.engine}: ${result.host}. ${result.models.length} models available.`);
     controls();
   }
 
   function showError(error) { status(error.message || String(error)); controls(); }
 
+  function modelValue(name, backend = "Ollama") { return backend === "Colibri" ? JSON.stringify([backend, name]) : name; }
+  function modelChoice() {
+    const value = element("model").value;
+    if (value.startsWith("[")) {
+      try { const pair = JSON.parse(value); if (pair[0] === "Colibri" && typeof pair[1] === "string") return {backend: pair[0], name: pair[1]}; } catch (error) { /* ordinary model tag */ }
+    }
+    return {backend: "Ollama", name: value};
+  }
+
   async function send(event) {
     event.preventDefault();
     const chatId = selected;
     const text = element("prompt").value;
     if (!chatId || openingChat || submitting || !text.trim() || activeStream(chatId)) return;
-    const model = element("model").value;
+    const choice = modelChoice(), model = choice.name;
     const rawContext = element("context").value;
     const editing = editingIndex;
     submitting = true;
@@ -532,7 +557,7 @@ window.app = (() => {
     try {
       const result = editing !== null
         ? await call("edit_and_resend", chatId, editing, text)
-        : await call("send", chatId, text, model, rawContext ? Number(rawContext) : null);
+        : await call("send", chatId, text, model, rawContext ? Number(rawContext) : null, choice.backend);
       track(chatId, result);
       if (editing !== null) { editingIndex = null; element("edit-hint").hidden = true; }
       chats.get(chatId).localDraft = "";
@@ -607,7 +632,12 @@ window.app = (() => {
   function onEvent(batch) {
     for (const event of Array.isArray(batch) ? batch : [batch]) {
       if (event.type === "ready") { refreshModels().catch(showError); continue; }
-      if (event.type === "status") { status(event.text); continue; }
+      if (event.type === "status") {
+        if (event.engine && (!event.chat_id || event.chat_id === selected)) window.workspaceui?.renderStatus(event);
+        else if (event.text) status(event.text);
+        continue;
+      }
+      window.workspaceui?.onEvent(event);
       if (event.type === "model_loading" || event.type === "model_loaded") {
         const text = event.type === "model_loading"
           ? `Loading ${event.model}… ${Math.floor(event.elapsed_seconds)} s`
@@ -672,7 +702,7 @@ window.app = (() => {
       row.append(label, button("Unload", "btn", async () => { await unloadModel(name); openSettings(); }));
       return row;
     }) : [Object.assign(document.createElement("p"), {className: "setting-hint", textContent: "No models are loaded right now."})]));
-    renderMemorySettings();
+    if (window.workspaceui) window.workspaceui.openSettings(); else renderMemorySettings();
     openDialog("settings-dialog");
   }
 
@@ -708,6 +738,7 @@ window.app = (() => {
   // ---------- wiring ----------
   element("prompt").addEventListener("input", () => { fitPrompt(); scheduleDraft(); });
   element("prompt").addEventListener("keydown", event => {
+    if (window.workspaceui?.promptKey(event)) return;
     if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
       event.preventDefault();
       if (!element("send").disabled) send(event);
@@ -751,12 +782,16 @@ window.app = (() => {
   element("jump").addEventListener("click", () => { scrollToEnd(); updateJump(); });
   element("conversation").addEventListener("scroll", updateJump);
   element("messages").addEventListener("click", event => {
-    const node = event.target?.closest?.('.code-actions [data-action="copy"], .code-actions [data-action="preview"]');
+    const node = event.target?.closest?.('.code-actions [data-action]');
     if (!node) return;
     const code = node.parentElement?.nextElementSibling;
     if (!code) return;
     if (node.getAttribute("data-action") === "preview") {
       call("preview_code", code.textContent).then(() => status("Preview opened in a separate window.")).catch(showError);
+    } else if (node.getAttribute("data-action") === "save") {
+      const language = code.firstChild?.className?.replace("lang-", "") || "txt";
+      const extension = ({python: "py", javascript: "js", typescript: "ts", text: "txt"})[language] || language;
+      call("save_code", code.textContent, "code." + extension.replace(/[^a-z0-9]/gi, "")).then(result => { if (!result.cancelled) status("Code saved."); }).catch(showError);
     } else copyText(code.textContent, node);
   });
 
@@ -848,6 +883,7 @@ window.app = (() => {
       else await newChat();
     } catch (error) { showError(error); }
     if (lastState?.interrupted?.length) status(`${lastState.interrupted.length} chat(s) have an interrupted reply: open them to keep or discard it.`);
+    if (window.pywebview.api.status_snapshot) call("status_snapshot").then(value => window.workspaceui?.renderStatus(value)).catch(showError);
   });
   // ---------- right-click menu ----------
   function showMenu(event, items) {
@@ -999,5 +1035,8 @@ window.app = (() => {
     if (selected && window.pywebview?.api?.set_chat_model) call("set_chat_model", selected, name).catch(showError);
   }
 
-  return {onEvent, showView, selectModel, refreshModels: () => refreshModels().catch(showError)};
+  function setPrompt(text) { element("prompt").value = text; fitPrompt(); scheduleDraft(); element("prompt").focus?.(); }
+  return {onEvent, showView, selectModel, modelChoice, setPrompt,
+          currentChat: () => chats.get(selected), refreshChat: async id => { await reloadChat(id); if (selected === id) renderMessages(); },
+          refreshModels: () => refreshModels().catch(showError)};
 })();
