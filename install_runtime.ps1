@@ -38,9 +38,14 @@ Write-Host "It is stored only in: $runtime"
 Write-Host 'No administrator rights are needed and other Python installations are not changed.'
 Write-Host 'This downloads Python from GitHub and web dependencies from PyPI, so it needs two confirmations.'
 $answer = Read-Host 'Download it now? [y/N]'
-if ($answer -notmatch '^\s*[Yy]') { exit 2 }
-$answer = Read-Host "Second check: type yes to download $file"
-if ("$answer".Trim() -ne 'yes') { exit 2 }
+if ($answer -notmatch '^\s*[Yy]') { Write-Host 'Download cancelled. Nothing was downloaded.'; exit 2 }
+# The second check needs the whole word; a short "y" asks again instead of cancelling silently.
+while ($true) {
+    $answer = ("" + (Read-Host "Second check: type yes (the whole word) to download $file, or press Enter to cancel")).Trim().ToLowerInvariant()
+    if ($answer -eq 'yes') { break }
+    if ($answer -eq '' -or $answer -eq 'n' -or $answer -eq 'no') { Write-Host 'Download cancelled. Nothing was downloaded.'; exit 2 }
+    Write-Host "Please type the whole word yes to confirm (you typed '$answer')."
+}
 
 function Remove-Staging {
     if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }

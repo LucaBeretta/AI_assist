@@ -46,11 +46,18 @@ install_private_python() {
     echo "No administrator password is needed and other Python installations are not changed."
     echo "This downloads Python from GitHub and web dependencies from PyPI, so it needs two confirmations."
     read -r -p "Download it now? [y/N] " answer
-    case "$answer" in [Yy]*) ;; *) return 1 ;; esac
-    read -r -p "Second check: type yes to download $file: " answer
-    if [ "$answer" != "yes" ]; then
-        return 1
-    fi
+    case "$answer" in [Yy]*) ;; *) echo "Download cancelled. Nothing was downloaded."; return 1 ;; esac
+    # The second check needs the whole word; a short "y" asks again instead of cancelling silently.
+    while :; do
+        read -r -p "Second check: type yes (the whole word) to download $file, or press Return to cancel: " answer
+        answer=$(printf '%s' "$answer" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
+        [ "$answer" = "yes" ] && break
+        if [ -z "$answer" ] || [ "$answer" = "n" ] || [ "$answer" = "no" ]; then
+            echo "Download cancelled. Nothing was downloaded."
+            return 1
+        fi
+        echo "Please type the whole word yes to confirm (you typed \"$answer\")."
+    done
 
     staging="$RUNTIME_DIR/.staging"
     rm -rf "$staging"
