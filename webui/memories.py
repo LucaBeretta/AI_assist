@@ -2,7 +2,7 @@
 
 import hashlib
 
-from shared_memory import SharedMemory
+from shared_memory import SharedMemory, MAX_NOTES
 
 
 def entries(memory):
@@ -19,6 +19,34 @@ class Memories:
     def list(self):
         memory = SharedMemory(self.directory)
         return {"memories": entries(memory), "enabled": memory.enabled}
+
+    def set_enabled(self, enabled):
+        if type(enabled) is not bool:
+            raise ValueError("Memory enabled must be true or false.")
+        memory = SharedMemory(self.directory)
+        memory.save(memory.notes, enabled)
+
+    def put(self, text, identity=None):
+        if not isinstance(text, str) or not text.strip() or len(text) > MAX_NOTES:
+            raise ValueError(f"Enter a memory of at most {MAX_NOTES:,} characters.")
+        # One logical entry per line, matching the legacy notes format.
+        text = " ".join(text.split())
+        memory = SharedMemory(self.directory)
+        records = entries(memory)
+        previous = None
+        if identity is not None:
+            previous = next((item for item in records if item["id"] == identity), None)
+            if previous is None:
+                raise ValueError("Choose an existing shared memory ID.")
+        if any(item["text"].casefold() == text.casefold() and item is not previous for item in records):
+            raise ValueError("This memory already exists.")
+        lines = memory.notes.splitlines()
+        if previous is None:
+            lines.append(text)
+        else:
+            lines = [text if line.strip() == previous["text"] else line for line in lines]
+        memory.save("\n".join(lines).strip(), memory.enabled)
+        return next(item for item in entries(memory) if item["text"] == text)
 
     def used(self, record):
         if record.get("incognito"):

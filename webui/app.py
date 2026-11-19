@@ -119,6 +119,51 @@ class Api:
             return {"ok": True, "window": value}
 
     @_json_method
+    def set_memory_enabled(self, enabled):
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("The web UI is closing.")
+            self._memories.set_enabled(enabled)
+        self._bridge.emit("memories_changed")
+        return {"ok": True, "enabled": enabled}
+
+    @_json_method
+    def add_memory(self, text):
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("The web UI is closing.")
+            item = self._memories.put(text)
+        self._bridge.emit("memories_changed")
+        return {"ok": True, "memory": item}
+
+    @_json_method
+    def edit_memory(self, id, text):
+        if not isinstance(id, str) or not id:
+            raise ValueError("Choose an existing shared memory ID.")
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("The web UI is closing.")
+            item = self._memories.put(text, id)
+        self._bridge.emit("memories_changed")
+        return {"ok": True, "memory": item}
+
+    @_json_method
+    def set_chat_memories(self, chat_id, ids):
+        if (not isinstance(ids, list) or any(not isinstance(item, str) for item in ids)
+                or len(ids) != len(set(ids))):
+            raise ValueError("Choose a list of unique shared memory IDs (empty means all).")
+        with self._lock:
+            self._require_idle(chat_id)
+            record = self._load_chat(chat_id)
+            if record.get("incognito") and ids:
+                raise ValueError("Incognito chats do not use shared memory.")
+            if ids and not set(ids) <= {item["id"] for item in self._memories.list()["memories"]}:
+                raise ValueError("Choose existing shared memory IDs.")
+            record["environment"]["memory_ids"] = list(ids)
+            record["_agent_history_stale"] = True
+            return {"ok": True, "chat": self._save_chat(record)}
+
+    @_json_method
     def list_memories(self):
         with self._lock:
             return {"ok": True, **self._memories.list()}
