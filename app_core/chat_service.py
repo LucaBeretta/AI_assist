@@ -157,7 +157,8 @@ class ChatService:
             raise ServiceError(f"Messages are limited to {MAX_MESSAGE_CHARS:,} characters.")
         record = self.get(chat_id)
         if record["mode"] != "chat":
-            raise ServiceError("Developer chats run in the desktop app, where every edit and command is reviewed.", 409)
+            raise ServiceError("This is a developer chat: send the request to the developer agent, which shows "
+                               "every edit and command for your approval.", 409)
         if record.get("backend", "Ollama") != backend and record["messages"]:
             raise ServiceError(f"This chat was written with {record.get('backend', 'Ollama')}. "
                                f"Switch the engine to it in Settings to continue it.", 409)

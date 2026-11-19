@@ -1,11 +1,11 @@
 // @ts-check
 /**
- * Projects: the folders of saved developer chats, read-only.
+ * Projects: the folders of saved developer chats, to read.
  *
  * File reads use the agent's own rules on the server: only inside a folder
  * the person chose for a developer chat, never secrets, binaries or
- * dependency folders. Edits, commands and the agent itself stay in the
- * desktop app, behind its reviewed confirmations.
+ * dependency folders. This view never changes a file: the agent does that
+ * from a developer conversation, after the person approves each step.
  */
 import { h, icon, replace } from "./dom.js";
 import { diffLines, fileTree, formatBytes, relativeTime } from "./format.js";
@@ -108,10 +108,10 @@ export function createProjectsView(ctx) {
     if (!project) {
       replace(element, h("header", { class: "view-header" }, h("h1", { class: "view-title" }, "Projects")),
         h("div", { class: "view-body" }, h("section", { class: "state" },
-          h("div", { class: "state-kicker" }, "read-only"),
+          h("div", { class: "state-kicker" }, "developer work"),
           h("h2", null, "Browse developer work"),
           h("p", { class: "muted" }, "Choose a project to read its files, the changes the agent applied, and the commands it ran. "
-            + "Running the agent, approving edits and running commands stay in the desktop app."))));
+            + "To change something, open its conversation and describe the task: you approve each edit and command there."))));
       return;
     }
     const tabs = [["source", "Source"], ["changes", "Changes"], ["activity", "Activity"]];
@@ -138,8 +138,10 @@ export function createProjectsView(ctx) {
       h("header", { class: "view-header" },
         h("div", { class: "view-heading" }, h("h1", { class: "view-title" }, project.chat?.title || "Project"),
           h("div", { class: "view-subtitle" }, project.root || "")),
-        h("span", { class: "badge is-accent" }, "read-only"),
-        h("button", { class: "button button-small", type: "button", onClick: () => ctx.openChat(project.chatId) }, icon("chat"), "Conversation")),
+        h("span", { class: "badge is-accent", title: "This view only reads files" }, "read-only"),
+        h("button", { class: "button button-small", type: "button", onClick: () => ctx.openChat(project.chatId) }, icon("chat"), "Conversation"),
+        h("button", { class: "button button-small", type: "button", disabled: Boolean(ctx.store.get().streaming),
+          onClick: () => ctx.newTask(project.chatId) }, icon("plus"), "New task")),
       h("div", { class: "project-layout" },
         h("div", { class: "project-tree" }, filter, tree),
         h("div", { class: "project-pane" }, tabList,

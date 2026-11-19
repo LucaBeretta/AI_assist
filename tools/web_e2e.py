@@ -5,9 +5,10 @@
 It starts web_workspace.py on a throwaway data folder (your saved chats are
 never touched), signs in with the printed single-use link, and drives a
 headless Edge or Chrome over the DevTools protocol (standard library only):
-a real streamed answer, Stop, dialogs and focus, the read-only developer
-view, the Day theme, a phone-sized screen, and any script error or CSP
-violation. Screenshots go to --out.
+a real streamed answer, Stop, dialogs and focus, the developer project view
+and agent (with --agent-model, a real task whose edit is reviewed, applied
+and undone), backups, the Day theme, a phone-sized screen, and any script
+error or CSP violation. Screenshots go to --out.
 
 Needs: Ollama running with --model installed (a tiny one such as gemma3:270m
 keeps it quick), and Edge or Chrome. It is not part of the unit suite.
@@ -29,6 +30,9 @@ parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
 parser.add_argument("--browser", default=None, help="Edge or Chrome executable (found automatically when omitted)")
 parser.add_argument("--model", default="gemma3:270m", help="an installed Ollama model; small is fast")
 parser.add_argument("--out", default=os.path.join(tempfile.gettempdir(), "aiassist-e2e-shots"), help="screenshot folder")
+parser.add_argument("--agent-model", default=None,
+                    help="an installed model that can call tools (such as qwen3-coder:30b): also runs a real agent task, "
+                         "approves its file edit, declines any command, then undoes the edit")
 options = parser.parse_args()
 REPO = Path(__file__).resolve().parent.parent
 EDGE = options.browser or find_browser()
@@ -39,6 +43,7 @@ OUT.mkdir(parents=True, exist_ok=True)
 DATA = Path(tempfile.mkdtemp(prefix="aiassist-e2e-data-"))
 PROFILE = tempfile.mkdtemp(prefix="aiassist-e2e-edge-")
 MODEL = options.model
+AGENT_MODEL = options.agent_model
 results = []
 
 
@@ -260,7 +265,69 @@ try:
     check("command activity is shown", cdp.wait("!!document.querySelector('.activity-type.is-success')", 5),
           cdp.js("document.getElementById('project-panel')?.innerText.slice(0, 300)"))
     cdp.js("document.querySelector('.view-header .button').click()")
-    check("the developer conversation is read-only", cdp.wait("document.querySelector('.composer').hidden && document.querySelector('.composer-notice').textContent.includes('Read-only here')", 10))
+    check("the developer conversation runs the agent with approvals",
+          cdp.wait("!document.querySelector('.composer').hidden && document.querySelector('.composer-notice').textContent.includes('You approve every step')"
+                   " && document.querySelector('.composer button[type=submit]').textContent.includes('Run agent')", 10))
+    # A model without tool calling is refused with plain help, before anything runs.
+    original = (project / "src" / "app.py").read_bytes()
+    cdp.js("document.getElementById('composer-input').focus()")
+    cdp.send("Input.insertText", text="Rename greet to welcome.")
+    cdp.key("Enter", "Enter", 13, text="\r")
+    refusal = cdp.wait("document.querySelector('.message.is-error .error-help strong')?.textContent", 30)
+    check("a model without tools is refused with plain help", refusal == "This model cannot use tools", refusal)
+    check("the refused task changed nothing", (project / "src" / "app.py").read_bytes() == original)
+
+    def agent_task(text, written):
+        """Run one real agent task. File edits are applied; every command is taken to its
+        second check, then rejected: this test runs no commands. Returns (applied, second checks seen)."""
+        cdp.js("document.getElementById('composer-input').focus()")
+        cdp.send("Input.insertText", text=text)
+        cdp.key("Enter", "Enter", 13, text="\r")
+        check("the agent task starts", cdp.wait("!!document.querySelector('.message[aria-busy=true]')", 30))
+        applied, second_checks = False, 0
+        deadline = time.monotonic() + 900
+        while time.monotonic() < deadline:
+            heading = cdp.wait("document.querySelector('.review h2')?.textContent || (!document.querySelector('.message[aria-busy=true]') && 'finished')", 900, 0.5)
+            if heading in (None, "finished"):
+                break
+            if heading.startswith("Run this command"):
+                cdp.js("document.querySelector('.review .button-primary').click()")
+                if cdp.wait("document.querySelector('.review.is-second .button-primary')?.disabled"
+                            " && document.querySelector('.review.is-second .button-primary').textContent.startsWith('Run (')", 10):
+                    second_checks += 1
+                cdp.shot("03c-second-check.png")
+                cdp.js("[...document.querySelectorAll('.review.is-second button')].find(b => b.textContent === 'Reject').click()")
+            elif heading.startswith("Second check"):
+                cdp.js("[...document.querySelectorAll('.review button')].find(b => b.textContent === 'Reject').click()")
+            else:
+                if not applied:
+                    check("nothing is written before approval", not written.exists())
+                    cdp.shot("03b-review.png")
+                cdp.js("document.querySelector('.review .button-primary').click()")
+                applied = True
+            cdp.wait(f"!document.querySelector('.review h2') || document.querySelector('.review h2').textContent !== {json.dumps(heading)}", 15)
+        cdp.wait("!document.querySelector('.message[aria-busy=true]')", 60)
+        return applied, second_checks
+
+    if AGENT_MODEL:
+        # Real tasks with a tool-calling model: every step waits for a review.
+        cdp.js(f"(() => {{ const s = document.querySelector('select[aria-label=Model]'); s.value = {json.dumps(AGENT_MODEL)}; s.dispatchEvent(new Event('change')); }})()")
+        marker = project / "ran.txt"
+        _, second_checks = agent_task("Run exactly this command in the project folder and report its output: "
+                                      "python -c \"open('ran.txt','w').write('x')\"", marker)
+        check("a command needs a second check with a countdown", second_checks >= 1, f"{second_checks} second checks")
+        check("the rejected command never ran", not marker.exists())
+        notes = project / "notes.txt"
+        applied, _ = agent_task("Create a new file named notes.txt in the project folder containing the single line: hello. "
+                                "Use the write_file tool. Do not run any command.", notes)
+        check("the approved edit is written", applied and notes.exists(),
+              notes.read_text(errors="replace")[:80] if notes.exists() else "notes.txt was not created")
+        check("Undo is offered after the task", cdp.wait("[...document.querySelectorAll('.view-header button')].some(b => b.textContent.includes('Undo last task') && !b.disabled)", 10))
+        cdp.js("[...document.querySelectorAll('.view-header button')].find(b => b.textContent.includes('Undo last task')).click()")
+        cdp.wait("document.getElementById('dialog').open", 5)
+        cdp.js("document.querySelector('#dialog button[value=confirm]').click()")
+        check("Undo removes the file the agent created", cdp.wait("document.getElementById('toasts').textContent.includes('Undid')", 15) and not notes.exists(),
+              cdp.js("document.getElementById('toasts').textContent"))
 
     # Backups: the daily one at start, and Back up now.
     cdp.js("document.querySelector('.nav-section[data-view=settings]').click()")

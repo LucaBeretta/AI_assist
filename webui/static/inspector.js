@@ -59,7 +59,8 @@ export function createInspector(ctx) {
       replace(privacy, h("h2", { id: "inspector-privacy" }, "Privacy"), status ? [
         h("span", { class: `chip ${status.privacy.role === "success" ? "is-success" : "is-amber"}` }, status.privacy.text),
         facts([["Engine", status.engine], ["Server", status.endpoint], ["Server is", status.endpoint_local ? "this computer" : "another computer"],
-          ["Internet gate", status.gate.installed ? "on" : "off"], ["Approvals", "desktop app only"], ["Agent", "desktop app only"]]),
+          ["Internet gate", status.gate.installed ? "on" : "off"], ["Internet approvals", "desktop app only"],
+          ["Agent", "you approve each edit and command"]]),
       ] : h("div", { class: "skeleton" }));
       replace(memory, h("h2", { id: "inspector-memory" }, "Shared memory"),
         status ? h("p", { class: "muted" }, !status.memory.available ? "Unavailable." : status.memory.enabled

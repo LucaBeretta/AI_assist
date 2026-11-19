@@ -10,6 +10,7 @@ import tkinter as tk
 from tkinter import END, filedialog, messagebox, scrolledtext, simpledialog, ttk
 
 from app_core import approvals, backups, documents
+from app_core.activity import activity_record
 from app_core.checkpoints import CheckpointError, CheckpointStore
 from app_core.explain import ACTION_LABELS, explain
 from backup_ui import BackupWindow
@@ -1171,17 +1172,7 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
             self.workspace_events.put(("preview", request, None, str(error)))
 
     def log_activity(self, event):
-        record = {"type": str(event.get("type", "status")), "text": str(event.get("text", ""))}
-        if isinstance(event.get("path"), str):
-            record["path"] = event["path"]
-        if isinstance(event.get("command"), str):
-            record["command"] = event["command"]
-        if record["type"] == "changed" and isinstance(event.get("destination"), str):
-            record["destination"] = event["destination"]
-        if record["type"] == "changed" and isinstance(event.get("diff"), str):
-            record["diff"] = event["diff"][:40000]
-            if len(event["diff"]) > 40000:
-                record["diff"] += "\n[Diff truncated for saved history.]"
+        record = activity_record(event)
         self.dev_activity.append(record)
         if record["type"] == "changed":
             self.project_dirty = True

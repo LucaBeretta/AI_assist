@@ -92,10 +92,12 @@ python web_workspace.py --no-browser --port 8765
 
 The window it runs in prints the link; press Enter there for a new one (each works once, for five minutes) and Ctrl+C to stop. It offers streamed chat with Stop, Markdown and code blocks with Copy, saved chats (search, rename, delete), models and where they run, a details panel (model capabilities, last answer's speed and context, privacy, shared memory, hardware), shared memory editing, the connection log, Night and Day themes, keyboard navigation, and a layout that works on narrow screens.
 
+**Developer agent.** Open a developer chat and describe the change you need; **Run agent** starts the task. Each file change appears as a card with its diff (**Apply change** or **Reject**), and each command needs the same two confirmations as the desktop app: **Run command**, then **Run**, which unlocks after three seconds on a second step that explains the command runs outside the internet gate. Nothing is written or run before you answer; **Stop** declines what is waiting. **Undo last task** puts back the files the task changed, and **New task** starts a fresh chat in the same folder. **Projects** shows each folder's files, applied diffs and command activity, read-only. The model must support tool calling (for example `qwen3-coder`); others are refused before anything runs.
+
 On purpose, it **cannot**:
 
 - **go online**: there is no approval window, so the internet gate blocks every internet request. Model downloads, cloud models and update checks stay in the desktop app.
-- **change your projects**: developer chats, their project files (with the agent's exclusions), applied diffs and command activity are **read-only**. The agent, edits and commands run in the desktop app, behind its reviewed confirmations.
+- **change your projects without you**: the agent edits a file or runs a command only after you approve it on the page, and the server refuses an early or skipped confirmation. It works only in folders chosen for developer chats in the desktop app (**Developer > Open project**).
 - **be reached from other devices**: it listens on 127.0.0.1 (or ::1) only, checks every request's Host and Origin, and needs the page's session for every call. No cookies are used.
 
 Only one AI Assist may use a data folder at a time, so close the desktop window before starting the web workspace (and vice versa); the second one explains which is open. Design and limits: `docs/architecture-decision.md`, `docs/target-architecture.md`, `docs/threat-model.md`.
@@ -233,7 +235,7 @@ node --test webui/tests/markdown.test.mjs webui/tests/format.test.mjs   # option
 python tools/web_e2e.py                                                # optional; real browser + running Ollama with gemma3:270m
 ```
 
-`tools/web_e2e.py` drives the web workspace in headless Edge or Chrome on a throwaway data folder: a real streamed answer, Stop, dialogs and focus, the read-only developer view, the Day theme, a phone-sized screen, and any script error or Content-Security-Policy violation. It needs no packages.
+`tools/web_e2e.py` drives the web workspace in headless Edge or Chrome on a throwaway data folder: a real streamed answer, Stop, dialogs and focus, the developer project view, the agent's refusal of a model without tools, the Day theme, a phone-sized screen, and any script error or Content-Security-Policy violation. With `--agent-model qwen3-coder:30b` (any installed tool-calling model) it also runs real agent tasks: a command is taken to its second check and rejected, and a file edit is reviewed, applied and undone. It needs no packages.
 
 Code layout: `app_core/` holds the rules both interfaces share (providers, conversation, chat service, privacy, settings, the single-instance lock) and imports no UI toolkit; `webui/` is the loopback API and its page; the root modules are the desktop app, the agent, persistence and the internet gate. See `docs/architecture-audit.md` for the current state and `docs/modernization-backlog.md` for what comes next.
 

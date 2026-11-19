@@ -53,7 +53,7 @@ export function createSettingsView(ctx) {
         h("h2", { id: "safety-title" }, "What this workspace cannot do"),
         h("ul", null,
           h("li", null, h("strong", null, "Go online. "), "There is no approval window here, so the internet gate blocks every internet request. Model downloads, cloud models and update checks happen in the desktop app, after two confirmations."),
-          h("li", null, h("strong", null, "Change your projects. "), "The developer agent, file edits and commands run in the desktop app, where each one is reviewed first. Project files are read-only here."),
+          h("li", null, h("strong", null, "Change your projects without you. "), "The developer agent changes a file or runs a command only after you approve it; a command also needs a second check. New project folders are chosen in the desktop app."),
           h("li", null, h("strong", null, "Be reached from other devices. "), "It listens on this computer only, and every request needs this page's session."))),
     )));
 

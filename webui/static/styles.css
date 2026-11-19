@@ -199,6 +199,23 @@ button.chip { cursor: pointer; }
 .message-body { overflow-wrap: anywhere; min-width: 0; }
 .message-body > :last-child { margin-bottom: 0; }
 .message-body.is-plain { white-space: pre-wrap; }
+.reviews { max-width: var(--reading-width); margin: var(--space-4) auto 0; display: grid; gap: var(--space-4); }
+.review { display: grid; gap: var(--space-2); padding: var(--space-4) var(--space-5); border: 2px solid var(--accent);
+  border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow); }
+.review.is-second { border-color: var(--warning); }
+.review h2 { font-size: var(--text-lg); outline-offset: 4px; }
+.review p { margin: 0; }
+.review-kicker { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--accent); text-transform: uppercase; letter-spacing: 0.06em; }
+.review.is-second .review-kicker, .review-warning { color: var(--warning); }
+.review-command, .review-diff { margin: 0; max-height: 22rem; overflow: auto; padding: var(--space-3); border-radius: var(--radius-md);
+  background: var(--code-bg); font-size: var(--text-sm); white-space: pre; }
+.review-diff { padding: var(--space-2) 0; }
+.review-actions { justify-content: flex-end; }
+.agent-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; font-size: var(--text-sm); }
+.agent-step { display: flex; gap: var(--space-2); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.agent-step-type { flex: none; min-width: 9rem; font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-muted); text-transform: uppercase; padding-top: 2px; }
+.agent-step.is-changed .agent-step-type, .agent-step.is-command_succeeded .agent-step-type { color: var(--success); }
+.agent-step.is-command_failed .agent-step-type, .agent-step.is-command_timed_out .agent-step-type { color: var(--danger); }
 .error-help { display: grid; gap: var(--space-1); justify-items: start; }
 .error-help p { margin: 0; }
 .error-help strong { font-size: var(--text-md); }
