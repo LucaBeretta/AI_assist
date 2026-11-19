@@ -1,4 +1,4 @@
-"""Opt-in notifications when an already-paired LAN inference node becomes ready.
+"""Opt-in availability notifications for already-paired LAN inference nodes.
 
 A discovery packet is NEVER trusted as proof of availability: every check pins
 the peer's full TLS certificate SHA-256 fingerprint, authenticates with the
@@ -157,8 +157,9 @@ def watch_paired_nodes(*, client_id, stop_event, notify=mac_notification,
     """Blocking watcher. Caller must start it through an explicit user action.
 
     A single watcher polls only previously paired nodes. No UDP broadcasts and
-    no unverified peers. No notification on loss by default; when a node later
-    comes back, it notifies once more.
+    no unverified peers. Emit one online alert after two successful probes,
+    and one offline alert after two failures *only if previously online*.
+    A machine offline when monitoring starts never triggers an offline alert.
     """
     if not isinstance(stop_event, threading.Event):
         raise TypeError("An explicit stop event is required.")
@@ -181,6 +182,12 @@ def watch_paired_nodes(*, client_id, stop_event, notify=mac_notification,
             if transition == "online":
                 notify("AI Assist · PC disponibile",
                        f"Il dispositivo associato {peer_id[:24]} è pronto per l'inferenza LAN.")
+            elif transition == "offline":
+                # A failed health check cannot tell a powered-off PC from
+                # disabled sharing, Wi-Fi loss or a temporary network issue.
+                notify("AI Assist · Nodo AI non disponibile",
+                       f"Connessione al nodo {peer_id[:24]} persa. "
+                       "Verifica Wi-Fi e condivisione AI su Windows.")
         stop_event.wait(interval)
 
 
@@ -199,7 +206,7 @@ def main(argv=None):
     store = TrustStore(args.data_dir or pairing_directory())
     if not store._read("paired_servers.json"):
         parser.error("No paired nodes: pair the Windows device first.")
-    print("Monitoring trusted LAN nodes. Notifications on ONLINE transitions only.")
+    print("Monitoring trusted LAN nodes. Notifications on ONLINE and OFFLINE transitions.")
     print("No automatic model sharing or internet connection. Press Ctrl+C to stop.")
     try:
         watch_paired_nodes(client_id=args.client_id, stop_event=stop,
