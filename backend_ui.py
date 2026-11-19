@@ -1,7 +1,6 @@
 """Backend selection and Colibri integration for the existing workspace."""
 
 import os
-import threading
 import time
 import tkinter as tk
 from tkinter import messagebox, ttk
@@ -297,17 +296,8 @@ class BackendMixin:
         def event(item):
             self.workspace_events.put(("agent_event", request, item, None))
 
-        def approval(action):
-            decision = {"approved": False, "event": threading.Event(), "action": action}
-            self.workspace_events.put(("approval", request, decision, None))
-            while not decision["event"].wait(.1):
-                if cancel.is_set() or self.closed:
-                    return False
-            if decision["approved"] and not cancel.is_set():
-                return ({"approved": True, "destination": decision["destination"]}
-                        if decision.get("destination") else True)
-            return False
-
+        approval = self.agent_approver(request, cancel)
+        checkpoint = self.agent_checkpoint
         try:
             if self.colibri_manageable():
                 event({"type": "status", "text": "Checking that colibri is running..."})
@@ -317,7 +307,7 @@ class BackendMixin:
             client = self.colibri_client()
             result = run_agent(client.url, model, root, messages, event, approval,
                                cancel_event=cancel, context_length=context,
-                               chat_fn=client.agent_chat, file_limit=self.agent_file_limit)
+                               chat_fn=client.agent_chat, file_limit=self.agent_file_limit, checkpoint=checkpoint)
             self.workspace_events.put(("agent_done", request, result, None))
         except Exception as error:
             self.workspace_events.put(("agent_done", request, None, str(error)))

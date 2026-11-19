@@ -67,6 +67,16 @@ def main(argv=None):
             print(f"Shared memory is unavailable: {error}", file=sys.stderr)
             memory = None
         workspace = WebWorkspace(store, memory)
+
+        def daily_backup():
+            try:
+                done = workspace.backup_if_due()
+                if done:
+                    print(f"Backed up {done[1]} chats to {done[0]}.", flush=True)
+            except (OSError, ValueError) as error:
+                print(f"The daily chat backup failed: {error}", file=sys.stderr, flush=True)
+
+        threading.Thread(target=daily_backup, name="daily-backup", daemon=True).start()
         try:
             server = WorkspaceServer(workspace, args.host, args.port)
         except (OSError, ValueError) as error:

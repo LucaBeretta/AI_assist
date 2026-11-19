@@ -16,6 +16,7 @@ approvals, which stay in the desktop window for now.
 from copy import deepcopy
 import threading
 
+from app_core import documents
 from app_core.conversation import chat_messages
 from app_core.streaming import StreamStopped, run_stoppable
 from chat_store import ChatStoreError
@@ -71,6 +72,11 @@ class ChatService:
                 self._records = self.store.list_chats()
             return list(self._records)
 
+    def reload(self):
+        """Forget the cached list, after files changed outside the service (a restore)."""
+        with self.lock:
+            self._records = None
+
     def _remember(self, record):
         with self.lock:
             if self._records is not None:
@@ -84,7 +90,7 @@ class ChatService:
     @staticmethod
     def summary(record):
         return {key: record.get(key) for key in ("id", "title", "mode", "model", "backend", "updated_at",
-                                                    "created_at", "project_path", "context_length")} | {
+                                                    "created_at", "project_path", "context_length", "library_path")} | {
             "backend": record.get("backend", "Ollama"), "message_count": len(record.get("messages", []))}
 
     def list(self, query="", mode=None):
@@ -217,7 +223,17 @@ class ChatService:
             others = self.records()
         emit({"type": "user", "message": record["messages"][-1]})
         shared = (self.shared_memory.context(text, others, chat_id) if self.shared_memory else "")
-        messages = chat_messages(record["messages"], shared)
+        found, documents_context = [], ""
+        if record.get("library_path"):
+            try:
+                folder = documents.library(record["library_path"], self.store.directory)
+                folder.update(progress=lambda status: emit({"type": "status", "text": status}), cancel=cancel_event)
+                found = folder.search(text)
+                documents_context = documents.context_message(found, record["library_path"])
+            except documents.LibraryError as error:
+                emit({"type": "error", "error": f"The chat's document folder could not be used: {error}"}, terminal=True)
+                return
+        messages = chat_messages(record["messages"], shared, documents_context)
         provider = self.provider_factory()
         parts = []
 
@@ -242,8 +258,11 @@ class ChatService:
         if stopped and not (answer or "").strip():
             emit({"type": "done", "chat": deepcopy(record), "stopped": True}, terminal=True)
             return
+        footer = documents.sources_footer(found)
+        if footer:
+            emit({"type": "chunk", "text": footer})
         with self.lock:
             latest = self.get(chat_id)
-            latest["messages"].append({"role": "assistant", "content": answer})
+            latest["messages"].append({"role": "assistant", "content": answer + footer})
             saved = self._save(latest)
         emit({"type": "done", "chat": saved, "stopped": stopped}, terminal=True)

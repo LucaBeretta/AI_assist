@@ -173,9 +173,16 @@ class DeveloperPanelMixin:
         self.changes_list = ttk.Combobox(changes, state="disabled", font=("Segoe UI", 9))
         self.changes_list.pack(fill="x", pady=(0, 8))
         self.changes_list.bind("<<ComboboxSelected>>", self.preview_change)
+        self.undo_button = self.button(
+            changes, "Undo the AI's last task...", self.undo_last_task,
+            c["sidebar_hover"], c["ink"], c["border"],
+        )
+        self.undo_button.config(font=("Segoe UI", 9), pady=7, state="disabled")
+        self.undo_button.pack(side="bottom", fill="x", pady=(6, 6))
         self.changes_preview = self._developer_text(changes)
         self.changes_preview.pack(fill="both", expand=True, pady=(0, 6))
         self.applied_changes = []
+        self.undo_point = None
         self.refresh_changes()
 
         self.code_list = ttk.Combobox(output, state="readonly", font=("Segoe UI", 9))
@@ -230,6 +237,7 @@ class DeveloperPanelMixin:
                 if index < len(self.visible_project_files)]
 
     def refresh_changes(self):
+        self.refresh_undo()
         self.applied_changes = [event for event in self.dev_activity if event.get("type") == "changed"]
         self.changes_list.config(
             values=[f"{index + 1}. {event.get('path') or 'Project file'}"
@@ -243,6 +251,17 @@ class DeveloperPanelMixin:
             self.changes_list.set("")
             self.replace_text(self.changes_preview,
                               "No applied changes yet.\n\nReviewed file edits appear here after you apply them.")
+
+    def refresh_undo(self):
+        """Find the newest task of this chat whose file changes can still be undone."""
+        store = getattr(self, "checkpoints", None)
+        chat_id = (getattr(self, "current_chat", None) or {}).get("id", "")
+        try:
+            self.undo_point = store.latest_undoable(chat_id) if store is not None else None
+        except OSError:
+            self.undo_point = None
+        busy = self.busy() if hasattr(self, "nav_buttons") else False
+        self.undo_button.config(state="normal" if self.undo_point and not busy else "disabled")
 
     def preview_change(self, event=None):
         index = self.changes_list.current()

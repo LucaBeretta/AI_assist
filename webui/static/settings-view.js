@@ -1,9 +1,10 @@
 // @ts-check
 /** Settings: engine, appearance, shared memory, the connection log, and what this interface cannot do. */
 import { h, icon, replace } from "./dom.js";
+import { formatBytes } from "./format.js";
 
 const SECTIONS = [["settings-engine", "Engine"], ["settings-appearance", "Appearance"], ["settings-memory", "Shared memory"],
-  ["settings-log", "Connection log"], ["settings-safety", "Safety"]];
+  ["settings-backups", "Backups"], ["settings-log", "Connection log"], ["settings-safety", "Safety"]];
 
 /** @param {any} ctx */
 export function createSettingsSidebar(ctx) {
@@ -24,6 +25,7 @@ export function createSettingsView(ctx) {
   const appearance = h("div", { class: "card-row" });
   const memory = h("div", { class: "field" });
   const log = h("div");
+  const backupList = h("div");
   const element = h("div", { class: "view-root" },
     h("header", { class: "view-header" }, h("h1", { class: "view-title" }, "Settings")),
     h("div", { class: "view-body" }, h("div", { class: "page" },
@@ -36,6 +38,12 @@ export function createSettingsView(ctx) {
         h("h2", { id: "memory-title" }, "Shared memory"),
         h("p", { class: "muted" }, "Notes shared with every chat, plus short excerpts of related chats. You can also say “Remember that …” in a chat."),
         memory),
+      h("section", { class: "card", id: "settings-backups", tabindex: "-1", "aria-labelledby": "backups-title" },
+        h("div", { class: "card-row" }, h("h2", { id: "backups-title" }, "Backups"),
+          h("button", { class: "button button-small", type: "button", onClick: () => ctx.backupNow() }, "Back up now")),
+        h("p", { class: "muted" }, "Every chat and your shared notes are backed up once a day on this computer; the newest 14 are kept. "
+          + "Restoring adds chats that are missing and replaces damaged ones. It never changes a chat you still have."),
+        backupList),
       h("section", { class: "card", id: "settings-log", tabindex: "-1", "aria-labelledby": "log-title" },
         h("div", { class: "card-row" }, h("h2", { id: "log-title" }, "Connection log"),
           h("button", { class: "button button-small", type: "button", onClick: () => ctx.loadLog() }, icon("refresh"), "Refresh")),
@@ -82,6 +90,20 @@ export function createSettingsView(ctx) {
           h("div", { class: "card-row" }, count,
             h("button", { class: "button button-ghost", type: "button", onClick: () => { notes.value = ""; notes.dispatchEvent(new Event("input")); } }, "Clear notes"),
             h("button", { class: "button button-primary", type: "button", onClick: () => ctx.saveMemory(notes.value, enabled.checked) }, "Save")));
+      }
+    }
+    if (fresh || state.backups !== previous.backups) {
+      const data = state.backups;
+      if (!data) replace(backupList, h("div", { class: "skeleton" }));
+      else if (data.error) replace(backupList, h("div", { class: "notice is-danger", role: "alert" }, data.error));
+      else if (!data.backups.length) replace(backupList, h("p", { class: "empty-note" }, "No backups yet. Choose Back up now."));
+      else {
+        replace(backupList, h("ul", { class: "log", "aria-label": "Backups, newest first" }, data.backups.map((/** @type {any} */ item) => {
+          const label = new Date(item.created).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+          return h("li", { class: "backup-row" }, h("span", null, `${label}  ·  ${formatBytes(item.size)}`),
+            h("button", { class: "button button-small", type: "button", "aria-label": `Restore the backup from ${label}`,
+              onClick: () => ctx.restoreBackup(item.name, label) }, "Restore"));
+        })), h("p", { class: "muted mono" }, data.folder));
       }
     }
     if (fresh || state.log !== previous.log) {

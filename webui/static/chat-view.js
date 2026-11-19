@@ -143,8 +143,10 @@ export function createChatView(ctx) {
 
     // Header
     title.textContent = chat ? chat.title : "New chat";
+    const library = chat?.library_path ? String(chat.library_path).split(/[\\/]/).filter(Boolean).pop() : "";
     subtitle.textContent = chat
       ? `${chat.backend || "Ollama"} / ${chat.model || "no model"}${developer ? "  /  developer chat (read-only here)" : ""}`
+        + (library ? `  /  documents: ${library}` : "")
       : `${state.status?.engine || "engine"} / ${state.selectedModel || "choose a model"}`;
     replace(actions, chat && !developer ? [
       h("button", { class: "icon-button", type: "button", "aria-label": "Rename chat", title: "Rename", onClick: () => ctx.renameChat(chat),
@@ -181,9 +183,11 @@ export function createChatView(ctx) {
         messages.appendChild(h("article", { class: "message is-assistant", "aria-busy": "true", "aria-label": "AI Assist, writing" },
           h("div", { class: "message-header" }, h("span", { class: "message-role" }, "◇ ai-assist"),
             h("span", { class: "writing", "aria-hidden": "true" }, h("span"), h("span"), h("span")),
-            h("span", null, state.streaming.stopping ? "stopping…" : "writing…")),
+            h("span", { class: "stream-status" }, state.streaming.stopping ? "stopping…" : "writing…")),
           streamNode));
       }
+      const status = messages.querySelector(".stream-status");
+      if (status) status.textContent = state.streaming.stopping ? "stopping…" : state.streaming.text ? "writing…" : state.streaming.status || "writing…";
       if (state.streaming.text !== previous?.streaming?.text) {
         const nearBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 120;
         replace(streamNode, renderMarkdown(state.streaming.text, document));

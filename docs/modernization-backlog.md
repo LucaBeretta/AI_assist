@@ -11,12 +11,15 @@ Sizes: S (≤1 day), M (2–4 days), L (1–2 weeks). Each item names its eviden
 - The update checker knows the new packages and page files (audit R2).
 - Web workspace (preview): loopback API and a page with streaming chat, Stop, Markdown, chats, models, settings, memory, connection log, a read-only developer view, inspector, themes, and responsive layout.
 - Tests: core, API contract and security, frontend unit tests (Node), page rules, and a browser end-to-end tool.
+- **P0-1, approvals as a core service** (`app_core/approvals.py`). The rules are now kept in the core: actions are declined unless approved, each is answered once, and a command needs its second check plus the full wait, so an early approval is refused even if a button skips the dialog. Every approved command is logged. The desktop window, for both Ollama and Colibri, uses it. Still to do for the web workspace: a registry of pending decisions that a page can list and answer (part of P1-1).
+
+- **Undo for the agent's file changes** (`app_core/checkpoints.py`): originals saved per task outside the project; undo restores them and leaves files you edited afterwards alone.
+- **Automatic daily backups with restore** (`app_core/backups.py`): 14 kept; restore adds missing chats, replaces damaged ones, never changes a chat you still have.
 
 ## P0
 
 | # | Item | Size | Depends on | Done when |
 | --- | --- | --- | --- | --- |
-| P0-1 | **Approvals as a core service** (`AgentSession`): pending edit and command approvals become objects any interface can resolve, with the two-step, three-second confirmation enforced in the core rather than in the dialog. Tk is migrated first. | M | — | Tk approval tests pass through the service; the timing is enforced server-side. |
 | P0-2 | **Sandboxed agent commands** (`Executor` with Seatbelt, bubblewrap/Landlock, and Windows restricted-token backends). Fail closed: no network, writes to the project only. | L | — | Per-OS tests show network refused and writes outside the project refused. |
 | P0-3 | **CI** on Windows, macOS and Linux (Xvfb), Python 3.9 and 3.13, plus `node --test`. | S | — | Matrix green on every push; the support-matrix rows show evidence. |
 | P0-4 | **Private settings everywhere:** `appearance.settings`, `colibri.settings`, the hybrid config and `firewall-lift.json` go through `app_core.settings.write_json` (audit S4, C6). | S | — | A POSIX test shows 0600 for each file. |
@@ -25,7 +28,7 @@ Sizes: S (≤1 day), M (2–4 days), L (1–2 weeks). Each item names its eviden
 
 | # | Item | Size | Depends on | Done when |
 | --- | --- | --- | --- | --- |
-| P1-1 | **Developer agent in the web workspace**, behind P0-1: an approval UI with the diff and command shown, Save As choice, and the same two-step command confirmation. New routes are added to the pinned list with a security review. | L | P0-1 | e2e: an edit is reviewed and applied; a rejected command never runs. |
+| P1-1 | **Developer agent in the web workspace**, using `app_core.approvals`: a registry of pending decisions, an approval UI with the diff and command shown, Save As choice, and the same two-step command confirmation. New routes are added to the pinned list with a security review. | L | P0-1 (done) | e2e: an edit is reviewed and applied; a rejected command never runs. |
 | P1-2 | **Chat metadata index** off the UI thread: title, mode, model, `updated_at`, size; full-text search in a worker (audit P1: 2.24 s per refresh at 200×200). | M | — | `profile_workflows.py` shows refresh under 50 ms at 200×200. |
 | P1-3 | **Schema version for chats**, with a backup zip before any migration that rewrites files (audit C7). | S | — | Old and new readers round-trip; damaged and newer files are skipped, not overwritten. |
 | P1-4 | **Model lifecycle service** (load, unload, start/stop Colibri) shared by both UIs; web: Run all / Stop all. | M | — | `BackendMixin.model_worker` delegates; web buttons work. |

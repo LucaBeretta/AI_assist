@@ -106,6 +106,8 @@ class ChatStore:
         for field in ("title", "model", "draft", "project_path"):
             if not isinstance(chat.get(field), str):
                 raise ChatStoreError(f"Chat {field} must be text.")
+        if not isinstance(chat.get("library_path", ""), str):
+            raise ChatStoreError("Chat library_path must be text.")
         project_files = chat.get("project_files", [])
         if not isinstance(project_files, list) or not all(isinstance(path, str) for path in project_files):
             raise ChatStoreError("Chat project_files must be a list of text paths.")
@@ -236,13 +238,15 @@ class ChatStore:
         }
         return chat
 
-    def export_all(self, destination, unsaved=None, deleted=()):
-        """Write every readable chat to one .zip: the JSON files (copy them back into
-        the chats folder to restore) and a Markdown copy of each.
+    def export_all(self, destination, unsaved=None, deleted=(), extras=None):
+        """Write every readable chat to one .zip: the JSON files (restore them with
+        Chat options > Restore chats from a backup) and a Markdown copy of each.
 
         ``unsaved`` maps chat ids to records not yet on disk; ``deleted`` lists
-        ids being deleted. Damaged files are left out and listed in ``errors``.
-        Returns the number of chats written."""
+        ids being deleted; ``extras`` maps archive names to other files to include
+        when they exist (shared memory). Damaged files are left out and listed in
+        ``errors``. Returns the number of chats written."""
+        extras = dict(extras or {})
         destination = Path(destination).expanduser()
         unsaved = dict(unsaved or {})
         deleted = set(deleted)
@@ -257,9 +261,14 @@ class ChatStore:
             with zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_DEFLATED) as archive:
                 archive.writestr("README.txt", (
                     "AI Assist chat backup\n\n"
-                    "chats/ holds the saved chats. To restore, copy those .json files into the AI Assist\n"
-                    "chats folder (on Windows %LOCALAPPDATA%\\AI Assist\\chats, elsewhere ~/.aiassist/chats)\n"
-                    "while AI Assist is closed.\n\nreadable/ holds the same conversations as Markdown.\n"))
+                    "chats/ holds the saved chats. To restore, use Chat options > Restore chats from a backup\n"
+                    "in AI Assist: it adds missing chats and never changes a chat you still have. By hand, copy\n"
+                    "the .json files into the AI Assist chats folder (on Windows %LOCALAPPDATA%\\AI Assist\\chats,\n"
+                    "elsewhere ~/.aiassist/chats) while AI Assist is closed.\n\n"
+                    "readable/ holds the same conversations as Markdown.\n"))
+                for name, path in extras.items():
+                    if Path(path).is_file():
+                        archive.write(path, name)
                 for chat in chats:
                     if chat["id"] in unsaved:
                         archive.writestr(f"chats/{chat['id']}.json", json.dumps(chat, ensure_ascii=False, indent=2))
@@ -318,6 +327,36 @@ class ChatStore:
         if record["title"] == NEW_CHAT_TITLE and not record.get("_manual_title", False):
             record["title"] = title_from(record["messages"]) or record["title"]
         record["updated_at"] = _utc_now()
+        self._write(record, path)
+        return record
+
+    def validate(self, chat, expected_id=None):
+        """The checked copy of a chat record, or ChatStoreError; nothing is written."""
+        return self._validate(chat, expected_id=expected_id)
+
+    def import_record(self, chat):
+        """Write a chat from a backup exactly as it was saved (title and times kept).
+        Refuses to replace a file that exists: a chat you still have is never changed."""
+        record = self._validate(chat)
+        path = self._path(record["id"])
+        if path.exists():
+            raise ChatStoreError(f"Saved chat {record['id']} already exists.")
+        self._write(record, path)
+        return record
+
+    def set_aside_damaged(self, chat_id):
+        """Move an unreadable chat file into ``damaged/`` (never deleted), so a backup can replace it."""
+        path = self._path(chat_id)
+        folder = self.directory / "damaged"
+        try:
+            ensure_private_directory(folder)
+            target = folder / f"{chat_id}.{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')}.json"
+            os.replace(path, target)
+        except OSError as error:
+            raise ChatStoreError(f"Could not move the damaged chat {chat_id} aside: {error}") from error
+        return target
+
+    def _write(self, record, path):
         temporary_path = None
         try:
             payload = json.dumps(record, ensure_ascii=False, allow_nan=False, indent=2) + "\n"
@@ -339,7 +378,6 @@ class ChatStore:
                     temporary_path.unlink(missing_ok=True)
                 except OSError:
                     pass
-        return record
 
     def rename(self, chat_id, title):
         """Persist a manual title, which subsequent message saves preserve."""

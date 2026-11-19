@@ -1,6 +1,7 @@
 """Conversation workspace and reviewed developer-agent interactions."""
 
 from copy import deepcopy
+import math
 from pathlib import Path
 import queue
 import threading
@@ -8,6 +9,9 @@ import time
 import tkinter as tk
 from tkinter import END, filedialog, messagebox, scrolledtext, simpledialog, ttk
 
+from app_core import approvals, backups, documents
+from app_core.checkpoints import CheckpointError, CheckpointStore
+from backup_ui import BackupWindow
 from app_core import conversation as conversation_rules
 from app_core import settings as app_settings
 from app_core.settings import load_file_limit  # noqa: F401  (long-standing name)
@@ -20,7 +24,7 @@ from hourly_status import HourlyStatusReport
 from coding_agent import FILE_LIMIT_CHOICES, estimate_tokens, run_agent
 from developer_tools import build_project_context, extract_code_blocks, fetch_model_capabilities, list_project_files, read_project_file
 from message_widgets import render_message
-import network_gate
+import network_gate  # noqa: F401  (patched through this module by tests; approvals log via app_core)
 from response_metrics import metrics_summary, response_metrics
 from shared_memory import MAX_NOTES, SharedMemory, memory_note
 from appearance import DARK_THEMES, Appearance
@@ -148,6 +152,14 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
             self.chat_store = None
             self.storage_error = str(error)
         self.saver = BackgroundSaves(self.chat_store) if self.chat_store else None
+        # Originals of files the agent changes, per task, so a task can be undone.
+        self.checkpoints = CheckpointStore(self.chat_store.directory / "checkpoints") if self.chat_store else None
+        self.agent_checkpoint = None
+        self.backup_running = False
+        self.backup_job = None
+        self.backup_window = None
+        self.answer_footer = ""
+        self.documents_indexing = False
         self.initialize_backend()
         self.initialize_hybrid()
         self.agent_settings = self.chat_store.directory / "agent.settings" if self.chat_store else None
@@ -171,6 +183,9 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         self.root.bind("<Control-Shift-l>", lambda event: self.appearance.toggle())
         self.refresh_theme_controls()
         self.update_checker = UpdateChecker(self)
+        if self.saver:
+            # The daily backup check runs a little after start, then every hour.
+            self.backup_job = self.root.after(5000, self.backup_if_due)
         self.hourly_status = HourlyStatusReport(self)
 
     def configure_styles(self):
@@ -348,6 +363,10 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         self.chat_menu.add_command(label="Rename chat", command=self.rename_chat)
         self.chat_menu.add_command(label="Export chat...", command=self.export_chat)
         self.chat_menu.add_command(label="Back up all chats...", command=self.backup_chats)
+        self.chat_menu.add_command(label="Restore chats from a backup...", command=self.open_backups)
+        self.chat_menu.add_separator()
+        self.chat_menu.add_command(label="Use documents from a folder...", command=self.choose_documents)
+        self.chat_menu.add_command(label="Stop using documents", command=self.stop_using_documents)
         self.chat_menu.add_separator()
         self.chat_menu.add_command(label="Delete chat", command=self.delete_chat)
         self.chat_actions = self.button(header, "Chat options", lambda: self.chat_menu.tk_popup(self.chat_actions.winfo_rootx(), self.chat_actions.winfo_rooty() + self.chat_actions.winfo_height()),
@@ -514,9 +533,14 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         for button in (self.choose_project_button, self.use_project_button, self.project_entry, self.attach_button):
             button.config(state="disabled" if busy else "normal")
         self.stop_agent_button.config(state="normal" if self.agent_active else "disabled")
+        self.undo_button.config(state="normal" if self.undo_point and not busy else "disabled")
         self.chat_actions.config(state="normal" if (self.current_chat or self.history_records) and not busy else "disabled")
         for label in ("Rename chat", "Export chat...", "Delete chat"):
             self.chat_menu.entryconfigure(label, state="normal" if self.current_chat else "disabled")
+        ordinary = self.current_mode == "chat" and self.chat_store is not None and not self.documents_indexing
+        self.chat_menu.entryconfigure("Use documents from a folder...", state="normal" if ordinary else "disabled")
+        self.chat_menu.entryconfigure("Stop using documents", state="normal" if ordinary and
+                                      (self.current_chat or {}).get("library_path") else "disabled")
         ready = bool(self.model_name.get()) and not busy and (self.current_mode != "dev" or self.project_ready)
         self.composer_label.config(text="Describe your task" if self.current_mode == "dev" else "Message")
         self.input_box.config(state="normal" if ready else "disabled")
@@ -548,7 +572,10 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
             if self.current_mode == "dev" and title == "New chat":
                 title = Path(self.project_path).name if self.project_path else "Developer"
             self.heading_label.config(text=title)
-            self.chat_subtitle.config(text=(self.model_name.get() or "Choose a model") + ("  /  Coding agent" if self.current_mode == "dev" else "  /  Local conversation"))
+            library = (self.current_chat or {}).get("library_path") if self.current_mode == "chat" else ""
+            self.chat_subtitle.config(text=(self.model_name.get() or "Choose a model") + (
+                "  /  Coding agent" if self.current_mode == "dev" else
+                f"  /  Documents: {Path(library).name}" if library else "  /  Local conversation"))
 
     def show_section(self, section):
         if self.closing:
@@ -1151,6 +1178,44 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
             self.refresh_changes()
         self.refresh_verification()
 
+    def undo_last_task(self):
+        """Put back the files the AI's last task in this chat changed, after the person confirms."""
+        if self.busy() or self.checkpoints is None:
+            return
+        self.refresh_undo()
+        point = self.undo_point
+        if point is None:
+            self.set_status("There are no AI file changes to undo in this chat.")
+            return
+        paths = [entry["path"] for entry in point["files"]]
+        shown = "\n".join(paths[:12]) + (f"\n...and {len(paths) - 12} more" if len(paths) > 12 else "")
+        if not messagebox.askyesno(
+                "Undo the AI's changes?",
+                "These files go back to how they were before the AI's last task in this chat "
+                "(files it created are removed):\n\n" + shown + "\n\nA file you changed after the AI is left as it is. "
+                "Changes made by commands the AI ran cannot be undone here.", parent=self.root):
+            return
+        try:
+            report = self.checkpoints.undo(point["id"])
+        except (CheckpointError, OSError) as error:
+            self.set_status(f"Could not undo: {error}", error=True)
+            self.refresh_undo()
+            return
+        done = len(report["restored"]) + len(report["removed"])
+        lines = [f"Undid the AI's changes to {done} file{'s' if done != 1 else ''}."]
+        lines += [f"Restored: {path}" for path in report["restored"]]
+        lines += [f"Removed (created by the AI): {path}" for path in report["removed"]]
+        lines += [f"Left as it is ({reason}): {path}" for path, reason in report["kept"]]
+        self.log_activity({"type": "undone", "text": "\n".join(lines)})
+        self.persist_current()
+        if self.project_path:
+            self.scan_project()
+        self.refresh_undo()
+        kept = len(report["kept"])
+        self.set_status(lines[0] + (f" {kept} file{'s were' if kept != 1 else ' was'} left as it is; see Activity."
+                                    if kept else ""), error=bool(kept))
+        self.update_controls()
+
     def send_prompt(self, event=None):
         if self.busy() or not self.model_name.get():
             return "break"
@@ -1220,14 +1285,23 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
                 self.project_context, self.dev_activity)
             messages = conversation_rules.agent_messages(self.conversation, self.agent_history, prompt,
                                                          system_prompt, shared_context)
+            self.agent_checkpoint = (self.checkpoints.begin((self.current_chat or {}).get("id", ""), self.project_path)
+                                     if self.checkpoints else None)
             threading.Thread(target=self.agent_worker, args=(self.request_serial, self.ollama_host(), model, self.project_path,
                                                              messages, context or 4096, self.agent_cancel), daemon=True).start()
         else:
             messages = conversation_rules.chat_messages(self.conversation, shared_context)
             self.set_status(f"{model} is thinking...")
             self.chat_cancel = threading.Event()
-            threading.Thread(target=self.fetch_response, args=(messages, prompt, model, context, self.chat_cancel),
-                             daemon=True).start()
+            self.answer_footer = ""
+            library = (self.current_chat or {}).get("library_path")
+            if library and self.chat_store is not None:
+                threading.Thread(target=self.fetch_with_documents, daemon=True,
+                                 args=(messages, prompt, model, context, self.chat_cancel, library,
+                                       1 if shared_context else 0, self.request_serial)).start()
+            else:
+                threading.Thread(target=self.fetch_response, args=(messages, prompt, model, context, self.chat_cancel),
+                                 daemon=True).start()
         self.update_controls()
         return "break"
 
@@ -1301,17 +1375,8 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
     def agent_worker(self, request, host, model, root, messages, context, cancel):
         def event(item):
             self.workspace_events.put(("agent_event", request, item, None))
-        def approval(action):
-            decision = {"approved": False, "event": threading.Event(), "action": action}
-            self.workspace_events.put(("approval", request, decision, None))
-            while not decision["event"].wait(.1):
-                if cancel.is_set() or self.closed:
-                    return False
-            if decision["approved"] and not cancel.is_set():
-                if decision.get("destination"):
-                    return {"approved": True, "destination": decision["destination"]}
-                return True
-            return False
+        approval = self.agent_approver(request, cancel)
+        checkpoint = self.agent_checkpoint
         try:
             metadata_result = queue.Queue()
             def inspect_model():
@@ -1336,17 +1401,24 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
                 snapshot = dict(self.active_hybrid_config)
                 def worker(worker_messages, emit):
                     return run_agent(host, model, root, worker_messages, emit, approval,
-                                     cancel_event=cancel, context_length=context, file_limit=self.agent_file_limit)
+                                     cancel_event=cancel, context_length=context, file_limit=self.agent_file_limit,
+                                     checkpoint=checkpoint)
                 try:
                     result = self.run_with_quality_review(worker, messages, root, event, cancel, host, model, snapshot)
                 finally:
                     self.health_poll_at = 0
             else:
                 result = run_agent(host, model, root, messages, event, approval, cancel_event=cancel, context_length=context,
-                                   file_limit=self.agent_file_limit)
+                                   file_limit=self.agent_file_limit, checkpoint=checkpoint)
             self.workspace_events.put(("agent_done", request, result, None))
         except Exception as error:
             self.workspace_events.put(("agent_done", request, None, str(error)))
+
+    def agent_approver(self, request, cancel):
+        """The agent's approve_action: each decision is shown in this window, and
+        app_core.approvals enforces the rules (declined by default, two checks for commands)."""
+        return approvals.approver(lambda decision: self.workspace_events.put(("approval", request, decision, None)),
+                                  cancel, lambda: self.closed)
 
     def review_action(self, decision):
         action = decision["action"]
@@ -1359,12 +1431,11 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
             destination = filedialog.asksaveasfilename(parent=self.root, title="Where should this new file be saved?",
                 initialdir=str(directory), initialfile=proposed.name, defaultextension=proposed.suffix)
             if not destination or self.agent_cancel.is_set() or self.closing:
-                decision["event"].set()
+                approvals.resolve(decision, False)
                 return
             if Path(destination).resolve() != proposed.resolve():
-                decision["destination"] = str(Path(destination).resolve())
-                decision["approved"] = True
-                decision["event"].set()
+                # The agent proposes the change again at the chosen file, for a fresh review there.
+                approvals.resolve(decision, True, destination=str(Path(destination).resolve()))
                 return
         c = self.COLORS
         window = tk.Toplevel(self.root)
@@ -1403,7 +1474,7 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         body.config(state="disabled")
         window.protocol("WM_DELETE_WINDOW", lambda: self.resolve_approval(decision, window, False))
 
-    COMMAND_CONFIRM_SECONDS = 3
+    COMMAND_CONFIRM_SECONDS = approvals.COMMAND_CONFIRM_SECONDS
 
     def confirm_command(self, decision, window, heading, details, button):
         """The second check before a command runs: it is a separate program the internet gate cannot see."""
@@ -1411,27 +1482,29 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         details.configure(fg=self.COLORS["amber"], text=(
             "It runs as a separate program, outside the internet gate. If it uses the internet, AI Assist cannot "
             "see or stop it; only Python that it starts is still checked. Run it only if you expect what it does."))
+        # The wait is kept by app_core.approvals: an earlier approval would be refused there.
+        approvals.begin_second_check(decision, self.COMMAND_CONFIRM_SECONDS)
 
-        def tick(remaining):
+        def tick():
             if not window.winfo_exists() or decision["event"].is_set():
                 return
-            if remaining > 0:
-                button.configure(text=f"Run ({remaining})", state="disabled")
-                window.after(1000, tick, remaining - 1)
+            left = approvals.seconds_left(decision)
+            if left > 0:
+                button.configure(text=f"Run ({math.ceil(left)})", state="disabled")
+                window.after(min(250, int(left * 1000) + 10), tick)
             else:
                 button.configure(text="Run", state="normal", command=lambda: self.run_confirmed(decision, window))
 
-        tick(self.COMMAND_CONFIRM_SECONDS)
+        tick()
 
     def run_confirmed(self, decision, window):
-        action = decision["action"]
-        network_gate.note_outside("Developer agent command", action["command"], action.get("description", ""))
+        # app_core.approvals writes the command to the connection log and announces it.
         self.resolve_approval(decision, window, True)
 
     def resolve_approval(self, decision, window, approved):
+        approvals.resolve(decision, approved)
         if not decision["event"].is_set():
-            decision["approved"] = approved
-            decision["event"].set()
+            return  # A command approved before its second check finished: the dialog stays open.
         if window.winfo_exists():
             window.grab_release()
             window.destroy()
@@ -1449,7 +1522,16 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
                 kind, request, data, error = self.workspace_events.get_nowait()
             except queue.Empty:
                 break
-            if kind == "chat_chunk" and request == self.request_serial and self.is_waiting and not self.agent_active:
+            if kind in ("backup", "restore"):
+                self.finish_backup_work(kind, data, error)
+            elif kind == "doc_index":
+                self.finish_documents_index(data, error)
+            elif kind == "doc_status" and (request == 0 and self.documents_indexing
+                                           or request == self.request_serial and self.is_waiting):
+                self.set_status(data)
+            elif kind == "doc_sources" and request == self.request_serial:
+                self.answer_footer = data
+            elif kind == "chat_chunk" and request == self.request_serial and self.is_waiting and not self.agent_active:
                 self.append_stream(data)
             elif kind == "chat_metrics" and request == self.request_serial:
                 self.last_metrics = response_metrics(data)
@@ -1507,6 +1589,10 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
             self.status_bar.refresh_now()
         self.activity.stop()
         self.activity.pack_forget()
+        # The documents an answer drew on are listed under it and saved with it.
+        footer, self.answer_footer = self.answer_footer, ""
+        if response and response.strip() and not error:
+            response += footer
         if stopped:
             if response and response.strip():
                 self.conversation.append({"role": "assistant", "content": response})
@@ -1657,6 +1743,146 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         self.set_status(f"Backed up {count} chat{'s' if count != 1 else ''} to {Path(destination).name}."
                         + (f" {skipped} damaged file{'s were' if skipped != 1 else ' was'} left out." if skipped else ""))
 
+    # ------------------------------------------------------------ chat with your documents
+
+    def choose_documents(self):
+        """Attach a folder of documents to this chat and read it in the background."""
+        if self.busy() or self.current_mode != "chat" or self.chat_store is None or self.documents_indexing:
+            return
+        folder = filedialog.askdirectory(parent=self.root, title="Choose a folder of documents for this chat")
+        if not folder:
+            return
+        try:
+            library = documents.library(folder, self.chat_store.directory)
+        except documents.LibraryError as error:
+            self.set_status(str(error), error=True)
+            return
+        if self.current_chat is None:
+            self.start_new_chat()
+        if self.current_chat is None:
+            return
+        self.set_chat_library(str(library.root))
+        self.documents_indexing = True
+        self.set_status(f"Reading the documents in {library.root.name}...")
+        self.update_controls()
+
+        def work():
+            try:
+                stats, error = library.update(progress=lambda text: self.workspace_events.put(("doc_status", 0, text, None))), None
+            except (documents.LibraryError, OSError) as failure:
+                stats, error = None, str(failure)
+            self.workspace_events.put(("doc_index", 0, (library.root.name, stats), error))
+
+        threading.Thread(target=work, name="documents", daemon=True).start()
+
+    def stop_using_documents(self):
+        if self.busy() or not (self.current_chat or {}).get("library_path"):
+            return
+        self.set_chat_library("")
+        self.set_status("This chat no longer uses documents. The folder and its files are unchanged.")
+
+    def set_chat_library(self, folder):
+        record = dict(self.current_chat, library_path=folder)
+        if not folder:
+            record.pop("library_path", None)
+        self.current_chat = record
+        self.history_records = [record if item["id"] == record["id"] else item for item in self.history_records]
+        self.queue_save(record)
+        self.saved_snapshot = None
+        self.update_heading()
+        self.update_controls()
+
+    def fetch_with_documents(self, messages, prompt, model, context_length, cancel_event, folder, position, request):
+        """Search the chat's documents, then ask the model with the best passages (worker thread)."""
+        try:
+            library = documents.library(folder, self.chat_store.directory)
+            library.update(progress=lambda text: self.workspace_events.put(("doc_status", request, text, None)),
+                           cancel=cancel_event)
+            found = library.search(prompt)
+        except (documents.LibraryError, OSError) as error:
+            self.response_queue.put((prompt, None, f"The chat's document folder could not be used: {error}",
+                                     cancel_event.is_set()))
+            return
+        self.workspace_events.put(("doc_sources", request, documents.sources_footer(found), None))
+        messages = list(messages)
+        messages.insert(position, {"role": "system", "content": documents.context_message(found, folder)})
+        self.workspace_events.put(("doc_status", request, f"{model} is thinking, with {len(found)} passage"
+                                   f"{'s' if len(found) != 1 else ''} from your documents...", None))
+        self.fetch_response(messages, prompt, model, context_length, cancel_event)
+
+    def finish_documents_index(self, data, error):
+        self.documents_indexing = False
+        name, stats = data
+        if error:
+            self.set_status(f"Could not read the documents in {name}: {error}", error=True)
+        else:
+            text = (f"Documents ready: {stats['files']} file{'s' if stats['files'] != 1 else ''} from {name}, "
+                    f"{stats['passages']} passages.")
+            if stats["skipped"]:
+                path, reason = stats["skipped"][0]
+                text += (f" {len(stats['skipped'])} file{'s were' if len(stats['skipped']) != 1 else ' was'} skipped "
+                         f"(for example {path}: {reason}).")
+            self.set_status(text, error=bool(stats["skipped"]) and not stats["files"])
+        self.update_controls()
+
+    # ------------------------------------------------------------ automatic backups
+
+    def backup_if_due(self):
+        self.backup_job = None
+        if self.closed or self.closing or self.saver is None:
+            return
+        if not self.backup_running:
+            self.start_backup(manual=False)
+        self.backup_job = self.root.after(3600 * 1000, self.backup_if_due)
+
+    def start_backup(self, manual=False):
+        """Back up on the chat-saving worker, after any queued saves."""
+        if self.saver is None or self.backup_running:
+            return
+        self.backup_running = True
+        store, memory = self.chat_store, self.chat_store.directory / "shared.memory"
+        work = (lambda: backups.create(store, memory)) if manual else (lambda: backups.create_if_due(store, memory))
+        self.saver.call(work, lambda result, error: self.workspace_events.put(
+            ("backup", 0, (manual, result), str(error) if error else None)))
+
+    def start_restore(self, path):
+        if self.saver is None or self.backup_running:
+            return
+        self.persist_current()
+        self.backup_running = True
+        store, memory = self.chat_store, self.shared_memory
+        self.saver.call(lambda: backups.restore(store, path, memory), lambda result, error: self.workspace_events.put(
+            ("restore", 0, result, str(error) if error else None)))
+
+    def open_backups(self):
+        if self.chat_store is None:
+            self.set_status("Saved chats are unavailable, so there is nothing to back up or restore.", error=True)
+            return
+        if self.backup_window is not None and self.backup_window.window.winfo_exists():
+            self.backup_window.window.lift()
+            return
+        self.backup_window = BackupWindow(self)
+
+    def finish_backup_work(self, kind, data, error):
+        self.backup_running = False
+        if kind == "backup":
+            manual, result = data
+            if error:
+                text = f"The chat backup failed: {error}"
+                self.set_status(text, error=True)
+            elif result:
+                text = f"Backed up {result[1]} chat{'s' if result[1] != 1 else ''} to {result[0].name}."
+                if manual:
+                    self.set_status(text)
+            else:
+                text = "Today's backup already exists."
+        else:
+            text = f"Could not restore: {error}" if error else backups.describe(data)
+            self.set_status(text, error=bool(error))
+            self.refresh_history()
+        if self.backup_window is not None:
+            self.backup_window.finished(text)
+
     def show_runtime_status(self, event=None):
         detail = metrics_summary(self.last_metrics)
         messagebox.showinfo("Model runtime status", self.model_status["text"] + ("\n\nLast response: " + detail if detail else ""), parent=self.root)
@@ -1702,10 +1928,12 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         self.agent_cancel.set()
         for decision, window in list(self.approvals):
             self.resolve_approval(decision, window, False)
-        for job in (self.draft_job, self.search_job):
+        for job in (self.draft_job, self.search_job, self.backup_job):
             if job:
                 self.root.after_cancel(job)
-        self.draft_job = self.search_job = None
+        self.draft_job = self.search_job = self.backup_job = None
+        if self.backup_window is not None and self.backup_window.window.winfo_exists():
+            self.backup_window.window.destroy()
         self.finish_close()
 
     def finish_close(self):

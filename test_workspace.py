@@ -511,6 +511,23 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         noted.assert_called_once_with("Developer agent command", "python -m pytest", "Run the tests")
         self.assertFalse(self.app.approvals)
 
+    def test_an_early_command_approval_is_refused_by_the_core_and_the_dialog_stays(self):
+        decision = dict(approved=False, event=threading.Event(), action=dict(
+            kind="run_command", command="rm -rf build", cwd=str(self.project), description="Clean"))
+        with patch("workspace_ui.network_gate.note_outside") as noted:
+            self.app.review_action(decision)
+            window = self.app.approvals[-1][1]
+            self.app.resolve_approval(decision, window, True)  # as if a button skipped both checks
+            self.assertFalse(decision["event"].is_set())
+            self.assertTrue(window.winfo_exists())
+            self.assertEqual(len(self.app.approvals), 1)
+            reject = next(widget for widget in descendants(window)
+                          if isinstance(widget, tk.Button) and widget.cget("text") == "Reject")
+            reject.invoke()
+        self.assertEqual((decision["event"].is_set(), decision["approved"]), (True, False))
+        noted.assert_not_called()
+        self.assertFalse(self.app.approvals)
+
     def test_picking_another_file_returns_destination_for_fresh_review(self):
         chosen = self.folder / "chosen.py"
         decision = dict(approved=False, event=threading.Event(), action=dict(kind="write_file",
@@ -937,6 +954,74 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         self.assertEqual([item["role"] for item in saved["messages"]], ["user", "assistant", "user", "assistant"])
         native_tool = next(item for item in saved["agent_history"] if item["role"] == "tool")
         self.assertEqual(native_tool, {"role": "tool", "tool_name": "read_file", "content": self.original_code})
+
+    def test_a_chat_answers_from_a_folder_of_documents_and_lists_its_sources(self):
+        documents_folder = self.folder / "manuals"
+        documents_folder.mkdir()
+        (documents_folder / "water.md").write_text("To purify water, boil it for one full minute.", encoding="utf-8")
+        (documents_folder / ".env").write_text("SECRET=never", encoding="utf-8")
+        with patch("workspace_ui.filedialog.askdirectory", return_value=str(documents_folder)):
+            self.app.chat_menu.invoke("Use documents from a folder...")
+        self.wait_for(lambda: not self.app.documents_indexing, "documents read")
+        self.assertIn("Documents ready: 1 file from manuals", self.app.status_label.cget("text"))
+        self.assertIn("Documents: manuals", self.app.chat_subtitle.cget("text"))
+        self.set_input("How long should I boil water to purify it?")
+        self.app.send_button.invoke()
+        self.wait_for(lambda: not self.app.is_waiting, "answer with documents")
+        sent = self.request.call_args.args[0]
+        system = "\n".join(item["content"] for item in sent if item["role"] == "system")
+        self.assertIn("boil it for one full minute", system)
+        self.assertNotIn("SECRET", system)
+        saved = self.load_saved(self.app.current_chat["id"])
+        self.assertEqual(saved["library_path"], str(documents_folder.resolve()))
+        self.assertEqual(saved["messages"][-1]["content"],
+                         "A local answer.\n\n---\nSources from your documents:\n[1] water.md, from line 1")
+        self.app.chat_menu.invoke("Stop using documents")
+        self.assertNotIn("library_path", self.load_saved(self.app.current_chat["id"]))
+
+    def test_back_up_now_and_restore_a_deleted_chat_from_the_window(self):
+        self.set_input("A chat worth keeping")
+        self.app.conversation.append(dict(role="user", content="A chat worth keeping"))
+        self.app.persist_current()
+        identity = self.app.current_chat["id"]
+        self.load_saved(identity)
+        self.app.chat_menu.invoke("Restore chats from a backup...")
+        window = self.app.backup_window
+        self.assertTrue(window.window.winfo_exists())
+        window.backup_button.invoke()
+        self.wait_for(lambda: not self.app.backup_running and window.items, "backup written")
+        self.assertIn("Backed up", self.app.status_label.cget("text"))
+        with patch("workspace_ui.messagebox.askyesno", return_value=True):
+            self.app.delete_chat()
+        self.wait_for(lambda: not (self.app.chat_store.directory / f"{identity}.json").exists(), "chat deleted")
+        with patch("backup_ui.messagebox.askyesno", return_value=True):
+            window.restore_button.invoke()
+        self.wait_for(lambda: not self.app.backup_running, "restore finished")
+        self.assertIn("1 chat added", self.app.status_label.cget("text"))
+        self.assertTrue(any(record["id"] == identity for record in self.app.history_records))
+        self.assertIn("Restore finished", window.status.cget("text"))
+
+    def test_undo_puts_back_the_ais_last_task_after_confirmation(self):
+        self.enter_project()
+        target = (self.project / "main.py").resolve()
+        original = target.read_bytes()
+        point = self.app.checkpoints.begin(self.app.current_chat["id"], self.app.project_path)
+        point.before_write(target, original)
+        target.write_bytes(b"print('changed by the AI')\n")
+        point.after_write(target, b"print('changed by the AI')\n")
+        self.app.refresh_changes()
+        self.app.update_controls()
+        self.assertEqual(str(self.app.undo_button.cget("state")), "normal")
+        with patch("workspace_ui.messagebox.askyesno", return_value=False) as asked:
+            self.app.undo_button.invoke()
+        self.assertIn(str(target), asked.call_args.args[1])
+        self.assertEqual(target.read_bytes(), b"print('changed by the AI')\n")
+        with patch("workspace_ui.messagebox.askyesno", return_value=True):
+            self.app.undo_button.invoke()
+        self.assertEqual(target.read_bytes(), original)
+        self.assertEqual(self.app.dev_activity[-1]["type"], "undone")
+        self.assertIn("Undid the AI's changes to 1 file.", self.app.dev_activity[-1]["text"])
+        self.assertEqual(str(self.app.undo_button.cget("state")), "disabled")
 
     def test_stopping_a_pending_review_releases_the_worker_without_a_write(self):
         self.enter_project()

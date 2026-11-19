@@ -51,11 +51,13 @@ def developer_system_prompt(project_path, quality_guidance="", project_context="
     return prompt
 
 
-def chat_messages(conversation, shared_context=""):
-    """Messages for an ordinary chat request: shared memory first, then the conversation."""
+def chat_messages(conversation, shared_context="", documents_context=""):
+    """Messages for an ordinary chat request: shared memory first, then excerpts from
+    the chat's documents, then the conversation."""
     messages = [dict(item) for item in conversation]
-    if shared_context:
-        messages.insert(0, {"role": "system", "content": shared_context})
+    for context in (documents_context, shared_context):
+        if context:
+            messages.insert(0, {"role": "system", "content": context})
     return messages
 
 
