@@ -64,6 +64,29 @@ vm.runInNewContext(fs.readFileSync(process.argv[1], 'utf8'), {document, window, 
 
 
 class StaticTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_internet_dialog_blocks_on_enter_escape_and_close_and_escapes_details(self):
+        self.run_scenario(r'''
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'security.js'),'utf8'),{document,window,Map,Set,Error,String,Number,Boolean,Array,Date});
+        window.pywebview.api.respond_internet=async(id,action)=>{calls.push(['internet',id,action]);return {ok:true};};
+        const event={type:'internet_approval',approval_id:'a',stage:1,remaining_seconds:3,request:{kind:'Download',target:'<script>bad</script>',purpose:'Get a model',sends:'Model name',source:'test',scope:'one task'}};
+        window.app.onEvent([event]);
+        assert.equal(elements.get('internet-target').textContent,'<script>bad</script>');
+        assert.equal(elements.get('internet-allow').disabled,false);
+        await elements.get('internet-allow').listeners.click();
+        assert.deepEqual(calls.at(-1),['internet','a','continue']);
+        window.app.onEvent([{...event,stage:2}]);
+        assert.equal(elements.get('internet-allow').disabled,true);
+        for(const key of ['Enter','Escape']) {
+          await elements.get('internet-dialog').listeners.keydown({key,preventDefault(){}});
+          assert.deepEqual(calls.at(-1),['internet','a','block']);
+        }
+        await elements.get('internet-dialog').listeners.close();
+        assert.deepEqual(calls.at(-1),['internet','a','block']);
+        window.app.onEvent([{type:'internet_closed',approval_id:'a',allowed:false}]);
+        assert.equal(elements.get('internet-dialog').open,false);
+        ''')
+
     def test_every_authored_translation_id_exists_and_forms_are_not_nested(self):
         root = Path(__file__).parent / "webui" / "static"
         source = (root / "strings.js").read_text(encoding="utf-8")

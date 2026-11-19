@@ -8,6 +8,7 @@ from developer_tools import fetch_model_capabilities
 from feedback import feedback_prompt
 from update_checker import check_update
 import vercel_deploy
+import network_gate
 from webui.api_utils import json_method
 from webui.local_files import write_utf8
 
@@ -38,8 +39,11 @@ class ParityApi:
     @json_method
     def check_updates(self):
         root = Path(__file__).resolve().parent.parent
+        def work(progress, cancel):
+            with network_gate.task("Check AI Assist source files for updates", "The GitHub repository and revision; no chats or project content."):
+                return check_update(root)
         with self._lock:
-            return self._jobs.start("updates", lambda progress, cancel: check_update(root), key="updates")
+            return self._jobs.start("updates", work, key="updates")
 
     @json_method
     def prepare_feedback(self, chat_id, index, text, criteria=""):
@@ -129,14 +133,22 @@ class ParityApi:
     @json_method
     def deploy_vercel(self, folder, project, scope="", domain=""):
         root, project, scope, domain = vercel_deploy.validate_project(folder, project, scope, domain)
+        def work(progress, cancel):
+            if not network_gate.allow_external("Vercel production deployment", project,
+                    "The chosen web project folder is uploaded to Vercel by its CLI.", purpose="Publish the chosen web project to Vercel"):
+                raise RuntimeError("The deployment was blocked before starting the Vercel CLI.")
+            if cancel.is_set():
+                return None
+            network_gate.note_outside("Vercel CLI", project, "Upload the explicitly approved web project.")
+            return vercel_deploy.deploy_project(root, project, scope, domain, lambda text: progress(text=text), cancel)
         with self._lock:
             if self._closed or self._developer.uses_project(root):
                 raise ValueError("Stop the task changing this project before deploying it.")
-            return self._jobs.start("deploy", lambda progress, cancel:
-                vercel_deploy.deploy_project(root, project, scope, domain, lambda text: progress(text=text), cancel), key="deploy:" + str(root))
+            return self._jobs.start("deploy", work, key="deploy:" + str(root))
 
     @json_method
     def cancel_job(self, job_id):
+        self._internet.block_pending()
         return self._jobs.cancel(job_id)
 
     @json_method

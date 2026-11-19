@@ -660,6 +660,7 @@ window.app = (() => {
       }
       window.workspaceui?.onEvent(event);
       window.welcomeui?.onEvent(event);
+      if (window.securityui?.onEvent(event)) continue;
       if (window.parityui?.onEvent(event)) continue;
       if (event.type === "model_loading" || event.type === "model_loaded") {
         const text = event.type === "model_loading"
@@ -727,6 +728,7 @@ window.app = (() => {
     }) : [Object.assign(document.createElement("p"), {className: "setting-hint", textContent: t("No models are loaded right now.")})]));
     window.workspaceui?.openSettings();
     window.parityui?.openSettings();
+    window.securityui?.openSettings();
     openDialog("settings-dialog");
   }
 

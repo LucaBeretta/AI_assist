@@ -594,6 +594,11 @@ code, kbd, pre, .mono { font-family: var(--mono); }
 #colibri-panel summary { cursor: pointer; }
 #colibri-panel .model-actions { flex-wrap: wrap; margin: 12px 0; }
 #deploy-output { max-height: 220px; overflow: auto; white-space: pre-wrap; }
+.internet-details { display: grid; grid-template-columns: 130px 1fr; gap: 12px; font-size: 13px; }
+.internet-details dt { color: var(--muted); }
+.internet-details dd { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.connection-log { max-height: 240px; overflow: auto; padding-left: 22px; font: 12px var(--mono); overflow-wrap: anywhere; }
+.connection-log li { padding: 6px 0; }
 #welcome-hardware { font-size: 13px; overflow-wrap: anywhere; }
 #welcome-download { display: flex; margin-top: 16px; }
 [hidden] { display: none !important; }

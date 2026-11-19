@@ -491,6 +491,7 @@ def _run_command(project, arguments, approve_action, cancel_event, on_event=None
     executable = ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command] if windows else ["/bin/sh", "-c", command]
     options = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)} if windows else {"start_new_session": True}
     # Python started by the command loads the internet gate; other programs it runs cannot be checked.
+    network_gate.note_outside("Developer command", command, "Run the command explicitly approved for this project.")
     process = subprocess.Popen(executable, cwd=str(project), stdin=subprocess.DEVNULL,
                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                env=network_gate.child_environment("developer agent command"), **options)

@@ -39,6 +39,9 @@ from webui.colibri import ColibriService
 from webui.api_utils import json_method as _json_method
 from webui.jobs import Jobs
 from webui.parity import ParityApi, hybrid_settings
+from webui.privacy import PrivacyApi
+from app_core.privacy import privacy_status
+import network_gate
 
 
 log = logging.getLogger(__name__)
@@ -80,7 +83,7 @@ def inference_message(message):
     return item
 
 
-class Api(ParityApi):
+class Api(PrivacyApi, ParityApi):
     def __init__(self, bridge, store=None, engine=None, hardware=None, desktop=None, colibri=None):
         self._bridge = bridge
         self._store = store if store is not None else ChatStore()
@@ -108,6 +111,7 @@ class Api(ParityApi):
         self._colibri = colibri if colibri is not None else ColibriService(self._store.directory)
         self._jobs = Jobs(self._bridge.emit)
         self._hybrid = hybrid_settings(self._store.directory)
+        self._init_privacy()
 
     @_json_method
     def set_web_preferences(self, values):
@@ -191,6 +195,7 @@ class Api(ParityApi):
         values = snapshot_values(engine=backend, connected=connected, model=model, details=details,
             metrics=metrics, choice=usage.get("total"), used=usage.get("used"), url=host, report=report,
             step=task.get("step", 0), agent_active=bool(task), max_steps=task.get("max_steps", 20))
+        values["privacy"], values["privacy_role"] = privacy_status(network_gate.status(), model, host, self._firewall_summary())
         detail = details.get(model, {})
         size = detail.get("size", 0)
         gpu = min(1.0, max(0.0, detail.get("size_vram", 0) / size)) if size else None
@@ -329,6 +334,7 @@ class Api(ParityApi):
 
     @_json_method
     def stop_pull(self, pull_id=None):
+        self._internet.block_pending()
         with self._lock:
             jobs = [job for identity, job in self._pulls.items() if pull_id is None or identity == pull_id]
             for job in jobs:
@@ -745,6 +751,7 @@ class Api(ParityApi):
 
     @_json_method
     def stop_task(self, task_id):
+        self._internet.block_pending()
         return self._developer.stop(task_id)
 
     @_json_method
@@ -1179,6 +1186,7 @@ class Api(ParityApi):
 
     @_json_method
     def stop(self, stream_id):
+        self._internet.block_pending()
         with self._lock:
             stream = self._streams.get(stream_id)
             if stream is None:
@@ -1234,7 +1242,8 @@ class Api(ParityApi):
                         lambda text: self._bridge.emit("status", text=text, chat_id=record["id"]))
                     if stream["cancel"].is_set():
                         raise engine.StreamStopped()
-                    return client.chat(deepcopy(stream["messages"]), model=record["model"], on_chunk=chunk, on_metrics=metrics)
+                    with network_gate.task("Send a message through Colibri", "Your message, conversation, shared notes and attached or pinned context."):
+                        return client.chat(deepcopy(stream["messages"]), model=record["model"], on_chunk=chunk, on_metrics=metrics)
                 loading = ModelLoadProgress(self._bridge.emit, record["model"], stream["cancel"],
                                            stream_id=stream_id, chat_id=stream["chat_id"])
                 with stream["data_lock"]:
@@ -1324,6 +1333,7 @@ class Api(ParityApi):
             self._bridge.emit("error", error=str(error))
 
     def _close(self, timeout=2):
+        self._close_privacy()
         self._status.close()
         with self._lock:
             self._closed = True
@@ -1392,6 +1402,7 @@ def main():
         desktop.main_window = window
         def loaded():
             desktop.set_theme(saved_theme(store.directory))
+            getattr(api, "_start_privacy", lambda: None)()
             bridge.start()
             instance.start(desktop.request_activation)
             api._start_status()
