@@ -19,6 +19,11 @@ class DeveloperTasks:
         with self.lock:
             return any(task["chat_id"] == chat_id and not task["finished"].is_set() for task in self.tasks.values())
 
+    def context_usage(self, chat_id):
+        with self.lock:
+            return next((deepcopy(task["context"]) for task in self.tasks.values()
+                         if task["chat_id"] == chat_id and "context" in task), None)
+
     def uses_model(self, name):
         with self.lock:
             return any(task["record"]["model"] == name and not task["finished"].is_set() for task in self.tasks.values())
@@ -105,9 +110,13 @@ class DeveloperTasks:
             kind = event.pop("type")
             event.pop("task_id", None)
             self.bridge.emit(kind, task_id=identity, chat_id=task["chat_id"], **event)
+        def context(value):
+            with self.lock:
+                task["context"] = deepcopy(value)
+            self.bridge.emit("context_usage", task_id=identity, chat_id=task["chat_id"], **value)
         try:
             result = coding_agent.run_agent(
-                on_event=emit, cancel_event=task["cancel"],
+                on_event=emit, on_context=context, cancel_event=task["cancel"],
                 approve_action=lambda action: self._wait(identity, task, "action", {"action": action}),
                 approve_plan=lambda text: self._wait(identity, task, "plan", {"text": text}), **options)
             if task["cancel"].is_set():

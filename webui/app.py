@@ -14,6 +14,7 @@ import uuid
 from chat_store import ChatStore, _utc_now
 import chat_versions
 import chat_attachments
+import coding_agent
 from developer_tools import fetch_model_capabilities
 from model_advisor import detect_hardware
 from webui.bridge import Bridge
@@ -275,6 +276,7 @@ class Api:
             record["messages"].append({"role": "user", "content": text})
             record["project_path"] = str(root)
             record["mode"] = "dev"
+            record["context_length"] = record["environment"]["context_length"] = context
             record = self._save_chat(record)
             return self._developer.start(chat_id, record, host=self._engine.ollama_url(), model=record["model"],
                 project_root=str(root), messages=history, plan_first=plan_first, max_steps=max_steps,
@@ -308,6 +310,7 @@ class Api:
                 if current.get(key) != before.get(key):
                     raise RuntimeError("This chat changed while the Developer task was running.")
             current["agent_history"] = result["messages"]
+            current["last_response"] = {"kind": "dev", "status": "done"}
             current.pop("_agent_history_stale", None)
             current["messages"].append({"role": "assistant", "content": result["assistant_text"]})
             self._save_chat(current)
@@ -473,7 +476,25 @@ class Api:
                 total = None
         if type(total) is not int or total <= 0:
             total = None
-        used = estimate_tokens("".join(message["content"] for message in request_messages(record)))
+        active = self._developer.context_usage(record["id"])
+        developer = record.get("mode") == "dev" and record.get("last_response", {}).get("kind", "dev") == "dev"
+        with self._lock:
+            chat_stream = next((item for item in self._streams.values()
+                                if item["chat_id"] == record["id"] and item["kind"] == "chat"), None)
+        if active is not None:
+            used, total = active["used"], active["total"]
+        elif chat_stream is not None:
+            with chat_stream["data_lock"]:
+                output = "".join(chat_stream["parts"])
+            used = estimate_tokens("".join(message["content"] for message in chat_stream["messages"]) + output)
+            total = chat_stream["context"] or total
+        elif developer:
+            history = [] if record.get("_agent_history_stale") else record.get("agent_history", [])
+            history = history or request_messages(record)
+            # The engine uses 4096 when no explicit or loaded context is known.
+            used = coding_agent.request_context_usage(history, total or 4096)["used"]
+        else:
+            used = estimate_tokens("".join(message["content"] for message in request_messages(record)))
         level = "full" if total and used * 100 >= total * 95 else "warn" if total and used * 100 >= total * 80 else "ok"
         return {"ok": True, "used": used, "total": total, "level": level}
 
@@ -701,7 +722,7 @@ class Api:
                     return
                 if content:
                     current["messages"].append({"role": "assistant", "content": content})
-                current["last_response"] = {"status": kind, "metrics": stream["metrics"]}
+                current["last_response"] = {"status": kind, "kind": "chat", "metrics": stream["metrics"]}
                 if error and kind == "error":
                     current["last_response"]["error"] = error
                 self._save_chat(current)

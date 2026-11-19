@@ -2,16 +2,91 @@
 
 from copy import deepcopy
 import json
+import io
 import threading
 import unittest
 import zipfile
+from unittest.mock import patch
 
 from chat_store import ChatStoreError
 import test_webui_app as fixtures
 from webui.app import estimate_tokens
+import coding_agent
 
 
 class ContextTests(unittest.TestCase):
+    def test_long_developer_history_counts_the_same_bounded_prompt_as_the_wire(self):
+        record = self.history(count=2, context=32768)
+        record["mode"] = "dev"
+        record["agent_history"] = [
+            {"role": "system", "content": "Pinned project context: main.py\n" + "source line\n" * 100
+                + "Shared memory: keep the existing API.\nConversation summary: preserve the decisions."},
+            {"role": "user", "content": "Task card: implement and test the feature.\n" * 50}]
+        for step in range(20):
+            record["agent_history"].extend([
+                {"role": "assistant", "content": f"Inspect step {step}", "thinking": "Check the actual result.",
+                 "tool_calls": [{"function": {"name": "run_command", "arguments": {"command": "python -m unittest", "description": "Verify step"}}}]},
+                {"role": "tool", "tool_name": "run_command", "content": f"Step {step} output\n" + "verified line\n" * 1000}])
+        record = self.store.save(record)
+        response = {"message": {"content": "done"}}
+        with patch("coding_agent.urllib.request.urlopen", return_value=io.BytesIO(json.dumps(response).encode())) as opened:
+            coding_agent._chat("http://localhost:11434", "fake:7b", record["agent_history"], 32768, None)
+        payload = json.loads(opened.call_args.args[0].data)
+        prompt = {key: payload[key] for key in ("messages", "tools")}
+        expected = estimate_tokens(json.dumps(prompt, ensure_ascii=False))
+        usage = self.api.context_usage(record["id"])
+        self.assertEqual((usage["used"], usage["total"]), (expected, 32768))
+        self.assertGreater(usage["used"], 1000)
+        self.assertLess(usage["used"], estimate_tokens(json.dumps(record["agent_history"])))
+        self.assertIn("Pinned project context", json.dumps(prompt))
+        self.assertIn("Shared memory", json.dumps(prompt))
+        # Stored IDs/paths that were never put in a request must not invent usage.
+        record["environment"]["pinned_paths"] = ["not-read-" * 1000]
+        record["environment"]["memory_ids"] = ["not-used-" * 1000]
+        self.store.save(record)
+        self.assertEqual(self.api.context_usage(record["id"])["used"], expected)
+
+    def test_stale_native_path_uses_instructions_summary_and_only_the_remaining_messages(self):
+        from webui.app import request_messages
+        record = self.history(count=8, context=32768)
+        record.update(mode="dev", _agent_history_stale=True,
+                      agent_history=[{"role": "user", "content": "old tool path" * 10000}])
+        record["summary"] = {"text": "Keep these decisions", "upto": 4, "created_at": record["created_at"]}
+        record = self.store.save(record)
+        messages = request_messages(record)
+        self.assertEqual([item["content"] for item in messages[:2]], ["Project rules", "Keep these decisions"])
+        self.assertEqual(self.api.context_usage(record["id"])["used"],
+                         coding_agent.request_context_usage(messages, 32768)["used"])
+
+    def test_live_developer_usage_updates_after_a_tool_and_keeps_the_chosen_context(self):
+        from test_coding_agent import tool_response, final_response
+        project = self.store.directory / "project"
+        project.mkdir()
+        (project / "source.py").write_text("source information\n" * 100, encoding="utf-8")
+        record = self.history(count=0, context=32768)
+        reached, release = threading.Event(), threading.Event()
+        self.addCleanup(release.set)
+        calls = []
+        def chat(*args):
+            calls.append(args)
+            if len(calls) == 1:
+                return tool_response("read_file", {"path": "source.py"})
+            reached.set()
+            if not release.wait(5):
+                raise RuntimeError("Test did not release the request")
+            return final_response()
+        with patch("coding_agent._chat", side_effect=chat):
+            task = self.api.run_agent(record["id"], "Inspect", str(project), context=16384)
+            self.assertTrue(task["ok"], task)
+            self.assertTrue(reached.wait(3))
+            snapshots = [item for item in self.events.items if item["type"] == "context_usage"]
+            self.assertGreater(snapshots[-1]["used"], snapshots[0]["used"])
+            usage = self.api.context_usage(record["id"])
+            self.assertEqual((usage["used"], usage["total"]), (snapshots[-1]["used"], 16384))
+            release.set()
+            self.events.wait("agent_done")
+        self.assertEqual(self.store.load(record["id"])["context_length"], 16384)
+
     def test_empty_oversized_and_failed_summaries_do_not_change_history(self):
         for answer in ("", "x" * 4000, None):
             record = self.history()
