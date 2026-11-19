@@ -88,11 +88,12 @@ Ollama runs as its own native programs, so the gate cannot see inside them. **Se
 A modern interface for the same chats, in your browser, on this computer only. It needs Python but not Tkinter:
 
 ```sh
-python web_workspace.py            # opens your browser with a single-use sign-in link
+python web_workspace.py            # opens AI Assist in its own window, signed in
+python web_workspace.py --tab      # a normal browser tab instead
 python web_workspace.py --no-browser --port 8765
 ```
 
-The window it runs in prints the link; press Enter there for a new one (each works once, for five minutes) and Ctrl+C to stop. It offers streamed chat with Stop, Markdown and code blocks with Copy, saved chats (search, rename, delete), models and where they run, a details panel (model capabilities, last answer's speed and context, privacy, shared memory, hardware), shared memory editing, the connection log, Night and Day themes, keyboard navigation, and a layout that works on narrow screens.
+With Edge, Chrome or Brave installed (your default browser first), it opens as an app window, without tabs or an address bar; otherwise in a normal tab. The console window it runs in prints a single-use sign-in link; press Enter there to open AI Assist again (each link works once, for five minutes) and Ctrl+C to stop. It offers streamed chat with Stop, Markdown and code blocks with Copy, saved chats (search, rename, delete), models and where they run, a details panel (model capabilities, last answer's speed and context, privacy, shared memory, hardware), shared memory editing, the connection log, Night and Day themes, keyboard navigation, and a layout that works on narrow screens.
 
 **Developer agent.** Open a developer chat and describe the change you need; **Run agent** starts the task. Each file change appears as a card with its diff (**Apply change** or **Reject**), and each command needs the same two confirmations as the desktop app: **Run command**, then **Run**, which unlocks after three seconds on a second step that explains the command runs outside the internet gate. Nothing is written or run before you answer; **Stop** declines what is waiting. **Undo last task** puts back the files the task changed, and **New task** starts a fresh chat in the same folder. **Projects** shows each folder's files, applied diffs and command activity, read-only. The model must support tool calling (for example `qwen3-coder`); others are refused before anything runs.
 

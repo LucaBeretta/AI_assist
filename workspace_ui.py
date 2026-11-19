@@ -1753,10 +1753,11 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
             return
         if not messagebox.askokcancel(
                 "Use the browser version?",
-                "This window closes and AI Assist opens in your web browser, on this computer only, with the same "
-                "chats. Only one of the two can use your chats at a time.\n\nIn the browser version you can chat, "
-                "use documents and read developer projects. The developer agent and model downloads stay in this "
-                "window for now.\n\nA small window stays open while it runs: close it to stop the browser version.",
+                "This window closes and AI Assist opens in its own browser window, on this computer only, with the "
+                "same chats. Only one of the two can use your chats at a time.\n\nIn the browser version you can chat, "
+                "use documents and run the developer agent (each edit and command still waits for your approval). "
+                "Choosing a new project folder, model downloads and internet approvals stay in this window for now."
+                "\n\nA small window stays open while it runs: close it to stop the browser version.",
                 parent=self.root):
             return
         self.switch_to_web = True
