@@ -14,8 +14,12 @@ Sizes: S (≤1 day), M (2–4 days), L (1–2 weeks). Each item names its eviden
 - **P0-1, approvals as a core service** (`app_core/approvals.py`). The rules are now kept in the core: actions are declined unless approved, each is answered once, and a command needs its second check plus the full wait, so an early approval is refused even if a button skips the dialog. Every approved command is logged. The desktop window, for both Ollama and Colibri, uses it.
 - **P1-1, developer agent in the web workspace** (`app_core/agent_service.py`, routes `/api/chats/<id>/agent`, `/api/approvals/<id>`, `/undo`, `/api/projects/<chat>/chats`). Each edit is a card with its diff; each command has the same two confirmations and the 3-second wait, counted by the server; Stop or a closed page declines what is waiting; Undo and New task. Evidence: `test_web_agent.py`, and `tools/web_e2e.py --agent-model qwen3-coder:30b` (a real command taken to its second check and rejected, never run; a real edit reviewed, applied and undone). Not in the web version: **Save As** (choosing another file for an edit) and choosing a new project folder; both stay in the desktop app.
 
+- **Commands explained in plain words** (`app_core/command_reading.py`), in both review screens: each program's purpose, the files and web addresses named, and warnings, most serious first. Local and rule-based; it never says a command is harmless. Evidence: `test_command_reading.py` (incl. 800 random inputs that must not break it), `test_workspace`, e2e.
+- **Everyday chat polish** (web): Edit and resend, Regenerate (a failed or early-stopped one puts the chat back), pinned chats (also in the desktop window), and keyboard shortcuts with a `?` list. No new routes: `edit_from` on `/messages`, `pinned` on `PATCH /api/chats/<id>`. Evidence: `test_web_server`, `test_workspace`, e2e.
+- **The browser version in its own app window** (`webui/app_window.py`): Edge, Chrome or Brave with `--app`; only this computer's workspace address, checked by the gate like any link.
 - **Undo for the agent's file changes** (`app_core/checkpoints.py`): originals saved per task outside the project; undo restores them and leaves files you edited afterwards alone.
 - **Automatic daily backups with restore** (`app_core/backups.py`): 14 kept; restore adds missing chats, replaces damaged ones, never changes a chat you still have.
+- **P0-4, private settings everywhere**: `appearance.settings`, `colibri.settings`, `hybrid.settings` and `firewall-lift.json` now use `app_core.settings.write_json` like the other settings (atomic, 0600), so every settings file has one writer (audit S4, C6). Evidence: `test_private_settings.py` and `test_hybrid_ui`, with the 0600 checks run on Linux (WSL Ubuntu); macOS not tested.
 
 ## P0
 
@@ -23,7 +27,6 @@ Sizes: S (≤1 day), M (2–4 days), L (1–2 weeks). Each item names its eviden
 | --- | --- | --- | --- | --- |
 | P0-2 | **Sandboxed agent commands** (`Executor` with Seatbelt, bubblewrap/Landlock, and Windows restricted-token backends). Fail closed: no network, writes to the project only. | L | — | Per-OS tests show network refused and writes outside the project refused. |
 | P0-3 | **CI** on Windows, macOS and Linux (Xvfb), Python 3.9 and 3.13, plus `node --test`. | S | — | Matrix green on every push; the support-matrix rows show evidence. |
-| P0-4 | **Private settings everywhere:** `appearance.settings`, `colibri.settings`, the hybrid config and `firewall-lift.json` go through `app_core.settings.write_json` (audit S4, C6). | S | — | A POSIX test shows 0600 for each file. |
 
 ## P1
 

@@ -12,6 +12,7 @@ from tkinter import END, filedialog, messagebox, scrolledtext, simpledialog, ttk
 from app_core import approvals, backups, documents
 from app_core.activity import activity_record
 from app_core.checkpoints import CheckpointError, CheckpointStore
+from app_core.command_reading import read_command
 from app_core.explain import ACTION_LABELS, explain
 from backup_ui import BackupWindow
 from welcome_ui import WelcomeGuide, ready
@@ -24,7 +25,7 @@ from deploy_dialog import DeployDialog
 from html_preview import HtmlPreviews, is_html
 from chat_store import ChatStore
 from hourly_status import HourlyStatusReport
-from coding_agent import FILE_LIMIT_CHOICES, estimate_tokens, run_agent
+from coding_agent import DEFAULT_COMMAND_DESCRIPTION, FILE_LIMIT_CHOICES, estimate_tokens, run_agent
 from developer_tools import build_project_context, extract_code_blocks, fetch_model_capabilities, list_project_files, read_project_file
 from message_widgets import render_message
 import network_gate  # noqa: F401  (patched through this module by tests; approvals log via app_core)
@@ -369,6 +370,8 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         self.chat_subtitle.pack(fill="x", pady=(2, 0))
         self.chat_menu = tk.Menu(self.root, tearoff=False)
         self.chat_menu.add_command(label="Rename chat", command=self.rename_chat)
+        self.chat_menu.add_command(label="Pin to top", command=self.toggle_pin)
+        self.pin_menu_index = self.chat_menu.index("end")
         self.chat_menu.add_command(label="Export chat...", command=self.export_chat)
         self.chat_menu.add_command(label="Back up all chats...", command=self.backup_chats)
         self.chat_menu.add_command(label="Restore chats from a backup...", command=self.open_backups)
@@ -552,6 +555,8 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         self.chat_actions.config(state="normal" if (self.current_chat or self.history_records) and not busy else "disabled")
         for label in ("Rename chat", "Export chat...", "Delete chat"):
             self.chat_menu.entryconfigure(label, state="normal" if self.current_chat else "disabled")
+        self.chat_menu.entryconfigure(self.pin_menu_index, state="normal" if self.current_chat else "disabled",
+                                      label="Unpin" if (self.current_chat or {}).get("pinned") else "Pin to top")
         ordinary = self.current_mode == "chat" and self.chat_store is not None and not self.documents_indexing
         self.chat_menu.entryconfigure("Use documents from a folder...", state="normal" if ordinary else "disabled")
         self.documents_button.config(state="normal" if ordinary and not busy else "disabled")
@@ -823,9 +828,11 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
                                     + list(self.failed_saves.values())
                                     + [record for record in self.history_records if record["id"] not in pending_ids])
         query = self.history_search.get().strip().casefold()
-        records = [record for record in self.history_records if _history_matches(record, query)]
+        # Pinned chats first; each group keeps its newest-first order.
+        records = sorted((record for record in self.history_records if _history_matches(record, query)),
+                         key=lambda record: not record.get("pinned"))
         signature = (query, (self.current_chat or {}).get("id"), self.history_limit, len(records),
-                     tuple((item["id"], item["title"], item["mode"]) for item in records[:self.history_limit]))
+                     tuple((item["id"], item["title"], item["mode"], bool(item.get("pinned"))) for item in records[:self.history_limit]))
         if signature == self.rendered_history:
             return
         self.rendered_history = signature
@@ -833,7 +840,7 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
             child.destroy()
         self.history_buttons = []
         for record in records[:self.history_limit]:
-            title = ("</> " if record["mode"] == "dev" else "") + record["title"]
+            title = ("★ " if record.get("pinned") else "") + ("</> " if record["mode"] == "dev" else "") + record["title"]
             button = self.button(self.sidebar_content, title, lambda identity=record["id"]: self.open_chat(identity),
                                  self.COLORS["sidebar"], self.COLORS["ink"], self.COLORS["sidebar_hover"], anchor="w", justify="left", wraplength=202)
             button.config(font=("Segoe UI", 9), padx=12, pady=8)
@@ -938,6 +945,27 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
                 self.update_heading()
             except (OSError, ValueError) as error:
                 self.set_status(str(error), error=True)
+
+    def toggle_pin(self):
+        """Keep this chat at the top of the list, or let it move with the others again."""
+        if self.busy() or not self.current_chat:
+            return
+        record = dict(self.current_chat)
+        pinned = not record.get("pinned")
+        if pinned:
+            record["pinned"] = True
+        else:
+            record.pop("pinned", None)
+        try:
+            self.current_chat = record
+            self.queue_save(record)
+        except (OSError, ValueError) as error:
+            self.set_status(str(error), error=True)
+            return
+        self.history_records = [record if item["id"] == record["id"] else item for item in self.history_records]
+        self.refresh_history(reload=False)
+        self.update_controls()
+        self.set_status("Pinned: this chat stays at the top of the list." if pinned else "Unpinned.")
 
     def export_chat(self):
         if not self.current_chat:
@@ -1510,13 +1538,18 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         heading = tk.Label(window, text=title, bg=c["background"], fg=c["ink"], font=("Segoe UI", 15, "bold"), wraplength=760, anchor="w")
         heading.pack(fill="x", padx=22, pady=(20, 10))
         if action["kind"] == "run_command":
-            detail = f"Folder: {action.get('cwd', self.project_path)}\nRuns with your account. Review the command before running."
+            description = action.get("description") or ""
+            said = f"The AI says: “{description}”\n" if description and description != DEFAULT_COMMAND_DESCRIPTION else ""
+            detail = f"Folder: {action.get('cwd', self.project_path)}\n{said}Runs with your account. Review the command before running."
             text = action["command"]
         else:
             detail = f"Destination: {action.get('destination', str(Path(self.project_path) / action.get('path', '')))}\nReview the exact proposed changes before applying them."
             text = action.get("diff") or action.get("content", "")
         details = tk.Label(window, text=detail, bg=c["background"], fg=c["muted"], font=("Segoe UI", 10), wraplength=760, justify="left", anchor="w")
         details.pack(fill="x", padx=22, pady=(0, 10))
+        if action["kind"] == "run_command":
+            window.geometry("820x720")
+            self.command_reading_panel(window, read_command(action["command"], action.get("cwd", self.project_path)))
         buttons = tk.Frame(window, bg=c["background"])
         buttons.pack(side="bottom", fill="x", padx=22, pady=18)
         primary = self.button(buttons, "Apply change" if action["kind"] == "write_file" else "Run command",
@@ -1533,6 +1566,32 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
             body.insert(END, line, "add" if line.startswith("+") else "remove" if line.startswith("-") else ())
         body.config(state="disabled")
         window.protocol("WM_DELETE_WINDOW", lambda: self.resolve_approval(decision, window, False))
+
+    SERIOUS_WARNINGS = ("hidden", "admin", "system", "delete")
+
+    def command_reading_panel(self, window, reading):
+        """AI Assist's own reading of a command (app_core.command_reading): warnings first,
+        then what each part does and the files it names. It helps; it proves nothing."""
+        c = self.COLORS
+        panel = tk.Frame(window, bg=c["surface"], highlightthickness=1, highlightbackground=c["border"])
+        panel.pack(fill="x", padx=22, pady=(0, 10))
+        tk.Label(panel, text="WHAT AI ASSIST CAN TELL", bg=c["surface"], fg=c["muted"], font=("Segoe UI", 8, "bold"),
+                 anchor="w").pack(fill="x", padx=12, pady=(8, 2))
+        for warning in reading["warnings"]:
+            tk.Label(panel, text="⚠ " + warning["text"], bg=c["surface"], wraplength=740, justify="left", anchor="w",
+                     fg=c["error"] if warning["kind"] in self.SERIOUS_WARNINGS else c["amber"],
+                     font=("Segoe UI", 10, "bold")).pack(fill="x", padx=12)
+        lines = [f"•  {step}" for step in reading["steps"]]
+        if reading["files"]:
+            lines.append("Files: " + ", ".join(f"{item['path']} ({item['effect']})" for item in reading["files"]))
+        if reading["addresses"]:
+            lines.append("Web addresses: " + ", ".join(reading["addresses"]))
+        if lines:
+            tk.Label(panel, text="\n".join(lines), bg=c["surface"], fg=c["ink"], font=("Segoe UI", 10), wraplength=740,
+                     justify="left", anchor="w").pack(fill="x", padx=12, pady=(4, 0))
+        tk.Label(panel, text=reading["note"], bg=c["surface"], fg=c["muted"], font=("Segoe UI", 9), wraplength=740,
+                 justify="left", anchor="w").pack(fill="x", padx=12, pady=(4, 8))
+        return panel
 
     COMMAND_CONFIRM_SECONDS = approvals.COMMAND_CONFIRM_SECONDS
 
@@ -1744,10 +1803,11 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
             return
         if not messagebox.askokcancel(
                 "Use the browser version?",
-                "This window closes and AI Assist opens in your web browser, on this computer only, with the same "
-                "chats. Only one of the two can use your chats at a time.\n\nIn the browser version you can chat, "
-                "use documents and read developer projects. The developer agent and model downloads stay in this "
-                "window for now.\n\nA small window stays open while it runs: close it to stop the browser version.",
+                "This window closes and AI Assist opens in its own browser window, on this computer only, with the "
+                "same chats. Only one of the two can use your chats at a time.\n\nIn the browser version you can chat, "
+                "use documents and run the developer agent (each edit and command still waits for your approval). "
+                "Choosing a new project folder, model downloads and internet approvals stay in this window for now."
+                "\n\nA small window stays open while it runs: close it to stop the browser version.",
                 parent=self.root):
             return
         self.switch_to_web = True

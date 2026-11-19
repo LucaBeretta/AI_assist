@@ -1,12 +1,14 @@
 """Cooperative settings, scoped memory handoff, and reviewed UI execution."""
 
 import json
+import os
 from pathlib import Path
 import threading
 import unittest
 from unittest.mock import patch
 from unittest.mock import Mock
 
+from app_core.settings import write_json
 from coding_agent import AgentCancelled
 from hybrid_ui import memory_callbacks, unload_worker
 import test_workspace as workspace_tests
@@ -81,7 +83,13 @@ class HybridWorkspaceTests(unittest.TestCase):
         window.enabled.set(True)
         window.memory.set(False)
         window.reviewer.set("reviewer")
-        window.save_button.invoke()
+        with patch("hybrid_ui.write_json", wraps=write_json) as writer:
+            window.save_button.invoke()
+        # The private, atomic writer every settings file uses (0600 on macOS and Linux).
+        writer.assert_called_once_with(self.app.hybrid_settings, dict(enabled=True, review_model="reviewer", manage_memory=False),
+                                       indent=2)
+        if os.name != "nt":
+            self.assertEqual(self.app.hybrid_settings.stat().st_mode & 0o777, 0o600)
         saved = self.app.hybrid_settings.read_text(encoding="utf-8")
         self.assertEqual(json.loads(saved), dict(enabled=True, review_model="reviewer", manage_memory=False))
         self.assertNotIn("session-key", saved)

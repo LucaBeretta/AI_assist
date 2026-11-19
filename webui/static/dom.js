@@ -62,6 +62,8 @@ const ICONS = {
   trash: "M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3",
   edit: "M4 20h4L19 9l-4-4L4 16zM14 6l4 4",
   memory: "M5 4h14v16H5zM9 8h6M9 12h6M9 16h3",
+  pin: "M9 3h6l-1 6 4 4H6l4-4zM12 13v8",
+  keyboard: "M3 6h18v12H3zM7 10h.01M11 10h.01M15 10h.01M7 14h10",
 };
 
 /**

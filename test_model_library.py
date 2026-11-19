@@ -151,7 +151,7 @@ class DownloadTests(unittest.TestCase):
         self.assertTrue(stream.closed)
 
     def test_http_and_connection_errors_are_reported(self):
-        failures = [urllib.error.HTTPError("http://localhost", 404, "Not found", {}, None),
+        failures = [urllib.error.HTTPError("http://localhost", 404, "Not found", {}, io.BytesIO(b"")),
                     urllib.error.URLError("Connection refused"), TimeoutError("Timed out")]
         for failure in failures:
             with self.subTest(failure=failure), patch(

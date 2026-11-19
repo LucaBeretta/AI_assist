@@ -13,9 +13,10 @@ Endpoints (all JSON, all under /api, all needing a session except /api/session):
     GET    /api/chats?query=&mode=            saved chats, newest first
     POST   /api/chats                         a new chat
     GET    /api/chats/<id>                    one chat with its messages
-    PATCH  /api/chats/<id>                    rename
+    PATCH  /api/chats/<id>                    rename {title} or pin {pinned}
     DELETE /api/chats/<id>                    delete
-    POST   /api/chats/<id>/messages           send; the answer streams as NDJSON events
+    POST   /api/chats/<id>/messages           send; the answer streams as NDJSON events. With edit_from,
+                                              it replaces one of your messages and what follows (edit, regenerate)
     POST   /api/chats/<id>/agent              a developer-agent task (developer chats); streams events,
                                               including each edit and command to review
     POST   /api/approvals/<id> {choice}       approve, second_check (commands) or reject a review
@@ -377,7 +378,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ("GET", r"/api/chats", "list_chats", True),
         ("POST", r"/api/chats", "create_chat", True),
         ("GET", rf"/api/chats/{_CHAT}", "get_chat", True),
-        ("PATCH", rf"/api/chats/{_CHAT}", "rename_chat", True),
+        ("PATCH", rf"/api/chats/{_CHAT}", "update_chat", True),
         ("DELETE", rf"/api/chats/{_CHAT}", "delete_chat", True),
         ("POST", rf"/api/chats/{_CHAT}/messages", "send_message", True),
         ("POST", rf"/api/chats/{_CHAT}/agent", "run_agent", True),
@@ -581,8 +582,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
         record = self.workspace.service.get(chat)
         return {"chat": record, "undo": record["mode"] == "dev" and self.workspace.agent.undo_available(chat)}
 
-    def api_rename_chat(self, body, chat):
-        return {"chat": ChatService.summary(self.workspace.service.rename(chat, body.get("title")))}
+    def api_update_chat(self, body, chat):
+        """Rename ({title}) and/or pin ({pinned: true|false})."""
+        if "title" not in body and "pinned" not in body:
+            raise HttpError(400, "Send a title or pinned.")
+        service = self.workspace.service
+        record = service.rename(chat, body.get("title")) if "title" in body else None
+        if "pinned" in body:
+            record = service.set_pinned(chat, body.get("pinned"))
+        return {"chat": ChatService.summary(record)}
 
     def api_delete_chat(self, body, chat):
         self.workspace.service.delete(chat)
@@ -636,12 +644,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
         return context
 
     def api_send_message(self, body, chat):
+        """A message and its streamed answer. ``edit_from`` (the index of one of the person's
+        messages) replaces that message and everything after it: edit and resend, or regenerate."""
         workspace = self.workspace
         text, model, context = body.get("content"), body.get("model", ""), self.context_choice(body)
+        edit_from = body.get("edit_from")
+        if edit_from is not None and type(edit_from) is not int:
+            raise HttpError(400, "edit_from must be a message number.")
         backend = workspace.provider().name
-        workspace.service.prepare(chat, text, model, backend)
+        workspace.service.prepare(chat, text, model, backend, edit_from)
         return self.stream(chat, workspace.service.release, lambda emit, cancel: workspace.service.send(
-            chat, text, model, backend, emit, cancel, context))
+            chat, text, model, backend, emit, cancel, context, edit_from))
 
     def api_run_agent(self, body, chat):
         """A developer-agent task. Each edit and command arrives as an ``approval`` event and
@@ -697,7 +710,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     last = saved["messages"][-1] if saved["messages"] else None
                     event = {"type": "done", "stopped": event["stopped"], "chat": ChatService.summary(saved),
                              "message": last if last and last["role"] == "assistant" else None,
-                             "local": event.get("local", False), "changed": event.get("changed", 0)}
+                             "local": event.get("local", False), "changed": event.get("changed", 0),
+                             "restored": event.get("restored", False)}
                 if connected:
                     try:
                         self.write_event(event)

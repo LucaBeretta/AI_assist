@@ -167,6 +167,10 @@ class CommandTests(AgentCase):
         marker, events = self.command_task()
         review = events("approval")
         self.assertEqual((review["action"]["kind"], review["action"]["cwd"]), ("run_command", str(self.project.resolve())))
+        # AI Assist's own reading comes with it, apart from the model's description.
+        reading = review["action"]["reading"]
+        self.assertEqual(review["action"]["description"], "Write a marker")
+        self.assertTrue(reading["steps"] and reading["note"])
         status, body = self.call("POST", f"/api/approvals/{review['id']}", {"choice": "approve"})
         self.assertEqual((status, body["error"]), (409, "Confirm the command a second time first."))
         status, body = self.call("POST", f"/api/approvals/{review['id']}", {"choice": "second_check"})

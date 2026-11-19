@@ -241,6 +241,48 @@ try:
     })()""")
     check("the stopped answer is saved", saved and saved.startswith("user,assistant,user,assistant|"), saved)
 
+    # Regenerate replaces the last answer; Edit (↑ in the empty composer) replaces the last message and its answer.
+    footer = cdp.js("(() => { const f = document.querySelectorAll('.message-footer'); const last = [...document.querySelectorAll('.message.is-assistant')].pop();"
+                    " return f.length + '|' + (f.length === 1 && last.contains(f[0]) && f[0].querySelector('button').textContent); })()")
+    check("Regenerate is a button under the last answer only", footer == "1|Regenerate", footer)
+    cdp.js("document.querySelector('.message-footer button').click()")
+    regenerated = cdp.wait("!document.querySelector('.message[aria-busy=true]') && document.getElementById('announcer').textContent === 'Answer complete.'"
+                           " && document.querySelectorAll('.message').length === 4", 120)
+    check("Regenerate answers the last message again in place", regenerated,
+          cdp.js("document.querySelectorAll('.message').length + ' messages'"))
+    cdp.js("document.getElementById('composer-input').focus()")
+    cdp.key("ArrowUp", "ArrowUp", 38)
+    check("↑ puts the last message back for editing", cdp.wait(
+        "document.getElementById('composer-input').value.startsWith('Write a very long') && document.querySelector('.composer-notice').textContent.includes('Editing your message')", 5))
+    cdp.key("Escape", "Escape", 27)
+    check("Esc cancels editing", cdp.wait("!document.querySelector('.composer-notice').textContent.includes('Editing') && !document.getElementById('composer-input').value", 5))
+    cdp.key("ArrowUp", "ArrowUp", 38)
+    cdp.js("const t = document.getElementById('composer-input'); t.value = ''; t.dispatchEvent(new Event('input'))")
+    cdp.send("Input.insertText", text="Reply with one short sentence about rivers.")
+    cdp.key("Enter", "Enter", 13, text="\r")
+    edited = cdp.wait("""(async () => {
+        if (document.querySelector('.message[aria-busy=true]')) return false;
+        const token = sessionStorage.getItem('aiassist.session');
+        const list = await (await fetch('/api/chats', {headers: {Authorization: 'Bearer ' + token}})).json();
+        const id = list.chats.find(c => c.mode === 'chat').id;
+        const chat = (await (await fetch('/api/chats/' + id, {headers: {Authorization: 'Bearer ' + token}})).json()).chat;
+        return chat.messages.length === 4 && chat.messages[2].content === 'Reply with one short sentence about rivers.'
+            && chat.messages[3].role === 'assistant' ? 'ok' : false;
+    })()""", 120, 0.5)
+    check("an edited message replaces the old one and gets a new answer", edited == "ok", str(edited))
+
+    # Pin, and the shortcuts list.
+    cdp.js("document.querySelector('[aria-label=\"Pin to top\"]').click()")
+    check("a pinned chat is marked in the list", cdp.wait(
+        "document.querySelector('[aria-label=\"Pin to top\"]').getAttribute('aria-pressed') === 'true'"
+        " && !!document.querySelector('.sidebar .list-item [aria-label=Pinned]')", 10))
+    cdp.js("document.activeElement.blur()")
+    cdp.key("?", "Slash", 191, modifiers=8, text="?")
+    check("? shows the keyboard shortcuts", cdp.wait("document.getElementById('dialog').open && document.getElementById('dialog-title').textContent === 'Keyboard shortcuts'", 5))
+    cdp.shot("02c-shortcuts.png")
+    cdp.key("Escape", "Escape", 27)
+    cdp.wait("!document.getElementById('dialog').open", 5)
+
     # Rename dialog: focus moves in, Escape cancels, focus returns.
     cdp.js("document.querySelector('[aria-label=\"Rename chat\"]').focus(); document.querySelector('[aria-label=\"Rename chat\"]').click()")
     check("the dialog opens with focus in its field", cdp.wait("document.getElementById('dialog').open && document.activeElement?.id === 'dialog-input'", 5))
@@ -291,6 +333,11 @@ try:
             if heading in (None, "finished"):
                 break
             if heading.startswith("Run this command"):
+                read = cdp.js("document.querySelector('.review .review-reading')?.innerText || ''")
+                check("the command comes with AI Assist's own reading", "WHAT AI ASSIST CAN TELL" in read.upper() and "cannot prove" in read,
+                      read[:200])
+                cdp.js("document.querySelector('.review').scrollIntoView({block: 'start'})")
+                cdp.shot("03c-command-review.png")
                 cdp.js("document.querySelector('.review .button-primary').click()")
                 if cdp.wait("document.querySelector('.review.is-second .button-primary')?.disabled"
                             " && document.querySelector('.review.is-second .button-primary').textContent.startsWith('Run (')", 10):

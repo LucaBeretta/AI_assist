@@ -1,3 +1,4 @@
+import io
 import tempfile
 import http.client
 from types import SimpleNamespace
@@ -97,7 +98,8 @@ class UpdateTests(unittest.TestCase):
             self.check(".", {"AIassist.py": b"app"}, truncated=True)
 
     def test_rate_limit_has_helpful_message(self):
-        error = urllib.error.HTTPError("https://api.github.com", 403, "Forbidden", {}, None)
+        # A real HTTPError carries the response body (closing one without it fails on Python 3.9).
+        error = urllib.error.HTTPError("https://api.github.com", 403, "Forbidden", {}, io.BytesIO(b""))
         with patch("update_checker.urllib.request.urlopen", side_effect=error):
             with self.assertRaisesRegex(RuntimeError, "limit"):
                 github_json("/commits?per_page=1")

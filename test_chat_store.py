@@ -66,7 +66,9 @@ class ChatStoreTests(unittest.TestCase):
         self.assertEqual(chat["activity"], [])
         self.assertEqual(chat["agent_history"], [])
         self.assertTrue(chat["created_at"].endswith("Z"))
-        self.assertEqual(datetime.fromisoformat(chat["updated_at"]).utcoffset().total_seconds(), 0)
+        # "Z" is read by fromisoformat only from Python 3.11, so it is replaced as the app does.
+        self.assertTrue(chat["updated_at"].endswith("Z"))
+        self.assertEqual(datetime.fromisoformat(chat["updated_at"].replace("Z", "+00:00")).utcoffset().total_seconds(), 0)
         self.assertEqual(list(self.directory.iterdir()), [self.directory / f"{chat['id']}.json"])
         self.assertEqual(self.store.load(chat["id"]), chat)
 

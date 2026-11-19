@@ -30,16 +30,15 @@ class ProjectToolsTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name) / "project"
+        # Resolved, as _project_root makes it: a temporary folder can be a short 8.3 name.
+        self.root = Path(self.temporary.name).resolve() / "project"
         self.root.mkdir()
 
     def write(self, name, contents="print('hello')\n"):
         target = self.root / name
         target.parent.mkdir(parents=True, exist_ok=True)
-        if isinstance(contents, bytes):
-            target.write_bytes(contents)
-        else:
-            target.write_text(contents, encoding="utf-8", newline="")
+        # Bytes as given, with no newline translation (write_text's newline= needs Python 3.10).
+        target.write_bytes(contents if isinstance(contents, bytes) else contents.encode("utf-8"))
         return target
 
     def symlink(self, target, name, directory=False):
@@ -286,7 +285,7 @@ class ModelCapabilitiesTests(unittest.TestCase):
 
     def test_reports_network_http_api_and_unreadable_response_errors(self):
         failures = [urllib.error.URLError("refused"), TimeoutError("timeout"),
-                    urllib.error.HTTPError("http://localhost", 404, "Not found", {}, None)]
+                    urllib.error.HTTPError("http://localhost", 404, "Not found", {}, io.BytesIO(b""))]
         for failure in failures:
             with self.subTest(failure=failure), patch("developer_tools.urllib.request.urlopen", side_effect=failure):
                 with self.assertRaises(RuntimeError):

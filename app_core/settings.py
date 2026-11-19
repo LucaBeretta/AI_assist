@@ -26,15 +26,16 @@ def read_json(path):
     return data if isinstance(data, dict) else {}
 
 
-def write_json(path, data):
-    """Atomically replace ``path`` with ``data``. The new file is private to this user (0600)."""
+def write_json(path, data, indent=None):
+    """Atomically replace ``path`` with ``data``. The new file is private to this user
+    (0600 on macOS and Linux): every settings file AI Assist writes goes through here."""
     path = Path(path)
     temporary = None
     try:
         with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.",
                                          suffix=".tmp", delete=False) as handle:
             temporary = Path(handle.name)
-            json.dump(data, handle)
+            json.dump(data, handle, indent=indent)
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, path)

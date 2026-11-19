@@ -18,7 +18,7 @@ from unittest.mock import patch
 from AIassist import AIAssistantGUI
 from colibri_panel import card_text, comparison_text, download_text
 from colibri_launcher import transfer_metrics
-from test_colibri_launcher import CATALOG, FakeGateway, completion, join_workers, make_fake_colibri
+from test_colibri_launcher import CATALOG, FakeGateway, completion, fake_calls, join_workers, make_fake_colibri
 
 
 def ollama_metadata(host, model):
@@ -212,8 +212,7 @@ class ColibriWorkspaceTests(unittest.TestCase):
             panel.context_button.invoke()
             self.wait_for(lambda: panel.installing is None and not panel.loading, "context change", timeout=15)
             self.assertIn("restarted with context 32,768 tokens", panel.message.cget("text"))
-            self.assertIn("setup --ctx 32768 --yes --json --no-browser",
-                          (self.colibri / "c" / "calls.log").read_text().splitlines())
+            self.assertIn("setup --ctx 32768 --yes --json --no-browser", fake_calls(self.colibri))
 
             other = dict(CATALOG[1], id="qwen36-35b", name="Qwen3.6-35B", fits=True, status="good",
                          family="qwen36", recommended=False)

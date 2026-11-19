@@ -1,19 +1,20 @@
 """AI Assist's web workspace (preview): chat in your browser, on this computer only.
 
-    python web_workspace.py [--port 8765] [--no-browser] [--host 127.0.0.1|::1]
+    python web_workspace.py [--port 8765] [--no-browser] [--tab] [--host 127.0.0.1|::1]
 
-It needs no Tkinter. It serves one page to this computer's browser and prints
-a single-use link that signs the page in. Press Enter in this window for a new
-link; press Ctrl+C to stop.
+It needs no Tkinter. It serves one page to this computer's browser and opens
+it, signed in by a single-use link, in its own app window (Edge or Chrome) or,
+with --tab or without those browsers, in a normal tab. Press Enter in this
+window to open it again; press Ctrl+C to stop.
+
+The developer agent runs here with the same two-step reviews as the desktop
+app, in project folders chosen there (Developer > Open project).
 
 What it does not do (yet), on purpose:
 
 - **Approve internet access.** There is no approval window here, so the
   internet gate blocks every internet request. Use the desktop app
   (AIassist.py) for model downloads, cloud models and update checks.
-- **Run the developer agent.** Edits and commands need the desktop app's
-  reviewed, two-step confirmations. Developer chats and their project files
-  can be read here, not changed.
 
 Only one AI Assist may use a data folder at a time: close the desktop window first.
 """
@@ -32,12 +33,16 @@ def main(argv=None):
     parser.add_argument("--host", choices=("127.0.0.1", "::1"), default="127.0.0.1",
                         help="loopback address to listen on; other addresses are refused")
     parser.add_argument("--no-browser", action="store_true", help="print the link without opening a browser")
+    parser.add_argument("--tab", action="store_true", help="open a normal browser tab instead of an app window")
     lan = parser.add_argument_group("optional paired Windows inference")
     lan.add_argument("--lan-peer-id", help="Already paired Windows node ID")
     lan.add_argument("--lan-client-id", help="Client ID used when pairing this Mac")
     args = parser.parse_args(argv)
     if bool(args.lan_peer_id) != bool(args.lan_client_id):
         parser.error("Use both --lan-peer-id and --lan-client-id to opt into paired LAN inference.")
+    if not 0 <= args.port <= 65535:
+        parser.error("Choose a port between 1 and 65535, or 0 for any free port.")
+
     if not 0 <= args.port <= 65535:
         parser.error("Choose a port between 1 and 65535, or 0 for any free port.")
 
@@ -105,6 +110,17 @@ def main(argv=None):
         def link():
             return f"{server.origin}/#launch={workspace.sessions.new_launch_code()}"
 
+        def show(url):
+            """Its own app window when Edge or Chrome is installed, else a browser tab."""
+            if not args.tab:
+                from webui.app_window import open_app_window
+                try:
+                    if open_app_window(url):
+                        return
+                except OSError as error:
+                    print(f"Could not open an app window ({error}); using a browser tab.", file=sys.stderr)
+            webbrowser.open(url)
+
         first = link()
         print("AI Assist web workspace (preview) is running on this computer only.")
         print(f"  Saved chats: {store.directory}")
@@ -113,16 +129,16 @@ def main(argv=None):
             print("  Inference: authenticated paired Windows LAN node (prompts sent to Windows only).")
         else:
             print("  Inference: this computer only (LAN inference OFF).")
-        print("  Developer agent: read-only here (edits and commands run in the desktop app).")
+        print("  Developer agent: each edit and command waits for your approval on the page.")
         print()
         print("Open this single-use link in your browser (valid for 5 minutes):")
         print(f"  {first}")
         if args.no_browser:
             print("Press Enter for a new link. Press Ctrl+C or close this window to stop.")
         else:
-            print("Closed the browser tab? Press Enter here to open it again.")
+            print("Closed the AI Assist window? Press Enter here to open it again.")
             print("Press Ctrl+C or close this window to stop.")
-            webbrowser.open(first)
+            show(first)
 
         def new_links():
             for _line in sys.stdin:
@@ -130,8 +146,8 @@ def main(argv=None):
                 if args.no_browser:
                     print(f"New single-use link: {fresh}", flush=True)
                 else:
-                    print("Opening AI Assist in your browser again...", flush=True)
-                    webbrowser.open(fresh)
+                    print("Opening AI Assist again...", flush=True)
+                    show(fresh)
 
         if sys.stdin is not None and sys.stdin.isatty():
             threading.Thread(target=new_links, name="web-links", daemon=True).start()

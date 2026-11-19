@@ -73,6 +73,8 @@ AI Assist works offline. Nothing it does reaches the internet until you approve 
 
 **Developer agent commands.** A command can start any program (git, npm, curl), and Windows cannot firewall "programs started by AI Assist" without cutting off the whole PC. So every command needs two confirmations: **Run command**, then **Run**, which unlocks after three seconds on a second step that explains the command runs outside the gate. Each confirmed command is written to the connection log and announced with a notification.
 
+Each command review also shows **what AI Assist can tell** about it, worked out on this computer: what each program does, the files and web addresses it names, and warnings for hidden or encoded commands, administrator rights, system changes, deleting, going online, installing, paths outside the project, unchecked scripts and unknown programs. It is a reading aid, not a guarantee, and it never replaces a confirmation. The model's own description is shown separately as "The AI says", because a model can be wrong or misled by what it read.
+
 ### Firewall lock
 
 Ollama runs as its own native programs, so the gate cannot see inside them. **Settings > Firewall lock...** (Windows) adds Windows Firewall rules that block every program in Ollama's folder, and any native program in the colibri folder, from internet addresses. The rules apply even when AI Assist is closed and when you use Ollama directly. This computer and your local network keep working. A startup task turns the rules back on after a restart.
@@ -99,11 +101,12 @@ Ollama runs as its own native programs, so the gate cannot see inside them. **Se
 A modern interface for the same chats, in your browser, on this computer only. It needs Python but not Tkinter:
 
 ```sh
-python web_workspace.py            # opens your browser with a single-use sign-in link
+python web_workspace.py            # opens AI Assist in its own window, signed in
+python web_workspace.py --tab      # a normal browser tab instead
 python web_workspace.py --no-browser --port 8765
 ```
 
-The window it runs in prints the link; press Enter there for a new one (each works once, for five minutes) and Ctrl+C to stop. It offers streamed chat with Stop, Markdown and code blocks with Copy, saved chats (search, rename, delete), models and where they run, a details panel (model capabilities, last answer's speed and context, privacy, shared memory, hardware), shared memory editing, the connection log, Night and Day themes, keyboard navigation, and a layout that works on narrow screens.
+With Edge, Chrome or Brave installed (your default browser first), it opens as an app window, without tabs or an address bar; otherwise in a normal tab. The console window it runs in prints a single-use sign-in link; press Enter there to open AI Assist again (each link works once, for five minutes) and Ctrl+C to stop. It offers streamed chat with Stop, Markdown and code blocks with Copy, **Edit** on your messages and **Regenerate** under the last answer (each replaces what follows; if the new answer fails or is stopped before it starts, the chat is put back as it was), saved chats (search, pin to the top, rename, delete), keyboard shortcuts (press **?** for the list), models and where they run, a details panel (model capabilities, last answer's speed and context, privacy, shared memory, hardware), shared memory editing, the connection log, Night and Day themes, keyboard navigation, and a layout that works on narrow screens.
 
 **Developer agent.** Open a developer chat and describe the change you need; **Run agent** starts the task. Each file change appears as a card with its diff (**Apply change** or **Reject**), and each command needs the same two confirmations as the desktop app: **Run command**, then **Run**, which unlocks after three seconds on a second step that explains the command runs outside the internet gate. Nothing is written or run before you answer; **Stop** declines what is waiting. **Undo last task** puts back the files the task changed, and **New task** starts a fresh chat in the same folder. **Projects** shows each folder's files, applied diffs and command activity, read-only. The model must support tool calling (for example `qwen3-coder`); others are refused before anything runs.
 
@@ -117,7 +120,7 @@ Only one AI Assist may use a data folder at a time, so close the desktop window 
 
 ## Chats and developer workspace
 
-- **New chat** immediately creates and selects a saved entry, clearing any search that would hide it. Messages and drafts save locally. Search, resume, rename, export, or delete chats from the sidebar and **Chat options**. **Chat options > Back up all chats...** writes one .zip with every chat as JSON and as readable Markdown, including chats still being saved.
+- **New chat** immediately creates and selects a saved entry, clearing any search that would hide it. Messages and drafts save locally. Search, resume, rename, pin to the top (★), export, or delete chats from the sidebar and **Chat options**. **Chat options > Back up all chats...** writes one .zip with every chat as JSON and as readable Markdown, including chats still being saved.
 - **Automatic backups.** Once a day AI Assist (the desktop window or the web workspace) writes every chat and your shared notes to `backups/` beside the saved chats, and keeps the newest 14. Backups stay on this computer; copy one to a USB stick to keep it elsewhere. **Chat options > Restore chats from a backup...** lists them, offers **Back up now**, and restores a chosen backup or another backup file. Restoring adds chats that are missing and replaces damaged ones (the damaged file is moved to `damaged/`, not deleted); it never changes a chat you still have, and shared notes come back only if yours are empty. The web workspace has the same under **Settings > Backups**, limited to the backups folder.
 - **Developer** uses a chosen project folder and a model that advertises tool calling, such as `qwen3-coder:30b`. The agent can inspect text files, propose edits, and run commands. It changes existing files by replacing exact blocks (`edit_file`), so small changes stay small; it writes whole files only for new files or full rewrites. Each edit shows its diff before **Apply change**; each command shows its text and working folder before **Run command**, then asks a second time, because a command runs outside the internet gate. **Reject** declines an action, and **Stop agent** cancels work and pending reviews.
 

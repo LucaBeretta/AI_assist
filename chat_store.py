@@ -173,6 +173,8 @@ class ChatStore:
             _timestamp(chat.get(field), field)
         if "_manual_title" in chat and type(chat["_manual_title"]) is not bool:
             raise ChatStoreError("Chat _manual_title must be true or false.")
+        if "pinned" in chat and type(chat["pinned"]) is not bool:
+            raise ChatStoreError("Chat pinned must be true or false.")
         record = deepcopy(chat)
         record.setdefault("project_files", [])
         record.setdefault("activity", [])
@@ -364,6 +366,12 @@ class ChatStore:
                 if record["updated_at"] != existing["updated_at"]:
                     record["title"] = existing["title"]
                 record["_manual_title"] = True
+            # Nor undo a pin made after that copy was read.
+            if record["updated_at"] != existing["updated_at"]:
+                if existing.get("pinned"):
+                    record["pinned"] = True
+                else:
+                    record.pop("pinned", None)
         if record["title"] == NEW_CHAT_TITLE and not record.get("_manual_title", False):
             record["title"] = title_from(record["messages"]) or record["title"]
         record["updated_at"] = _utc_now()
@@ -435,6 +443,17 @@ class ChatStore:
         chat = self.load(chat_id)
         chat["title"] = title.strip()
         chat["_manual_title"] = True
+        return self.save(chat)
+
+    def set_pinned(self, chat_id, pinned):
+        """Pin a chat to the top of the list, or unpin it."""
+        if type(pinned) is not bool:
+            raise ChatStoreError("Chat pinned must be true or false.")
+        chat = self.load(chat_id)
+        if pinned:
+            chat["pinned"] = True
+        else:
+            chat.pop("pinned", None)
         return self.save(chat)
 
     def delete(self, chat_id):

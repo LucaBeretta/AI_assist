@@ -32,8 +32,19 @@ FAKE_COLI = textwrap.dedent('''\
             json.dump(state, handle)
     state = load()
     args = sys.argv[1:]
-    with open(os.path.join(here, "calls.log"), "a", encoding="utf-8") as log:
-        log.write(" ".join(args) + "\\n")
+    # One numbered file per call: status polls run while setup runs, and two processes
+    # appending to one file can overwrite each other on Windows. O_EXCL claims a number once.
+    calls = os.path.join(here, "calls")
+    os.makedirs(calls, exist_ok=True)
+    number = len(os.listdir(calls))
+    while True:
+        try:
+            descriptor = os.open(os.path.join(calls, "%06d.txt" % number), os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+            break
+        except FileExistsError:
+            number += 1
+    os.write(descriptor, " ".join(args).encode("utf-8"))
+    os.close(descriptor)
     print("colibri v2 (fake)")
     if args[:1] == ["status"]:
         report = {"configured": state["model"] is not None, "config_path": os.path.join(here, "setup.json"),
@@ -87,6 +98,12 @@ CATALOG = [
      "recommended": False, "license_note": "", "doc": ""},
     "not a row",
 ]
+
+
+def fake_calls(folder):
+    """The commands the fake coli in ``folder`` received, in order."""
+    calls = Path(folder) / "c" / "calls"
+    return [path.read_text(encoding="utf-8") for path in sorted(calls.glob("*.txt"))] if calls.is_dir() else []
 
 
 def make_fake_colibri(folder, url, **state):
@@ -204,7 +221,7 @@ class LauncherTests(unittest.TestCase):
         self.colibri = make_fake_colibri(self.folder / "colibri-main", "http://127.0.0.1:8123")
 
     def calls(self):
-        return (self.colibri / "c" / "calls.log").read_text(encoding="utf-8").splitlines()
+        return fake_calls(self.colibri)
 
     def test_find_and_remember_directory(self):
         with patch.dict(os.environ, {"COLIBRI_DIR": str(self.colibri)}):

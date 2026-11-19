@@ -18,6 +18,7 @@ import threading
 import time
 import urllib.parse
 
+from app_core.settings import write_json
 import network_gate
 
 
@@ -67,10 +68,8 @@ def save_directory(directory, settings_path=None):
         data["directory"] = directory
         path = Path(settings_path)
         try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            temporary = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-            temporary.write_text(json.dumps(data, indent=2), encoding="utf-8")
-            os.replace(temporary, path)
+            path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            write_json(path, data, indent=2)
         except OSError as error:
             raise ColibriError(f"Could not remember the colibri folder: {error}") from error
     return directory

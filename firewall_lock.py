@@ -25,9 +25,10 @@ import tempfile
 import threading
 import time
 
+from app_core.settings import write_json
 import network_gate
 
-GROUP = "AI Assist internet lock"
+GROUP ="AI Assist internet lock"
 TASK = "AI Assist internet relock"
 LIFT_MINUTES = (5, 15, 60)
 CANCELLED = 1223
@@ -374,8 +375,8 @@ class Lock:
                 if ok:
                     until = time.time() + minutes * 60
                     try:
-                        self.lift_file.parent.mkdir(parents=True, exist_ok=True)
-                        self.lift_file.write_text(json.dumps({"until": until}), encoding="utf-8")
+                        self.lift_file.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                        write_json(self.lift_file, {"until": until})
                     except OSError:
                         pass
         except Exception as error:

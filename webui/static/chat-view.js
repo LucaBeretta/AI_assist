@@ -67,7 +67,8 @@ export function createChatSidebar(ctx) {
     replace(list, state.chats.map((/** @type {any} */ chat) => h("li", null,
       h("button", { class: "list-item", type: "button", "aria-current": state.chat?.id === chat.id ? "true" : null,
         onClick: () => ctx.openChat(chat.id) },
-        h("span", { class: "list-item-title" }, chat.mode === "dev" ? h("span", { class: "muted" }, "</> ") : null, chat.title),
+        h("span", { class: "list-item-title" }, chat.pinned ? icon("pin", "Pinned") : null,
+          chat.mode === "dev" ? h("span", { class: "muted" }, "</> ") : null, chat.title),
         h("span", { class: "list-item-meta" }, relativeTime(chat.updated_at), chat.model ? h("span", null, "· " + chat.model) : null)))));
   }
 
@@ -109,7 +110,31 @@ export function createChatView(ctx) {
 
   textarea.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); submit(); }
+    else if (event.key === "Escape" && ctx.store.get().editing) { event.preventDefault(); cancelEdit(); }
+    else if (event.key === "ArrowUp" && !textarea.value && !event.isComposing) {
+      // Up in an empty composer edits your last message, as in many chat apps.
+      const state = ctx.store.get();
+      const index = state.chat?.mode === "chat" && !state.streaming
+        ? state.chat.messages.map((/** @type {any} */ m) => m.role).lastIndexOf("user") : -1;
+      if (index >= 0) { event.preventDefault(); startEdit(index, state.chat.messages[index].content); }
+    }
   });
+
+  /** Put one of your messages back in the composer; sending replaces it and what follows. @param {number} index @param {string} content */
+  function startEdit(index, content) {
+    ctx.store.set({ editing: { index } });
+    textarea.value = content;
+    grow();
+    textarea.focus();
+    textarea.setSelectionRange(content.length, content.length);
+  }
+
+  function cancelEdit() {
+    ctx.store.set({ editing: null });
+    textarea.value = "";
+    grow();
+    textarea.focus();
+  }
   textarea.addEventListener("input", grow);
 
   function grow() {
@@ -124,26 +149,62 @@ export function createChatView(ctx) {
     if (!text || sendButton.disabled) return;
     textarea.value = "";
     grow();
-    const accepted = state.chat?.mode === "dev" ? await ctx.runAgent(text) : await ctx.send(text);
+    const editFrom = state.editing && state.chat?.mode === "chat" ? state.editing.index : null;
+    const accepted = state.chat?.mode === "dev" ? await ctx.runAgent(text) : await ctx.send(text, editFrom);
     // A message the server never accepted goes back into the composer.
     if (!accepted && !textarea.value) { textarea.value = text; grow(); }
     textarea.focus();
   }
 
-  /** @param {string} role @param {string} content */
-  function messageNode(role, content) {
+  /**
+   * @param {string} role @param {string} content
+   * @param {{index?: number, editable?: boolean, last?: boolean, editing?: boolean}} [options]
+   *   editable: ordinary chat, nothing streaming; last: the answer Regenerate replaces
+   */
+  function messageNode(role, content, options = {}) {
     const assistant = role === "assistant";
     const bodyNode = h("div", { class: "message-body" });
     if (assistant) bodyNode.appendChild(renderMarkdown(content, document, { onCopy: (code, button) => ctx.copy(code, button) }));
     else { bodyNode.classList.add("is-plain"); bodyNode.textContent = content; }
     const copy = h("button", { class: "button button-ghost button-small", type: "button" }, "Copy");
     copy.addEventListener("click", () => ctx.copy(content, copy));
-    return h("article", { class: `message is-${assistant ? "assistant" : "user"}`, "aria-label": assistant ? "AI Assist" : "You" },
+    const edit = !assistant && options.editable && typeof options.index === "number"
+      ? h("button", { class: "button button-ghost button-small", type: "button", title: "Change this message and send it again (↑)",
+        onClick: () => startEdit(/** @type {number} */ (options.index), content) }, "Edit") : null;
+    // Regenerate sits under the answer, where the eye ends after reading it, not in the small top line.
+    const regenerate = assistant && options.editable && options.last
+      ? h("div", { class: "message-footer" },
+        h("button", { class: "button button-small", type: "button", title: "Answer your last message again (Alt+R)",
+          onClick: () => ctx.regenerate() }, icon("refresh"), "Regenerate"),
+        h("span", { class: "muted" }, "Not happy with this answer? Get a new one."))
+      : null;
+    return h("article", { class: `message is-${assistant ? "assistant" : "user"}${options.editing ? " is-editing" : ""}`,
+      "aria-label": assistant ? "AI Assist" : "You" },
       h("div", { class: "message-header" }, h("span", { class: "message-role" }, assistant ? "◇ ai-assist" : "> you"),
-        h("div", { class: "message-actions" }, copy,
+        h("div", { class: "message-actions" }, edit, copy,
           h("button", { class: "button button-ghost button-small", type: "button", onClick: () => ctx.addToMemory(content),
             title: "Save this message as a shared note for every chat" }, "Add to memory"))),
-      bodyNode);
+      bodyNode, regenerate);
+  }
+
+  /**
+   * AI Assist's own reading of a command: warnings first, then what each part does and the
+   * files it names. At the second check only the warnings are repeated.
+   * @param {any} reading @param {boolean} brief
+   */
+  function readingBlock(reading, brief) {
+    if (!reading) return null;
+    const flags = reading.warnings.length ? h("ul", { class: "review-flags", "aria-label": "Warnings" },
+      reading.warnings.map((/** @type {any} */ warning) => h("li", { class: `review-flag is-${warning.kind}` }, warning.text))) : null;
+    if (brief) return flags;
+    return h("section", { class: "review-reading", "aria-label": "What AI Assist can tell" },
+      h("h3", null, "What AI Assist can tell"),
+      flags,
+      reading.steps.length ? h("ul", { class: "review-steps" }, reading.steps.map((/** @type {string} */ step) => h("li", null, step))) : null,
+      reading.files.length ? h("p", null, h("strong", null, "Files: "),
+        reading.files.map((/** @type {any} */ file) => `${file.path} (${file.effect})`).join(", ")) : null,
+      reading.addresses.length ? h("p", null, h("strong", null, "Web addresses: "), reading.addresses.join(", ")) : null,
+      h("p", { class: "muted" }, reading.note));
   }
 
   /** One review: what the agent wants to do, and the buttons to answer. @param {any} review */
@@ -159,10 +220,11 @@ export function createChatView(ctx) {
       ? (second
         ? h("p", { class: "review-warning" }, "It runs as a separate program with your account, outside the internet gate: "
           + "AI Assist cannot see or stop what it does online. Run it only if you expect what it does.")
-        : h("p", { class: "muted" }, `Folder: ${action.cwd}`, action.description ? h("br") : null, action.description || ""))
+        : h("p", { class: "muted" }, `Folder: ${action.cwd}`, action.description ? h("br") : null,
+          action.description ? `The AI says: “${action.description}”` : ""))
       : h("p", { class: "muted" }, `File: ${action.destination || action.path}. Review the exact change before applying it.`);
     const shown = command
-      ? h("pre", { class: "review-command", tabindex: "0" }, h("code", null, action.command))
+      ? [h("pre", { class: "review-command", tabindex: "0" }, h("code", null, action.command)), readingBlock(action.reading, second)]
       : h("pre", { class: "review-diff", tabindex: "0", "aria-label": `Changes to ${action.path}` }, h("code", null,
         diffLines(action.diff || "").map((line) => h("span", { class: `diff-line ${line.kind}` }, line.text + "\n"))));
     /** One answer at a time: both buttons wait for the server's reply. @param {string} choice */
@@ -251,6 +313,8 @@ export function createChatView(ctx) {
         icon("folder"), "Files") : null,
       developer ? h("button", { class: "button button-small", type: "button", disabled: busy, onClick: () => ctx.newTask(chat.id) },
         icon("plus"), "New task") : null,
+      h("button", { class: `icon-button${chat.pinned ? " is-on" : ""}`, type: "button", "aria-pressed": String(Boolean(chat.pinned)),
+        "aria-label": "Pin to top", title: chat.pinned ? "Unpin (Alt+P)" : "Pin to top (Alt+P)", onClick: () => ctx.togglePin(chat) }, icon("pin")),
       h("button", { class: "icon-button", type: "button", "aria-label": "Rename chat", title: "Rename", onClick: () => ctx.renameChat(chat),
         disabled: busy }, icon("edit")),
       h("button", { class: "icon-button", type: "button", "aria-label": "Delete chat", title: "Delete", onClick: () => ctx.deleteChat(chat),
@@ -259,7 +323,8 @@ export function createChatView(ctx) {
 
     // Messages: rebuilt when the chat or its message count changes; streaming text updates in place.
     const key = [chat?.id || "new", chat?.messages.length || 0, state.chatLoading, state.chatError || "", state.sendError || "",
-      Boolean(state.modelsError), Boolean(state.selectedModel), Boolean(state.streaming)].join("\u0000");
+      Boolean(state.modelsError), Boolean(state.selectedModel), Boolean(state.streaming), state.editing?.index ?? "",
+      chat?.messages.at(-1)?.content.length ?? ""].join("\u0000");
     if (key !== renderedKey) {
       renderedKey = key;
       streamNode = null;
@@ -268,8 +333,10 @@ export function createChatView(ctx) {
       else if (!chat || !chat.messages.length) {
         replace(messages, state.streaming || state.sendError ? [] : emptyState(state));
       } else {
-        replace(messages, chat.messages.filter((/** @type {any} */ m) => m.role !== "system")
-          .map((/** @type {any} */ m) => messageNode(m.role, m.content)));
+        const editable = chat.mode === "chat" && !state.streaming;
+        const lastAnswer = chat.messages.at(-1)?.role === "assistant" ? chat.messages.length - 1 : -1;
+        replace(messages, chat.messages.map((/** @type {any} */ m, /** @type {number} */ index) => m.role === "system" ? null
+          : messageNode(m.role, m.content, { index, editable, last: index === lastAnswer, editing: state.editing?.index === index })));
       }
       if (state.sendError) {
         messages.appendChild(h("div", { class: "message is-error", role: "alert" },
@@ -322,8 +389,13 @@ export function createChatView(ctx) {
     contextSelect.title = colibri ? "Colibri's context is set when its model is installed" : "Context for this chat's next answer";
     modelSelect.disabled = Boolean(state.streaming) || !state.models.length;
     const blocked = mismatch;
+    const editingLater = state.editing && chat ? chat.messages.length - state.editing.index - 1 : 0;
     replace(notice, mismatch ? h("div", { class: "notice is-amber" }, icon("lock"), h("div", null,
       `This chat was written with ${chat.backend || "Ollama"}. Switch the engine in Settings to continue it.`))
+      : state.editing && !state.streaming ? h("div", { class: "notice" }, icon("edit"), h("div", null,
+        h("strong", null, "Editing your message. "),
+        editingLater > 0 ? `Sending replaces it and the ${editingLater} message${editingLater === 1 ? "" : "s"} after it. ` : "Sending replaces it. ",
+        h("button", { class: "button button-small", type: "button", onClick: cancelEdit }, "Cancel (Esc)")))
       : developer && !state.streaming ? h("div", { class: "notice" }, icon("lock"), h("div", null,
         h("strong", null, "You approve every step. "), "The agent shows each file change and each command here before "
         + "it happens. Commands run with your account, outside the internet gate."))
@@ -338,7 +410,8 @@ export function createChatView(ctx) {
       : developer ? "Run the developer agent" : "Send message");
     hint.textContent = streaming ? (developer ? "Stop declines what is waiting; applied changes stay (Undo puts them back)."
       : "Stop keeps the part already written.")
-      : state.selectedModel ? "Enter to send · Shift+Enter for a new line" : "Choose a model to start.";
+      : !state.selectedModel ? "Choose a model to start."
+        : state.editing ? "Enter sends the edited message · Esc cancels" : "Enter to send · Shift+Enter for a new line";
     textarea.disabled = Boolean(blocked);
   }
 

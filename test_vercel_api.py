@@ -18,7 +18,8 @@ class VercelAPITests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
-        self.root = Path(temporary.name)
+        # Resolved, as validate_project makes it: a temporary folder can be a short 8.3 name.
+        self.root = Path(temporary.name).resolve()
         self.write("index.html", "hello")
         self.cancel = threading.Event()
         self.logs = []
