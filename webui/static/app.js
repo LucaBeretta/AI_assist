@@ -638,6 +638,7 @@ window.app = (() => {
         continue;
       }
       window.workspaceui?.onEvent(event);
+      window.welcomeui?.onEvent(event);
       if (event.type === "model_loading" || event.type === "model_loaded") {
         const text = event.type === "model_loading"
           ? `Loading ${event.model}… ${Math.floor(event.elapsed_seconds)} s`
@@ -884,6 +885,7 @@ window.app = (() => {
     } catch (error) { showError(error); }
     if (lastState?.interrupted?.length) status(`${lastState.interrupted.length} chat(s) have an interrupted reply: open them to keep or discard it.`);
     if (window.pywebview.api.status_snapshot) call("status_snapshot").then(value => window.workspaceui?.renderStatus(value)).catch(showError);
+    window.welcomeui?.onReady(lastState);
   });
   // ---------- right-click menu ----------
   function showMenu(event, items) {
@@ -1015,11 +1017,11 @@ window.app = (() => {
   element("open-palette").addEventListener("click", openPalette);
 
   // ---------- views (Chats / Developer / Models) ----------
-  const views = {chat: ["chat-view", "nav-chats"], dev: ["dev-view", "nav-dev"], models: ["models-view", "nav-models"]};
+  const views = {chat: ["chat-view", "nav-chats"], dev: ["dev-view", "nav-dev"], models: ["models-view", "nav-models"], welcome: ["welcome-view", null]};
   function showView(name) {
     for (const [key, [view, nav]] of Object.entries(views)) {
       element(view).hidden = key !== name;
-      element(nav).setAttribute("aria-current", key === name ? "page" : "false");
+      if (nav) element(nav).setAttribute("aria-current", key === name ? "page" : "false");
     }
     if (name === "dev") window.devui?.onShow?.();
     if (name === "models") window.modelsui?.onShow?.();
@@ -1029,10 +1031,13 @@ window.app = (() => {
   element("nav-models").addEventListener("click", () => showView("models"));
   element("open-models").addEventListener("click", () => showView("models"));
 
-  function selectModel(name) {
-    element("model").value = name;
+  async function selectModel(name, backend = "Ollama") {
+    element("model").value = modelValue(name, backend);
     controls();
-    if (selected && window.pywebview?.api?.set_chat_model) call("set_chat_model", selected, name).catch(showError);
+    if (selected && window.pywebview?.api?.set_chat_model) {
+      try { await call("set_chat_model", selected, name, backend); await reloadChat(selected); }
+      catch (error) { showError(error); throw error; }
+    }
   }
 
   function setPrompt(text) { element("prompt").value = text; fitPrompt(); scheduleDraft(); element("prompt").focus?.(); }

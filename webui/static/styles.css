@@ -575,6 +575,17 @@ code, kbd, pre, .mono { font-family: var(--mono); }
 .pull-other input { flex: 0 1 340px; height: 34px; padding: 0 10px; border: 1px solid var(--border-2); border-radius: var(--r); background: var(--raised); color: var(--text); font-size: 12.5px; }
 
 /* ---------- scrollbars ---------- */
+.welcome { overflow: auto; background: var(--bg); }
+.welcome-content { width: min(620px, 100%); margin: auto; padding: 48px 28px; }
+.welcome h1 { margin: 24px 0 10px; font-size: clamp(26px, 4vw, 36px); line-height: 1.2; letter-spacing: -.025em; font-weight: 600; color: var(--strong); }
+.welcome h2 { font-size: 15px; font-weight: 600; }
+.welcome-lead { color: var(--muted); margin: 0 0 32px; max-width: 48ch; }
+.welcome-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; margin-top: 24px; }
+.welcome .side-group { margin: 20px 0; padding: 16px 0; border-bottom: 1px solid var(--border); }
+.welcome .field select { padding: 10px; background: var(--panel); border: 1px solid var(--border-2); border-radius: var(--r); }
+#welcome-hardware { font-size: 13px; overflow-wrap: anywhere; }
+#welcome-download { display: flex; margin-top: 16px; }
+[hidden] { display: none !important; }
 * { scrollbar-width: thin; scrollbar-color: var(--border-2) transparent; }
 
 @media (prefers-reduced-motion: reduce) {

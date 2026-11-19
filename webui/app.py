@@ -119,6 +119,16 @@ class Api:
         self._colibri = colibri if colibri is not None else ColibriService(self._store.directory)
 
     @_json_method
+    def set_web_preferences(self, values):
+        if not isinstance(values, dict) or not set(values) <= {"first_run_complete"}:
+            raise ValueError("Choose supported web preferences.")
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("The web UI is closing.")
+            self._settings = settings.save(self._store.directory, {**self._settings, **values})
+            return {"ok": True, "settings": deepcopy(self._settings)}
+
+    @_json_method
     def list_prompts(self):
         with self._lock:
             return {"ok": True, "prompts": self._prompts.list()}

@@ -6,13 +6,15 @@ from pathlib import Path
 import tempfile
 
 
-DEFAULTS = {"idle_unload_minutes": 0}
+DEFAULTS = {"idle_unload_minutes": 0, "first_run_complete": False}
 
 
 def validate(values):
     minutes = values.get("idle_unload_minutes", 0)
     if type(minutes) is not int or not 0 <= minutes <= 1440:
         raise ValueError("Idle unload must be 0 (off) or 1 to 1440 minutes.")
+    if type(values.get("first_run_complete", False)) is not bool:
+        raise ValueError("First run completion must be true or false.")
     return {**DEFAULTS, **values}
 
 

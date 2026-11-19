@@ -11,6 +11,7 @@
   <script defer src="app.js"></script>
   <script defer src="developer.js"></script>
   <script defer src="models.js"></script>
+  <script defer src="welcome.js"></script>
 </head>
 <body>
 <div class="app">
@@ -64,6 +65,25 @@
     </aside>
 
     <main class="main">
+      <section id="welcome-view" class="view welcome" aria-labelledby="welcome-title" hidden>
+        <div class="welcome-content">
+          <span class="brand-name">◇ AI Assist</span>
+          <h1 id="welcome-title">Your first local conversation</h1>
+          <p class="welcome-lead">Choose a model that fits this computer. Your conversations stay here.</p>
+          <section class="side-group"><h2>This computer</h2><p id="welcome-hardware" class="mono">Reading hardware…</p></section>
+          <section class="side-group"><h2>A model to start with</h2>
+            <label class="field"><span>Recommended model</span><select id="welcome-model"></select></label>
+            <p id="welcome-reason" class="setting-hint"></p>
+            <div id="welcome-download" class="pull-progress" hidden><progress id="welcome-progress" max="1" value="0"></progress><span id="welcome-progress-text" class="mono"></span></div>
+            <p id="welcome-status" class="setting-hint" role="status" aria-live="polite"></p>
+          </section>
+          <div class="welcome-actions"><button id="welcome-skip" class="btn ghost" type="button">Skip for now</button>
+            <button id="welcome-retry" class="btn" type="button" hidden>Try again</button>
+            <button id="welcome-stop" class="btn" type="button" hidden>Stop download</button>
+            <button id="welcome-start" class="btn primary" type="button" disabled>Download model</button>
+            <button id="welcome-open" class="btn primary" type="button" hidden>Open the first chat</button></div>
+        </div>
+      </section>
       <div id="chat-view" class="view">
       <header class="header">
         <h1 id="chat-title">Conversation</h1>

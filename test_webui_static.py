@@ -63,6 +63,35 @@ vm.runInNewContext(fs.readFileSync(process.argv[1], 'utf8'), {document, window, 
 
 class StaticTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_welcome_handles_progress_fast_completion_open_and_skip(self):
+        self.run_scenario(r'''
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'welcome.js'),'utf8'), {document,window,Map,Set,Error,String,Number,Boolean,Array});
+        const api=window.pywebview.api;
+        api.set_web_preferences=async value=>{calls.push(['preferences',value.first_run_complete]); return {ok:true};};
+        api.recommend_models=async()=>({ok:true,hardware:{cpu:'CPU',ram_total_bytes:32*1024**3,gpus:[]},recommendations:[{name:'recommended',fit:'fits GPU'}]});
+        api.pull_model=async name=>{
+          window.app.onEvent([{type:'pull_progress',pull_id:'p1',model:name,completed:5,total:10,status:'downloading'},
+                              {type:'pull_done',pull_id:'p1',model:name}]);
+          return {ok:true,pull_id:'p1'};
+        };
+        api.set_chat_model=async(...args)=>{calls.push(['select',...args]);return {ok:true};};
+        api.state=async()=>({ok:true,engine:'Ollama',host:'localhost',models:['fake:7b'],settings:{first_run_complete:true}});
+        await window.listeners.pywebviewready();
+        await window.welcomeui.onReady({engine:'Ollama',models:[],settings:{first_run_complete:false}});
+        assert.equal(elements.get('welcome-view').hidden,false);
+        assert.match(elements.get('welcome-hardware').textContent,/32.0 GB RAM/);
+        await elements.get('welcome-start').listeners.click();
+        assert.equal(elements.get('welcome-progress').value,5);
+        assert.equal(elements.get('welcome-open').hidden,false);
+        assert.equal(elements.get('welcome-stop').hidden,true);
+        await elements.get('welcome-open').listeners.click();
+        assert.equal(elements.get('chat-view').hidden,false);
+        assert(calls.some(item=>item[0]==='select'&&item[2]==='recommended'));
+        await elements.get('welcome-skip').listeners.click();
+        assert(calls.some(item=>item[0]==='preferences'&&item[1]===true));
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
     def test_d5_memory_prompts_status_and_backend_selection(self):
         self.run_scenario(r'''
         vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'workspace.js'),'utf8'), {document,window,Map,Error,String,Number,Boolean,Array});
