@@ -26,6 +26,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
+      - name: Install test-only TLS dependency
+        run: python -m pip install cryptography
       - name: Syntax check
         run: python -m compileall -q .
       - name: Canonical Windows temporary directory
