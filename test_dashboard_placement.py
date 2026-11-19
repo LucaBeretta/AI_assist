@@ -17,7 +17,7 @@ EXTERNAL = _screen("mac-external", -800, 100, 800, 480, False)
 
 
 def saved_for(screen=EXTERNAL, x=-790, y=110, w=780, h=440):
-    return {"version": 1, "screen": screen,
+    return {"version": 1, "screen": dict(screen),
             "window": {"x": x, "y": y, "width": w, "height": h}}
 
 
