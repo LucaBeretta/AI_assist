@@ -65,6 +65,20 @@ vm.runInNewContext(fs.readFileSync(process.argv[1], 'utf8'), {document, window, 
 
 class StaticTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_reading_sharing_settings_never_enables_the_listener(self):
+        self.run_scenario(r'''
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'sharing.js'),'utf8'),{document,window,Map,Set,Error,String,Number,Boolean,Array,Date,Object});
+        window.pywebview.api.sharing_state=async()=>({ok:true,enabled:false,host:null,peers:{}});
+        window.pywebview.api.set_sharing=async (...args)=>{calls.push(['sharing',...args]);return {ok:true,job_id:'job'};};
+        await window.sharingui.openSettings();
+        assert(!calls.some(item=>item[0]==='sharing'));
+        assert.equal(elements.get('sharing-enabled').checked,false);
+        elements.get('sharing-enabled').checked=true;document.getElementById('sharing-address').value='192.168.1.10';
+        await elements.get('sharing-enabled').listeners.change();
+        assert.deepEqual(calls.at(-1),['sharing',true,'192.168.1.10']);
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
     def test_hourly_preview_does_not_enable_audio_and_model_reflection_is_plain_text(self):
         self.run_scenario(r'''
         vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'hourly.js'),'utf8'),{document,window,Map,Set,Error,String,Number,Boolean,Array,Date});

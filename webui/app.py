@@ -44,6 +44,7 @@ from app_core.privacy import privacy_status
 from compute_telemetry import TelemetrySampler
 from webui.compute import ComputePoller
 from app_core.hourly_status import HourlyStatusReport
+from webui.sharing import SharingApi
 import network_gate
 
 
@@ -86,7 +87,7 @@ def inference_message(message):
     return item
 
 
-class Api(PrivacyApi, ParityApi):
+class Api(SharingApi, PrivacyApi, ParityApi):
     def __init__(self, bridge, store=None, engine=None, hardware=None, desktop=None, colibri=None):
         self._bridge = bridge
         self._store = store if store is not None else ChatStore()
@@ -115,7 +116,8 @@ class Api(PrivacyApi, ParityApi):
         self._jobs = Jobs(self._bridge.emit)
         self._hybrid = hybrid_settings(self._store.directory)
         self._init_privacy()
-        self._compute = ComputePoller(TelemetrySampler(self._engine.ollama_url()), self._bridge.emit)
+        self._init_sharing()
+        self._compute = ComputePoller(TelemetrySampler(self._engine.ollama_url()), self._bridge.emit, peers=self._paired_records)
         self._last_update = None
         self._hourly = HourlyStatusReport(self._store, self._hourly_context, self._hourly_event)
 
@@ -1389,6 +1391,7 @@ class Api(PrivacyApi, ParityApi):
         self._hourly.close()
         self._compute.close()
         self._close_privacy()
+        self._close_sharing()
         self._status.close()
         with self._lock:
             self._closed = True

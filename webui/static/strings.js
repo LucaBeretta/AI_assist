@@ -442,7 +442,20 @@ window.i18n = (() => {
   "Not checked yet · check only when you choose.": "Non ancora controllato: la verifica parte solo su tua richiesta.",
   "Last check was blocked by your privacy settings.": "L’ultima verifica è stata bloccata dalle impostazioni di privacy.",
   "Last check could not be completed.": "Non è stato possibile completare l’ultima verifica.",
-  "Your app files differ from the latest GitHub copy.": "I file dell’app differiscono dall’ultima copia su GitHub."
+  "Your app files differ from the latest GitHub copy.": "I file dell’app differiscono dall’ultima copia su GitHub.",
+  "LAN pairing": "Abbinamento LAN",
+  "Manual only. Off on every launch. Pairing shares no chats, files, commands or inference.": "Solo manuale. Disattivato a ogni avvio. Non condivide chat, file, comandi o inferenza.",
+  "This computer's LAN IPv4 address": "Indirizzo IPv4 LAN di questo computer",
+  "Enable LAN pairing": "Abilita abbinamento LAN",
+  "Compare this certificate code on the other device before entering the PIN. PIN expires after 120 seconds; three attempts.": "Confronta questo codice del certificato sull’altro dispositivo prima di inserire il PIN. Il PIN scade dopo 120 secondi; tre tentativi.",
+  "Address": "Indirizzo",
+  "Certificate code": "Codice del certificato",
+  "New pairing PIN": "Nuovo PIN di abbinamento",
+  "Pair another device": "Abbina un altro dispositivo",
+  "Target LAN IPv4 address": "Indirizzo IPv4 LAN del dispositivo",
+  "Port": "Porta",
+  "Pair device": "Abbina dispositivo",
+  "PIN expired. Generate a new one.": "PIN scaduto. Generane uno nuovo."
 };
   const en = Object.fromEntries(Object.keys(it).map(key => [key, key]));
   const messages = {en, it};

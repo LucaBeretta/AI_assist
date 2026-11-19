@@ -18,6 +18,7 @@
   <script defer src="security.js"></script>
   <script defer src="compute.js"></script>
   <script defer src="hourly.js"></script>
+  <script defer src="sharing.js"></script>
 </head>
 <body>
 <div class="app">
@@ -378,6 +379,25 @@
     <div class="model-actions"><button id="firewall-on" class="btn" type="button" data-i18n="Turn lock on"></button><button id="firewall-off" class="btn" type="button" data-i18n="Turn lock off"></button><button id="firewall-relock" class="btn" type="button" data-i18n="Lock again"></button></div>
     <label class="setting-row"><span data-i18n="Lift temporarily"></span><select id="firewall-minutes"><option value="5">5 min</option><option value="15">15 min</option><option value="60">60 min</option></select><button id="firewall-lift" class="btn" type="button" data-i18n="Lift"></button></label>
     <details><summary data-i18n="Connection log"></summary><ol id="connection-log" class="connection-log"></ol></details>
+    <h3 data-i18n="LAN pairing"></h3>
+    <p class="setting-hint" data-i18n="Manual only. Off on every launch. Pairing shares no chats, files, commands or inference."></p>
+    <label class="setting-row"><span data-i18n="This computer's LAN IPv4 address"></span><input id="sharing-address" type="text" placeholder="192.168.1.10" autocomplete="off"></label>
+    <label class="check-row"><input id="sharing-enabled" type="checkbox"><span data-i18n="Enable LAN pairing"></span></label>
+    <div id="sharing-details" hidden>
+      <p class="setting-hint" data-i18n="Compare this certificate code on the other device before entering the PIN. PIN expires after 120 seconds; three attempts."></p>
+      <dl><dt data-i18n="Address"></dt><dd id="sharing-endpoint" class="mono"></dd><dt data-i18n="Certificate code"></dt><dd id="sharing-code" class="mono"></dd><dt>PIN</dt><dd id="sharing-pin" class="mono"></dd></dl>
+      <button id="sharing-new-pin" class="btn" type="button" data-i18n="New pairing PIN"></button>
+    </div>
+    <details><summary data-i18n="Pair another device"></summary>
+      <form id="pair-form">
+        <label class="setting-row"><span data-i18n="Target LAN IPv4 address"></span><input id="pair-address" type="text" required autocomplete="off"></label>
+        <label class="setting-row"><span data-i18n="Port"></span><input id="pair-port" type="number" min="1" max="65535" required></label>
+        <label class="setting-row"><span data-i18n="Certificate code"></span><input id="pair-code" type="text" pattern="[0-9A-Fa-f]{16}" required autocomplete="off"></label>
+        <label class="setting-row"><span>PIN</span><input id="pair-pin" type="password" inputmode="numeric" pattern="[0-9]{6}" required autocomplete="off"></label>
+        <button id="pair-submit" class="btn" type="submit" data-i18n="Pair device"></button>
+      </form>
+    </details>
+    <ul id="sharing-peers" class="connection-log"></ul><p id="sharing-status" class="setting-hint" role="status"></p>
   </section>
   <section class="setting-group"><h3 data-i18n="Hourly check-in"></h3>
     <label class="check-row"><input id="hourly-enabled" type="checkbox"><span data-i18n="Enable hourly quiet-time check-ins"></span></label>

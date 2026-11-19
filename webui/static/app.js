@@ -660,6 +660,7 @@ window.app = (() => {
       }
       window.workspaceui?.onEvent(event);
       window.welcomeui?.onEvent(event);
+      if (window.sharingui?.onEvent(event)) continue;
       if (window.securityui?.onEvent(event)) continue;
       if (window.computeui?.onEvent(event)) continue;
       if (window.hourlyui?.onEvent(event)) continue;
@@ -731,6 +732,7 @@ window.app = (() => {
     window.workspaceui?.openSettings();
     window.parityui?.openSettings();
     window.securityui?.openSettings();
+    window.sharingui?.openSettings();
     window.hourlyui?.openSettings();
     openDialog("settings-dialog");
   }
