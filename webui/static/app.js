@@ -280,6 +280,7 @@ const ctx = {
         flush();
         const current = store.get().chat;
         if (event.type === "start") update({ requestId: event.request });
+        else if (event.type === "status") update({ status: event.text });
         else if (event.type === "user") {
           accepted = true;
           if (current?.id === chatId) store.set({ chat: { ...current, messages: [...current.messages, event.message] } });

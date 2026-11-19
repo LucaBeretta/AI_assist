@@ -106,6 +106,8 @@ class ChatStore:
         for field in ("title", "model", "draft", "project_path"):
             if not isinstance(chat.get(field), str):
                 raise ChatStoreError(f"Chat {field} must be text.")
+        if not isinstance(chat.get("library_path", ""), str):
+            raise ChatStoreError("Chat library_path must be text.")
         project_files = chat.get("project_files", [])
         if not isinstance(project_files, list) or not all(isinstance(path, str) for path in project_files):
             raise ChatStoreError("Chat project_files must be a list of text paths.")

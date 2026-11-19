@@ -65,6 +65,16 @@ Ollama runs as its own native programs, so the gate cannot see inside them. **Se
 
 **Limits.** Audit hooks cannot see into native code: Python extensions that open their own connections are refused where they are known (`hf_xet`, `hf_transfer`, `pycurl`), and others are not checked. Python started with `-I`, `-E` or `-S` skips the child gate. The browser is outside the gate once a page is open. Audit hooks also cannot stop deliberately malicious code inside a gated process; the gate guards AI Assist's features and the programs it starts. The firewall lock is available on Windows only.
 
+## Chat with your documents
+
+**Chat options > Use documents from a folder...** lets a chat answer from your own files, entirely on this computer: manuals, notes, books, exported web pages. AI Assist reads the folder (text and code, Markdown, CSV/JSON, HTML, Word `.docx`, OpenDocument `.odt`, EPUB, and PDFs with ordinary text), finds the passages that best match each message by keyword relevance, and gives them to the model as numbered excerpts. The saved answer ends with **Sources from your documents**, so you can check each file. It needs no extra model and no download, so it works offline with the models you already have.
+
+- Only changed files are read again; the index lives in `libraries/` beside the saved chats, and your files are never changed.
+- Secret and private files are skipped exactly as for the developer agent (`.env`, keys, credentials, dependency and hidden folders).
+- Scanned PDFs (pictures of pages) and PDFs with unusual internal text encodings have no readable text; they are listed as skipped, never guessed.
+- Answers are only as good as the model: very small models (under about 1B parameters) often ignore the excerpts; an 8B model answers and cites them well.
+- **Stop using documents** detaches the folder. The web workspace uses a folder attached here and shows it in the chat's title line.
+
 ## Web workspace (preview)
 
 A modern interface for the same chats, in your browser, on this computer only. It needs Python but not Tkinter:

@@ -9,7 +9,7 @@ import time
 import tkinter as tk
 from tkinter import END, filedialog, messagebox, scrolledtext, simpledialog, ttk
 
-from app_core import approvals, backups
+from app_core import approvals, backups, documents
 from app_core.checkpoints import CheckpointError, CheckpointStore
 from backup_ui import BackupWindow
 from app_core import conversation as conversation_rules
@@ -156,6 +156,8 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         self.backup_running = False
         self.backup_job = None
         self.backup_window = None
+        self.answer_footer = ""
+        self.documents_indexing = False
         self.initialize_backend()
         self.initialize_hybrid()
         self.agent_settings = self.chat_store.directory / "agent.settings" if self.chat_store else None
@@ -356,6 +358,9 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         self.chat_menu.add_command(label="Back up all chats...", command=self.backup_chats)
         self.chat_menu.add_command(label="Restore chats from a backup...", command=self.open_backups)
         self.chat_menu.add_separator()
+        self.chat_menu.add_command(label="Use documents from a folder...", command=self.choose_documents)
+        self.chat_menu.add_command(label="Stop using documents", command=self.stop_using_documents)
+        self.chat_menu.add_separator()
         self.chat_menu.add_command(label="Delete chat", command=self.delete_chat)
         self.chat_actions = self.button(header, "Chat options", lambda: self.chat_menu.tk_popup(self.chat_actions.winfo_rootx(), self.chat_actions.winfo_rooty() + self.chat_actions.winfo_height()),
                                         c["background"], c["muted"], c["user"])
@@ -525,6 +530,10 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         self.chat_actions.config(state="normal" if (self.current_chat or self.history_records) and not busy else "disabled")
         for label in ("Rename chat", "Export chat...", "Delete chat"):
             self.chat_menu.entryconfigure(label, state="normal" if self.current_chat else "disabled")
+        ordinary = self.current_mode == "chat" and self.chat_store is not None and not self.documents_indexing
+        self.chat_menu.entryconfigure("Use documents from a folder...", state="normal" if ordinary else "disabled")
+        self.chat_menu.entryconfigure("Stop using documents", state="normal" if ordinary and
+                                      (self.current_chat or {}).get("library_path") else "disabled")
         ready = bool(self.model_name.get()) and not busy and (self.current_mode != "dev" or self.project_ready)
         self.composer_label.config(text="Describe your task" if self.current_mode == "dev" else "Message")
         self.input_box.config(state="normal" if ready else "disabled")
@@ -556,7 +565,10 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
             if self.current_mode == "dev" and title == "New chat":
                 title = Path(self.project_path).name if self.project_path else "Developer"
             self.heading_label.config(text=title)
-            self.chat_subtitle.config(text=(self.model_name.get() or "Choose a model") + ("  /  Coding agent" if self.current_mode == "dev" else "  /  Local conversation"))
+            library = (self.current_chat or {}).get("library_path") if self.current_mode == "chat" else ""
+            self.chat_subtitle.config(text=(self.model_name.get() or "Choose a model") + (
+                "  /  Coding agent" if self.current_mode == "dev" else
+                f"  /  Documents: {Path(library).name}" if library else "  /  Local conversation"))
 
     def show_section(self, section):
         if self.closing:
@@ -1274,8 +1286,15 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
             messages = conversation_rules.chat_messages(self.conversation, shared_context)
             self.set_status(f"{model} is thinking...")
             self.chat_cancel = threading.Event()
-            threading.Thread(target=self.fetch_response, args=(messages, prompt, model, context, self.chat_cancel),
-                             daemon=True).start()
+            self.answer_footer = ""
+            library = (self.current_chat or {}).get("library_path")
+            if library and self.chat_store is not None:
+                threading.Thread(target=self.fetch_with_documents, daemon=True,
+                                 args=(messages, prompt, model, context, self.chat_cancel, library,
+                                       1 if shared_context else 0, self.request_serial)).start()
+            else:
+                threading.Thread(target=self.fetch_response, args=(messages, prompt, model, context, self.chat_cancel),
+                                 daemon=True).start()
         self.update_controls()
         return "break"
 
@@ -1482,6 +1501,13 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
                 break
             if kind in ("backup", "restore"):
                 self.finish_backup_work(kind, data, error)
+            elif kind == "doc_index":
+                self.finish_documents_index(data, error)
+            elif kind == "doc_status" and (request == 0 and self.documents_indexing
+                                           or request == self.request_serial and self.is_waiting):
+                self.set_status(data)
+            elif kind == "doc_sources" and request == self.request_serial:
+                self.answer_footer = data
             elif kind == "chat_chunk" and request == self.request_serial and self.is_waiting and not self.agent_active:
                 self.append_stream(data)
             elif kind == "chat_metrics" and request == self.request_serial:
@@ -1540,6 +1566,10 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
             self.status_bar.refresh_now()
         self.activity.stop()
         self.activity.pack_forget()
+        # The documents an answer drew on are listed under it and saved with it.
+        footer, self.answer_footer = self.answer_footer, ""
+        if response and response.strip() and not error:
+            response += footer
         if stopped:
             if response and response.strip():
                 self.conversation.append({"role": "assistant", "content": response})
@@ -1689,6 +1719,88 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         skipped = len(self.chat_store.errors)
         self.set_status(f"Backed up {count} chat{'s' if count != 1 else ''} to {Path(destination).name}."
                         + (f" {skipped} damaged file{'s were' if skipped != 1 else ' was'} left out." if skipped else ""))
+
+    # ------------------------------------------------------------ chat with your documents
+
+    def choose_documents(self):
+        """Attach a folder of documents to this chat and read it in the background."""
+        if self.busy() or self.current_mode != "chat" or self.chat_store is None or self.documents_indexing:
+            return
+        folder = filedialog.askdirectory(parent=self.root, title="Choose a folder of documents for this chat")
+        if not folder:
+            return
+        try:
+            library = documents.library(folder, self.chat_store.directory)
+        except documents.LibraryError as error:
+            self.set_status(str(error), error=True)
+            return
+        if self.current_chat is None:
+            self.start_new_chat()
+        if self.current_chat is None:
+            return
+        self.set_chat_library(str(library.root))
+        self.documents_indexing = True
+        self.set_status(f"Reading the documents in {library.root.name}...")
+        self.update_controls()
+
+        def work():
+            try:
+                stats, error = library.update(progress=lambda text: self.workspace_events.put(("doc_status", 0, text, None))), None
+            except (documents.LibraryError, OSError) as failure:
+                stats, error = None, str(failure)
+            self.workspace_events.put(("doc_index", 0, (library.root.name, stats), error))
+
+        threading.Thread(target=work, name="documents", daemon=True).start()
+
+    def stop_using_documents(self):
+        if self.busy() or not (self.current_chat or {}).get("library_path"):
+            return
+        self.set_chat_library("")
+        self.set_status("This chat no longer uses documents. The folder and its files are unchanged.")
+
+    def set_chat_library(self, folder):
+        record = dict(self.current_chat, library_path=folder)
+        if not folder:
+            record.pop("library_path", None)
+        self.current_chat = record
+        self.history_records = [record if item["id"] == record["id"] else item for item in self.history_records]
+        self.queue_save(record)
+        self.saved_snapshot = None
+        self.update_heading()
+        self.update_controls()
+
+    def fetch_with_documents(self, messages, prompt, model, context_length, cancel_event, folder, position, request):
+        """Search the chat's documents, then ask the model with the best passages (worker thread)."""
+        try:
+            library = documents.library(folder, self.chat_store.directory)
+            library.update(progress=lambda text: self.workspace_events.put(("doc_status", request, text, None)),
+                           cancel=cancel_event)
+            found = library.search(prompt)
+        except (documents.LibraryError, OSError) as error:
+            self.response_queue.put((prompt, None, f"The chat's document folder could not be used: {error}",
+                                     cancel_event.is_set()))
+            return
+        self.workspace_events.put(("doc_sources", request, documents.sources_footer(found), None))
+        messages = list(messages)
+        messages.insert(position, {"role": "system", "content": documents.context_message(found, folder)})
+        self.workspace_events.put(("doc_status", request, f"{model} is thinking, with {len(found)} passage"
+                                   f"{'s' if len(found) != 1 else ''} from your documents...", None))
+        self.fetch_response(messages, prompt, model, context_length, cancel_event)
+
+    def finish_documents_index(self, data, error):
+        self.documents_indexing = False
+        name, stats = data
+        if error:
+            self.set_status(f"Could not read the documents in {name}: {error}", error=True)
+        else:
+            text = (f"Documents ready: {stats['files']} file{'s' if stats['files'] != 1 else ''} from {name}, "
+                    f"{stats['passages']} passages.")
+            if stats["skipped"]:
+                path, reason = stats["skipped"][0]
+                text += (f" {len(stats['skipped'])} file{'s were' if len(stats['skipped']) != 1 else ' was'} skipped "
+                         f"(for example {path}: {reason}).")
+            self.set_status(text, error=bool(stats["skipped"]) and not stats["files"])
+        self.update_controls()
 
     # ------------------------------------------------------------ automatic backups
 

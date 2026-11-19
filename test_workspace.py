@@ -955,6 +955,30 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         native_tool = next(item for item in saved["agent_history"] if item["role"] == "tool")
         self.assertEqual(native_tool, {"role": "tool", "tool_name": "read_file", "content": self.original_code})
 
+    def test_a_chat_answers_from_a_folder_of_documents_and_lists_its_sources(self):
+        documents_folder = self.folder / "manuals"
+        documents_folder.mkdir()
+        (documents_folder / "water.md").write_text("To purify water, boil it for one full minute.", encoding="utf-8")
+        (documents_folder / ".env").write_text("SECRET=never", encoding="utf-8")
+        with patch("workspace_ui.filedialog.askdirectory", return_value=str(documents_folder)):
+            self.app.chat_menu.invoke("Use documents from a folder...")
+        self.wait_for(lambda: not self.app.documents_indexing, "documents read")
+        self.assertIn("Documents ready: 1 file from manuals", self.app.status_label.cget("text"))
+        self.assertIn("Documents: manuals", self.app.chat_subtitle.cget("text"))
+        self.set_input("How long should I boil water to purify it?")
+        self.app.send_button.invoke()
+        self.wait_for(lambda: not self.app.is_waiting, "answer with documents")
+        sent = self.request.call_args.args[0]
+        system = "\n".join(item["content"] for item in sent if item["role"] == "system")
+        self.assertIn("boil it for one full minute", system)
+        self.assertNotIn("SECRET", system)
+        saved = self.load_saved(self.app.current_chat["id"])
+        self.assertEqual(saved["library_path"], str(documents_folder.resolve()))
+        self.assertEqual(saved["messages"][-1]["content"],
+                         "A local answer.\n\n---\nSources from your documents:\n[1] water.md, from line 1")
+        self.app.chat_menu.invoke("Stop using documents")
+        self.assertNotIn("library_path", self.load_saved(self.app.current_chat["id"]))
+
     def test_back_up_now_and_restore_a_deleted_chat_from_the_window(self):
         self.set_input("A chat worth keeping")
         self.app.conversation.append(dict(role="user", content="A chat worth keeping"))
