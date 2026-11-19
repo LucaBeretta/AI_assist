@@ -281,7 +281,7 @@ class SecurityTests(ServerCase):
         # Adding an endpoint is a security decision: update this list deliberately.
         self.assertEqual(sorted((method, pattern) for method, pattern, _, _ in Handler.ROUTES), sorted([
             ("POST", r"/api/session"), ("GET", r"/api/status"), ("GET", r"/api/models"), ("GET", r"/api/models/details"),
-            ("GET", r"/api/hardware"), ("GET", r"/api/chats"), ("POST", r"/api/chats"),
+            ("GET", r"/api/hardware"), ("GET", r"/api/compute"), ("GET", r"/api/chats"), ("POST", r"/api/chats"),
             ("GET", r"/api/chats/(?P<chat>[0-9a-f-]{36})"), ("PATCH", r"/api/chats/(?P<chat>[0-9a-f-]{36})"),
             ("DELETE", r"/api/chats/(?P<chat>[0-9a-f-]{36})"), ("POST", r"/api/chats/(?P<chat>[0-9a-f-]{36})/messages"),
             ("POST", r"/api/requests/(?P<request>[0-9a-f]{16})/cancel"), ("GET", r"/api/memory"), ("PUT", r"/api/memory"),
@@ -303,6 +303,27 @@ class ApiTests(ServerCase):
         self.assertEqual(body["capabilities"], {"chat": True, "developer_agent": False, "internet_approvals": False,
                                                 "project_files": "read-only"})
         self.assertEqual((body["engine"], body["endpoint_local"]), ("Ollama", True))
+
+    def test_compute_endpoint_requires_session_and_exposes_local_only(self):
+        response, _ = self.call("GET", "/api/compute", token=False)
+        self.assertEqual(response.status, 401)
+        fake = {"schema": 1, "device": "test-pc", "cpu": {"name": "CPU", "percent": 20},
+                "gpus": [], "ram": {"total_bytes": 1000, "available_bytes": 500},
+                "models": {"available": True, "installed": [], "loaded": []}}
+        with patch.object(self.workspace.compute_sampler, "sample", return_value=fake) as sample:
+            response, report = self.call("GET", "/api/compute")
+            self.assertEqual(response.status, 200)
+            self.assertEqual(report["local"], fake)
+            self.assertEqual(report["remote_telemetry"], False)
+            self.assertEqual(report["peers"], [])
+            self.assertNotIn("token", json.dumps(report))
+            self.call("GET", "/api/compute")
+            sample.assert_called_once()
+
+    def test_compute_endpoint_stays_read_only(self):
+        for method in ("POST", "PUT", "PATCH", "DELETE"):
+            response, _ = self.call(method, "/api/compute", body={} if method != "DELETE" else None)
+            self.assertEqual(response.status, 405)
 
     def test_models_report_placement_and_cloud_models(self):
         _, body = self.call("GET", "/api/models")
