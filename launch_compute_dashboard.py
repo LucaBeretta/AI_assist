@@ -4,21 +4,18 @@ This entrypoint opens NO LAN listener or discovery service. It uses local-only
 telemetry, and saved peer IDs are NOT interpreted as live connections.
 """
 
-from pathlib import Path
 from types import SimpleNamespace
 
-import network_gate
+from app_core.paths import data_directory
+from compute_dashboard import ComputeDashboard, saved_peer_records
 from gui_runtime import GUIRuntimeError, create_root
-from compute_dashboard import ComputeDashboard
+import network_gate
 
 
 def saved_peers():
     """Read only the default on-disk enrollment inventory, never peer secrets."""
     try:
-        from chat_store import ChatStore
-        from peer_pairing import TrustStore
-        folder = ChatStore().directory.parent / "pairing"
-        return TrustStore(folder)._read("paired_servers.json")
+        return saved_peer_records(data_directory().resolve())
     except (OSError, ValueError, TypeError):
         return {}
 

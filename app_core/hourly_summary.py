@@ -1,3 +1,6 @@
+"""What the hourly check-in says, without any window: recent chats, a short
+work snapshot, a fallback suggestion, and a device-health line."""
+
 from datetime import datetime, timedelta, timezone
 import re
 

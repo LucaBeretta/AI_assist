@@ -15,6 +15,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from app_core.privacy import is_local_url
 import network_gate
 from response_metrics import response_metrics
 
@@ -134,8 +135,7 @@ def ensure_running(base, check, progress=lambda text: None, environ=None):
         return
     except RuntimeError:
         pass
-    host = urllib.parse.urlsplit(base).hostname
-    if host not in ("localhost", "127.0.0.1", "::1"):
+    if not is_local_url(base):
         raise RuntimeError("The configured remote Ollama server is offline. Start it on that computer.")
     executable = shutil.which("ollama")
     if not executable:

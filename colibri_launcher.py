@@ -18,6 +18,9 @@ import threading
 import time
 import urllib.parse
 
+from app_core import privacy
+from app_core.processes import terminate_tree as _terminate_tree
+from app_core.settings import write_json
 import network_gate
 
 
@@ -68,9 +71,7 @@ def save_directory(directory, settings_path=None):
         path = Path(settings_path)
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            temporary = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-            temporary.write_text(json.dumps(data, indent=2), encoding="utf-8")
-            os.replace(temporary, path)
+            write_json(path, data)
         except OSError as error:
             raise ColibriError(f"Could not remember the colibri folder: {error}") from error
     return directory
@@ -216,10 +217,8 @@ def server_url(report):
 
 
 def is_local_url(url):
-    try:
-        return urllib.parse.urlsplit(url).hostname in ("127.0.0.1", "localhost", "::1")
-    except ValueError:
-        return False
+    """True when ``url`` is on this computer, by the internet gate's own rule."""
+    return privacy.is_local_url(url)
 
 
 def start_server(directory, progress=lambda text: None, timeout=1800, cancel_event=None):
@@ -394,31 +393,6 @@ def install_model(directory, model_id, on_progress, cancel_event, poll_seconds=2
 
 
 def terminate_tree(process):
-    """Stop a process and its children (download workers, compilers)."""
-    if process.poll() is not None:
-        return
-    if os.name == "nt":
-        try:
-            subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], stdin=subprocess.DEVNULL,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5, check=True,
-                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        except (OSError, subprocess.SubprocessError):
-            if process.poll() is None:
-                process.kill()
-    else:
-        import signal
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except (OSError, ProcessLookupError):
-            pass
-        try:
-            process.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except (OSError, ProcessLookupError):
-                pass
-    try:
-        process.wait(timeout=10)
-    except subprocess.TimeoutExpired:
-        process.kill()
+    """Stop a process and its children (download workers, compilers). A setup run
+    gets ten seconds to save its resumable download state."""
+    _terminate_tree(process, grace=10.0)

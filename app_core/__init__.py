@@ -9,6 +9,7 @@ same services, so business rules live here once:
 - ``privacy``: whether prompts stay on this computer.
 - ``settings`` / ``paths`` / ``instance_lock``: where data lives and who may write it.
 - ``streaming``: stoppable streamed requests.
+- ``processes``: stopping a started program and everything it started.
 
 The internet gate (network_gate.py) stays a standalone root module: Python
 programs AI Assist starts load it by file path, without this package.

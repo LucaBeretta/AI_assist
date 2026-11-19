@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 
 from peer_pairing import (
-    DISCOVERY_PORT, MAGIC, PROTOCOL, PairingError, PairingHost, PairingWindow,
+    MAGIC, PROTOCOL, PairingError, PairingHost, PairingWindow,
     TrustStore, _json_packet, discover, pair_with_host, parse_advertisement,
     permitted_ipv4, verification_code,
 )
@@ -70,6 +70,14 @@ class PairingWindowTests(unittest.TestCase):
             self.assertFalse(window.verify_once(wrong))
         self.assertFalse(window.verify_once(pin))
 
+    def test_non_ascii_pin_is_a_wrong_attempt_not_a_crash(self):
+        window = PairingWindow()
+        pin = window.open()
+        # compare_digest raises TypeError for non-ASCII str; JSON can also carry lone surrogates.
+        for bogus in ("١٢٣٤٥٦", "\ud800" * 6):
+            self.assertFalse(window.verify_once(bogus))
+        self.assertTrue(window.verify_once(pin))
+
     def test_expired_window_denies_correct_pin(self):
         with patch("peer_pairing.time.monotonic", side_effect=[50.0, 52.0]):
             window = PairingWindow()
@@ -84,9 +92,10 @@ class TrustStoreTests(unittest.TestCase):
             trust.save_server("client_1", "top-secret")
             self.assertTrue(trust.authenticate_client("client_1", "top-secret"))
             self.assertFalse(trust.authenticate_client("client_1", "wrong"))
-            self.assertNotIn("top-secret", (Path(directory) / "paired_clients.json").read_text())
+            self.assertNotIn("top-secret", (Path(directory) / "paired_clients.json").read_text(encoding="utf-8"))
             trust.save_client("server_1", "a" * 64, "another-secret", "192.168.1.5", 50001)
             self.assertEqual(trust.client_record("server_1")["address"], "192.168.1.5")
+            self.assertEqual(list(trust.paired_servers()), ["server_1"])
             trust.revoke("client_1", server=True)
             trust.revoke("server_1")
             self.assertFalse(trust.authenticate_client("client_1", "top-secret"))

@@ -15,11 +15,11 @@ from tkinter import font as tkfont
 from app_core.ollama import placement  # noqa: F401  (long-standing name)
 from app_core.privacy import FIREWALL_WARNINGS, is_cloud_model, privacy_status  # noqa: F401
 from app_core.privacy import is_local_url as is_local  # noqa: F401  (long-standing name)
+from coding_agent import MAX_STEPS as AGENT_MAX_STEPS
 import network_gate
 
 MONO_CANDIDATES = ("Cascadia Mono", "Cascadia Code", "Consolas", "SF Mono", "Menlo",
                    "JetBrains Mono", "DejaVu Sans Mono", "Liberation Mono", "Courier New")
-AGENT_MAX_STEPS = 12
 
 
 def mono_family(root):

@@ -850,6 +850,10 @@ def _notice(title, body, key):
         last = _noticed.get(key)
         if last is not None and now - last < NOTICE_SECONDS:
             return
+        if len(_noticed) >= 256:
+            # Only recent keys matter; drop the rest so a long session stays bounded.
+            for old in [old for old, shown in _noticed.items() if now - shown >= NOTICE_SECONDS]:
+                del _noticed[old]
         _noticed[key] = now
         if _notice_thread is None:
             _notice_thread = threading.Thread(target=_show_notices, name="internet-gate-notices", daemon=True)

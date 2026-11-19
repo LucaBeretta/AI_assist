@@ -97,8 +97,8 @@ class PathsAndSettingsTests(unittest.TestCase):
     def test_read_json_tolerates_missing_damaged_and_non_object_files(self):
         with tempfile.TemporaryDirectory() as folder:
             self.assertEqual(settings.read_json(Path(folder, "missing")), {})
-            Path(folder, "bad").write_text("{not json")
-            Path(folder, "list").write_text("[1]")
+            Path(folder, "bad").write_text("{not json", encoding="utf-8")
+            Path(folder, "list").write_text("[1]", encoding="utf-8")
             self.assertEqual(settings.read_json(Path(folder, "bad")), {})
             self.assertEqual(settings.read_json(Path(folder, "list")), {})
 
@@ -110,7 +110,7 @@ class PathsAndSettingsTests(unittest.TestCase):
             self.assertEqual(settings.load_backend(path, normalize_url, {}), ("Colibri", "http://127.0.0.1:9000/v1"))
             self.assertEqual(settings.load_backend(path, normalize_url, {"COLIBRI_URL": "http://127.0.0.1:7/v1"})[1],
                              "http://127.0.0.1:7/v1")
-            path.write_text(json.dumps({"backend": "Colibri", "url": "ftp://bad"}))
+            path.write_text(json.dumps({"backend": "Colibri", "url": "ftp://bad"}), encoding="utf-8")
             self.assertEqual(settings.load_backend(path, normalize_url, {})[0], "Ollama")
             with self.assertRaises(ValueError):
                 settings.save_backend(path, "Other", "x")
@@ -121,7 +121,7 @@ class PathsAndSettingsTests(unittest.TestCase):
             self.assertEqual(settings.load_file_limit(path), 64000)
             settings.save_file_limit(path, 512000)
             self.assertEqual(settings.load_file_limit(path), 512000)
-            path.write_text(json.dumps({"file_limit": 999}))
+            path.write_text(json.dumps({"file_limit": 999}), encoding="utf-8")
             self.assertEqual(settings.load_file_limit(path), 64000)
             with self.assertRaises(ValueError):
                 settings.save_file_limit(path, 5)

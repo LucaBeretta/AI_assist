@@ -21,6 +21,7 @@ import time
 import urllib.parse
 import urllib.request
 
+from app_core import ollama, privacy
 from model_advisor import detect_hardware
 
 
@@ -133,11 +134,11 @@ def _gpu_usage():
 
 
 def _is_loopback_ollama(url):
+    """Plain HTTP to this computer, by the internet gate's rule, without credentials."""
     try:
         parsed = urllib.parse.urlsplit(url)
-        return (parsed.scheme == "http" and parsed.hostname in
-                ("127.0.0.1", "localhost", "::1") and
-                (parsed.username is None and parsed.password is None))
+        return (parsed.scheme == "http" and parsed.username is None and parsed.password is None
+                and privacy.is_local_url(url))
     except (TypeError, ValueError):
         return False
 
@@ -172,8 +173,9 @@ def _installed_models(host):
 class TelemetrySampler:
     """Thread-safe polling; callers should sample on a worker, never Tk's thread."""
 
-    def __init__(self, ollama_host="http://127.0.0.1:11434"):
-        self.host = ollama_host
+    def __init__(self, ollama_host=None):
+        # The Ollama the app itself uses (OLLAMA_HOST); only a local one is polled.
+        self.host = ollama_host or ollama.base_url()
         self._lock = threading.Lock()
         self._previous_cpu = None
         self._hardware = {}
@@ -185,7 +187,8 @@ class TelemetrySampler:
             if not self._hardware or now - self._last_hardware >= 45:
                 try:
                     # This discovery reads local hardware. It may query Ollama's local port.
-                    self._hardware = detect_hardware("http://127.0.0.1:11434")
+                    self._hardware = detect_hardware(self.host if _is_loopback_ollama(self.host)
+                                                     else ollama.DEFAULT_URL)
                     self._last_hardware = now
                 except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired):
                     self._hardware = {}

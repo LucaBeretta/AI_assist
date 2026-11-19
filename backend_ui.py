@@ -1,13 +1,14 @@
 """Backend selection and Colibri integration for the existing workspace."""
 
 import os
-import threading
 import time
 import tkinter as tk
 from tkinter import messagebox, ttk
 import webbrowser
 
 from app_core import settings
+from app_core.streaming import run_stoppable
+from coding_agent import run_agent
 from colibri_backend import ColibriClient, normalize_url
 import colibri_launcher as launcher
 
@@ -215,7 +216,7 @@ class BackendMixin:
     def model_worker(self, action, selected, contexts=None):
         if self.backend != "Colibri":
             return super().model_worker(action, selected, contexts)
-        progress = lambda text: self.lifecycle_queue.put(("progress", text))
+        progress = self.lifecycle_progress
         errors, models = [], []
         try:
             if self.colibri_manageable():
@@ -274,7 +275,6 @@ class BackendMixin:
     def fetch_response(self, messages, user_input, model, context_length=None, cancel_event=None):
         if self.backend != "Colibri":
             return super().fetch_response(messages, user_input, model, context_length, cancel_event)
-        from AIassist import run_stoppable
         chunk, metrics, flush, parts = self.stream_callbacks(cancel_event)
 
         def request():
@@ -292,22 +292,7 @@ class BackendMixin:
     def agent_worker(self, request, host, model, root, messages, context, cancel):
         if self.backend != "Colibri":
             return super().agent_worker(request, host, model, root, messages, context, cancel)
-        from coding_agent import run_agent
-
-        def event(item):
-            self.workspace_events.put(("agent_event", request, item, None))
-
-        def approval(action):
-            decision = {"approved": False, "event": threading.Event(), "action": action}
-            self.workspace_events.put(("approval", request, decision, None))
-            while not decision["event"].wait(.1):
-                if cancel.is_set() or self.closed:
-                    return False
-            if decision["approved"] and not cancel.is_set():
-                return ({"approved": True, "destination": decision["destination"]}
-                        if decision.get("destination") else True)
-            return False
-
+        event, approval = self.agent_callbacks(request, cancel)
         try:
             if self.colibri_manageable():
                 event({"type": "status", "text": "Checking that colibri is running..."})

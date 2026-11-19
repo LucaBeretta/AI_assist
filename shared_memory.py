@@ -8,6 +8,8 @@ import tempfile
 
 
 MAX_NOTES = 4000
+# The app's own reply to an explicit memory command, shown only after the note is saved.
+MEMORY_RECEIPT = "Saved to shared memory. This note is available in other chats."
 _WORDS = re.compile(r"\w{3,}", re.UNICODE)
 _STOP = {"the", "and", "that", "this", "with", "from", "for", "you", "can", "have", "what", "please"}
 _REMEMBER = re.compile(r"^\s*(?:please\s+)?(?:/remember\s*|remember(?:\s+that\s+|\s*:\s*|\s+))(.+)$", re.I | re.S)
@@ -86,7 +88,7 @@ class SharedMemory:
         note = note.strip()
         if not note:
             raise ValueError("Enter a note to remember.")
-        if note and ("\n" + note + "\n") not in ("\n" + self.notes + "\n"):
+        if ("\n" + note + "\n") not in ("\n" + self.notes + "\n"):
             self.save((self.notes + "\n" + note).strip(), self.enabled)
 
     def context(self, prompt, records, current_id=None):

@@ -12,6 +12,15 @@ Sizes: S (≤1 day), M (2–4 days), L (1–2 weeks). Each item names its eviden
 - Web workspace (preview): loopback API and a page with streaming chat, Stop, Markdown, chats, models, settings, memory, connection log, a read-only developer view, inspector, themes, and responsive layout.
 - Tests: core, API contract and security, frontend unit tests (Node), page rules, and a browser end-to-end tool.
 
+## Done in the code-quality pass (branch `code-quality-pass`)
+
+- P0-4: appearance, colibri, hybrid and firewall-lift settings are written through `app_core.settings.write_json` (private, synced, atomic).
+- One rule for "is this host local?" (`app_core.privacy.is_local_url`, the gate's own rule), now also used by `colibri_launcher`, Ollama auto-start and the compute dashboard; the dashboard follows `OLLAMA_HOST` (audit C2).
+- One process-tree killer (`app_core.processes.terminate_tree`), one agent-approval bridge (`WorkspaceMixin.agent_callbacks`), one chat-search rule (`chat_store.matches`), one memory receipt, and `AGENT_MAX_STEPS` from `coding_agent.MAX_STEPS` (audit C2).
+- Retired the Vercel CLI flow and `OllamaAssistantBase.resize_chat` (audit C3).
+- Pairing prototype: a non-ASCII PIN is a wrong attempt rather than a crash; the discovery thread survives `stop()`; saved enrollments are read through `TrustStore.paired_servers()`.
+- Fixed a shared-fixture bug that failed five dashboard-placement tests when the suite ran in order.
+
 ## P0
 
 | # | Item | Size | Depends on | Done when |
@@ -19,7 +28,7 @@ Sizes: S (≤1 day), M (2–4 days), L (1–2 weeks). Each item names its eviden
 | P0-1 | **Approvals as a core service** (`AgentSession`): pending edit and command approvals become objects any interface can resolve, with the two-step, three-second confirmation enforced in the core rather than in the dialog. Tk is migrated first. | M | — | Tk approval tests pass through the service; the timing is enforced server-side. |
 | P0-2 | **Sandboxed agent commands** (`Executor` with Seatbelt, bubblewrap/Landlock, and Windows restricted-token backends). Fail closed: no network, writes to the project only. | L | — | Per-OS tests show network refused and writes outside the project refused. |
 | P0-3 | **CI** on Windows, macOS and Linux (Xvfb), Python 3.9 and 3.13, plus `node --test`. | S | — | Matrix green on every push; the support-matrix rows show evidence. |
-| P0-4 | **Private settings everywhere:** `appearance.settings`, `colibri.settings`, the hybrid config and `firewall-lift.json` go through `app_core.settings.write_json` (audit S4, C6). | S | — | A POSIX test shows 0600 for each file. |
+| P0-4 | ~~**Private settings everywhere**~~ Done in the code-quality pass; still wanted: a POSIX test showing 0600 for each file. | S | — | A POSIX test shows 0600 for each file. |
 
 ## P1
 
@@ -47,9 +56,6 @@ Sizes: S (≤1 day), M (2–4 days), L (1–2 weeks). Each item names its eviden
 
 ## P3
 
-- Retire `vercel_deploy.deploy_project` / `vercel_command` / `run_cli` (dead code, audit C3), keeping the validation helpers.
-- One process-tree killer (audit C2): `coding_agent._terminate_process_tree` and `colibri_launcher.terminate_tree`.
-- One agent-approval bridge for Ollama and Colibri (audit C2).
 - Replace 120 literal "Segoe UI" fonts in Tk with a platform font helper (audit X1).
 - Virtualize long message lists in Tk (audit P3), or stop investing in Tk once web parity lands.
-- `AGENT_MAX_STEPS` from `coding_agent` (audit C2).
+- Make the helpers other modules borrow public: `coding_agent._check_cancelled` / `_request_messages` (colibri_backend, hybrid_engine), `developer_tools._project_file` / `_project_root` (html_preview), `model_advisor._fallback_ram` (workspace_ui).

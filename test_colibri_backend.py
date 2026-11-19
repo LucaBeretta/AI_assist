@@ -111,7 +111,7 @@ class ColibriTests(unittest.TestCase):
                 return True
             result = run_agent(self.client.url, "glm", directory, [{"role": "user", "content": "Create hello.py"}],
                                lambda event: None, approve, chat_fn=self.client.agent_chat)
-            self.assertEqual(Path(directory, "hello.py").read_text(), "print('hello')\n")
+            self.assertEqual(Path(directory, "hello.py").read_text(encoding="utf-8"), "print('hello')\n")
         self.assertEqual(len(approvals), 1)
         self.assertEqual(result["assistant_text"], "Saved.")
         messages = self.requests[1][2]["messages"]
@@ -250,7 +250,7 @@ class BackendGuiTests(unittest.TestCase):
     def test_colibri_startup_chat_and_switch_back_to_ollama(self):
         from AIassist import AIAssistantGUI
         with tempfile.TemporaryDirectory() as directory, ExitStack() as mocks:
-            Path(directory, "backend.settings").write_text(json.dumps({"backend": "Colibri", "url": "http://localhost:8000/v1"}))
+            Path(directory, "backend.settings").write_text(json.dumps({"backend": "Colibri", "url": "http://localhost:8000/v1"}), encoding="utf-8")
             mocks.enter_context(patch.dict(os.environ, {"AI_ASSIST_DATA_DIR": directory, "COLIBRI_URL": "", "COLI_API_KEY": ""}))
             mocks.enter_context(patch("update_checker.UpdateChecker.check"))
             ensure = mocks.enter_context(patch("AIassist.ensure_ollama"))
@@ -312,7 +312,7 @@ class BackendGuiTests(unittest.TestCase):
                 self.assertEqual(app.backend, "Ollama")
                 ensure.assert_called()
                 self.assertNotEqual(str(app.download_models_button.cget("state")), "disabled")
-                self.assertNotIn("do-not-save-this-key", Path(directory, "backend.settings").read_text())
+                self.assertNotIn("do-not-save-this-key", Path(directory, "backend.settings").read_text(encoding="utf-8"))
                 app.open_chat(identity)
                 # The chat reopens on the engine it was written with, and its model returns.
                 self.assertEqual(app.backend, "Colibri")

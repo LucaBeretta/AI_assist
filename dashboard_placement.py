@@ -84,8 +84,6 @@ def _mac_screens():
 
 def _windows_screens():
     """EnumDisplayMonitors gives rectangles across the whole Windows desktop."""
-    from ctypes import wintypes
-
     class RECT(ctypes.Structure):
         _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
                     ("right", ctypes.c_long), ("bottom", ctypes.c_long)]

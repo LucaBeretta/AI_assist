@@ -4,14 +4,13 @@ import fnmatch
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
 import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from vercel_deploy import DeploymentCancelled, _cancelled, validate_project
+from vercel_deploy import DeploymentCancelled, check_cancelled, validate_project
 
 
 class VercelAPIError(RuntimeError):
@@ -52,7 +51,7 @@ class VercelAPI:
             on_output("Using the token's personal account.")
 
     def request(self, method, path, payload=None, headers=None):
-        _cancelled(self.cancel)
+        check_cancelled(self.cancel)
         body = payload if isinstance(payload, bytes) else json.dumps(payload).encode() if payload is not None else None
         request_headers = {"Authorization": "Bearer " + self.token,
                            "Content-Type": "application/octet-stream" if isinstance(payload, bytes) else "application/json"}
@@ -76,7 +75,7 @@ class VercelAPI:
             raise VercelAPIError(error.code, code, f"Vercel API ({error.code}, {method} {path}, {code or 'unknown_error'}): {message}") from None
         except (URLError, OSError):
             raise RuntimeError("Could not reach Vercel API. Check your connection and the Vercel dashboard before retrying.") from None
-        _cancelled(self.cancel)
+        check_cancelled(self.cancel)
         try:
             result = json.loads(raw) if raw.strip() else {}
             if not isinstance(result, dict):
@@ -131,7 +130,7 @@ def deployment_files(root, cancel):
         nonlocal total
         rules = inherited + _rules(folder, (".gitignore",))
         for path in sorted(folder.iterdir()):
-            _cancelled(cancel)
+            check_cancelled(cancel)
             name = path.name.lower()
             if (name in excluded or name == ".env" or name.startswith(".env.")
                     or name in {".npmrc", ".pypirc", "credentials.json"}
@@ -186,7 +185,7 @@ def deploy_project_api(folder, project, scope, domain, on_output, cancel, *, tok
     uploaded = set()
     total = 0
     for path in files:
-        _cancelled(cancel)
+        check_cancelled(cancel)
         if path.is_symlink() or not path.resolve().is_relative_to(root):
             raise ValueError("Project files changed during upload. Retry with a stable project folder.")
         data = path.read_bytes()
@@ -210,7 +209,7 @@ def deploy_project_api(folder, project, scope, domain, on_output, cancel, *, tok
     deadline = time.monotonic() + 900
     last_state = None
     while True:
-        _cancelled(cancel)
+        check_cancelled(cancel)
         state = deployment.get("readyState") or deployment.get("status")
         if state != last_state:
             on_output(f"Build status: {state or 'pending'}")
@@ -224,7 +223,7 @@ def deploy_project_api(folder, project, scope, domain, on_output, cancel, *, tok
         if time.monotonic() >= deadline:
             raise RuntimeError(f"Timed out waiting for the build. It may continue on Vercel: {url}")
         if cancel.wait(2):
-            _cancelled(cancel)
+            check_cancelled(cancel)
         deployment = api.request("GET", "/v13/deployments/" + quote(identifier, safe=""))
     result = dict(url=url, domain=domain, domain_assigned=False, domain_error="")
     if domain:

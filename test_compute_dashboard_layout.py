@@ -4,7 +4,7 @@ from collections import deque
 import unittest
 
 from compute_dashboard import (
-    ComputeDashboard, dashboard_layout, _value_ratio, _short, DASHBOARD_COLORS,
+    ComputeDashboard, dashboard_layout, _value_ratio, _short,
 )
 
 

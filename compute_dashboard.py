@@ -6,17 +6,25 @@ Worker threads never access Tk widgets. The window can be closed safely while
 a probe is in flight.
 """
 
+from collections import deque
+from pathlib import Path
 import queue
 import threading
 import time
 import tkinter as tk
-from collections import deque
 
 from compute_telemetry import TelemetrySampler
 from dashboard_placement import DashboardPlacement, geometry_string
 
 
 POLL_MS = 5000
+
+
+def saved_peer_records(chats_directory):
+    """The pairing enrollments saved beside the chats folder. Reading them opens
+    no socket and contacts no peer; a record is not proof a peer is online."""
+    from peer_pairing import TrustStore
+    return TrustStore(Path(chats_directory).parent / "pairing").paired_servers()
 
 
 def display_bytes(value):

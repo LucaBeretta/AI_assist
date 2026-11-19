@@ -66,7 +66,7 @@ def _process_is_running(pid):
     # A terminated process can briefly remain a zombie until its parent reaps it.
     process_status = Path(f"/proc/{pid}/stat")
     try:
-        if process_status.exists() and process_status.read_text().rsplit(")", 1)[1].split()[0] == "Z":
+        if process_status.exists() and process_status.read_text(encoding="utf-8").rsplit(")", 1)[1].split()[0] == "Z":
             return False
     except (OSError, IndexError):
         pass

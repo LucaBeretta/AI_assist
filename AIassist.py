@@ -188,12 +188,6 @@ class OllamaAssistantBase:
         )
         return button
 
-
-
-
-    def resize_chat(self, event):
-        self.chat_canvas.itemconfigure(self.chat_window, width=event.width)
-
     def scroll_messages(self, event):
         try:
             widget = self.root.winfo_containing(event.x_root, event.y_root)
@@ -208,7 +202,6 @@ class OllamaAssistantBase:
                 self.chat_canvas.yview_scroll(-int(event.delta / 120), "units")
                 return "break"
             widget = widget.master
-
 
     def use_suggestion(self, text):
         if self.is_waiting or self.is_loading_models or self.lifecycle_busy or not self.model_name.get():
@@ -344,9 +337,13 @@ class OllamaAssistantBase:
         self.set_status("Checking local models...")
         threading.Thread(target=self.model_worker, args=(action, selected, dict(self.model_contexts)), daemon=True).start()
 
+    def lifecycle_progress(self, text):
+        """Report model-lifecycle progress from a worker thread to the window."""
+        self.lifecycle_queue.put(("progress", text))
+
     def model_worker(self, action, selected, contexts=None):
         contexts = contexts or {}
-        progress = lambda text: self.lifecycle_queue.put(("progress", text))
+        progress = self.lifecycle_progress
         errors = []
         models, loaded = [], set()
         try:
@@ -466,7 +463,6 @@ class OllamaAssistantBase:
         self.new_chat()
         self.manage_models("start_one", self.model_name.get())
 
-
     def copy_message(self, message, button):
         self.root.clipboard_clear()
         self.root.clipboard_append(message)
@@ -477,7 +473,6 @@ class OllamaAssistantBase:
         if event.state & 0x0001:
             return None
         return self.send_prompt(event)
-
 
     def stream_callbacks(self, cancel_event=None):
         """Chunk and metrics callbacks for one streamed answer, plus the list of
@@ -514,7 +509,6 @@ class OllamaAssistantBase:
         response, error, stopped = run_stoppable(lambda: request_ollama(messages, model, **options), parts, cancel_event)
         flush()
         self.response_queue.put((user_input, response, error, stopped))
-
 
     def open_connection_log(self, event=None):
         if getattr(self, "connection_log", None) is None:

@@ -18,12 +18,11 @@ import threading
 
 from app_core.conversation import chat_messages
 from app_core.streaming import StreamStopped, run_stoppable
-from chat_store import ChatStoreError
+from chat_store import ChatStoreError, matches
 from response_metrics import metrics_summary, response_metrics
-from shared_memory import memory_note
+from shared_memory import MEMORY_RECEIPT, memory_note
 
 MAX_MESSAGE_CHARS = 100_000
-MEMORY_RECEIPT = "Saved to shared memory. This note is available in other chats."
 
 
 class ServiceError(Exception):
@@ -91,17 +90,8 @@ class ChatService:
         query = (query or "").casefold().strip()
         if mode not in (None, "chat", "dev"):
             raise ServiceError("Mode must be chat or dev.")
-        result = []
-        for record in self.records():
-            if mode and record["mode"] != mode:
-                continue
-            if query:
-                fields = [record["title"], record["model"], record.get("project_path", ""), record.get("draft", "")]
-                if not (any(query in field.casefold() for field in fields)
-                        or any(query in message["content"].casefold() for message in record["messages"])):
-                    continue
-            result.append(self.summary(record))
-        return result
+        return [self.summary(record) for record in self.records()
+                if (not mode or record["mode"] == mode) and matches(record, query)]
 
     def get(self, chat_id):
         try:

@@ -34,12 +34,12 @@ class ProgramTests(unittest.TestCase):
             ollama = Path(folder, "Programs", "Ollama")
             (ollama / "lib" / "ollama").mkdir(parents=True)
             for name in ("ollama.exe", "ollama app.exe", "lib/ollama/llama-server.exe", "notes.txt"):
-                Path(ollama, name).write_text("x")
+                Path(ollama, name).write_text("x", encoding="utf-8")
             colibri = Path(folder, "colibri")
             (colibri / ".git").mkdir(parents=True)
             (colibri / "c").mkdir()
-            Path(colibri, "c", "engine.exe").write_text("x")
-            Path(colibri, ".git", "hook.exe").write_text("x")
+            Path(colibri, "c", "engine.exe").write_text("x", encoding="utf-8")
+            Path(colibri, ".git", "hook.exe").write_text("x", encoding="utf-8")
             with patch.dict(os.environ, {"LOCALAPPDATA": folder}), patch("firewall_lock.shutil.which", return_value=None):
                 programs = lock.engine_programs(str(colibri))
         self.assertEqual(sorted(Path(program).name for program in programs),
@@ -50,7 +50,7 @@ class ProgramTests(unittest.TestCase):
             shims = Path(folder, "shims")
             shims.mkdir()
             for name in ("ollama.exe", "git.exe", "python.exe"):
-                Path(shims, name).write_text("x")
+                Path(shims, name).write_text("x", encoding="utf-8")
             with patch.dict(os.environ, {"LOCALAPPDATA": str(Path(folder, "missing"))}), \
                     patch("firewall_lock.shutil.which", return_value=str(shims / "ollama.exe")):
                 programs = lock.engine_programs()

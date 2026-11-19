@@ -6,7 +6,6 @@ are exact. The server runs for real on 127.0.0.1 and is called over HTTP.
 
 import http.client
 import json
-import os
 from pathlib import Path
 import socket
 import tempfile
@@ -408,7 +407,7 @@ class ApiTests(ServerCase):
     def test_engine_switch_is_saved_like_the_desktop_app(self):
         response, _ = self.call("PUT", "/api/settings/engine", {"backend": "Colibri"})
         self.assertEqual(response.status, 200)
-        saved = json.loads((self.store.directory / "backend.settings").read_text())
+        saved = json.loads((self.store.directory / "backend.settings").read_text(encoding="utf-8"))
         self.assertEqual(saved["backend"], "Colibri")
         response, _ = self.call("PUT", "/api/settings/engine", {"backend": "Cloud"})
         self.assertEqual(response.status, 400)
@@ -416,7 +415,7 @@ class ApiTests(ServerCase):
     def test_gate_log_shows_recent_decisions(self):
         log = self.store.directory / "network.log"
         log.write_text("cut line}\n" + json.dumps({"time": "t", "decision": "blocked", "kind": "Internet connection",
-                                                    "target": "example.com", "purpose": "", "source": "x.py"}) + "\n")
+                                                    "target": "example.com", "purpose": "", "source": "x.py"}) + "\n", encoding="utf-8")
         with patch("webui.server.network_gate.log_path", return_value=log):
             _, body = self.call("GET", "/api/log")
         self.assertEqual([(entry["decision"], entry["target"]) for entry in body["entries"]], [("blocked", "example.com")])
@@ -430,11 +429,11 @@ class ProjectFileTests(ServerCase):
         self.project = Path(folder.name, "project")
         (self.project / "src").mkdir(parents=True)
         (self.project / "src" / "main.py").write_bytes(b"print('hi')\n")
-        (self.project / ".env").write_text("TOKEN=secret\n")
-        (self.project / "server.pem").write_text("-----BEGIN PRIVATE KEY-----\n")
+        (self.project / ".env").write_text("TOKEN=secret\n", encoding="utf-8")
+        (self.project / "server.pem").write_text("-----BEGIN PRIVATE KEY-----\n", encoding="utf-8")
         (self.project / "node_modules").mkdir()
-        (self.project / "node_modules" / "dep.js").write_text("x")
-        Path(folder.name, "outside.txt").write_text("outside")
+        (self.project / "node_modules" / "dep.js").write_text("x", encoding="utf-8")
+        Path(folder.name, "outside.txt").write_text("outside", encoding="utf-8")
         self.developer = self.store.save(self.store.new_record(model="alpha:8b", mode="dev", project_path=str(self.project)))
 
     def test_files_of_a_chosen_project_are_listed_without_secrets(self):

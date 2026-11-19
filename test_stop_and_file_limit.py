@@ -80,9 +80,9 @@ class FileLimitAgentTests(unittest.TestCase):
         self.assertEqual(file_limit_value("nonsense"), 64000)
         settings = self.root / "agent.settings"
         self.assertEqual(load_file_limit(settings), 64000)
-        settings.write_text(json.dumps({"file_limit": 256000}))
+        settings.write_text(json.dumps({"file_limit": 256000}), encoding="utf-8")
         self.assertEqual(load_file_limit(settings), 256000)
-        settings.write_text(json.dumps({"file_limit": 12345}))
+        settings.write_text(json.dumps({"file_limit": 12345}), encoding="utf-8")
         self.assertEqual(load_file_limit(settings), 64000)
         self.assertEqual(file_limit_warning(64000, 131072), "")
         warning = file_limit_warning(512000, 4096, ram_free=8 * 1024 ** 3)
@@ -202,7 +202,7 @@ class StopAndLimitUITests(unittest.TestCase):
         with patch("workspace_ui.messagebox.askokcancel", return_value=True):
             self.app.choose_file_limit()
         self.assertEqual(self.app.agent_file_limit, 512000)
-        self.assertEqual(json.loads((self.history / "agent.settings").read_text())["file_limit"], 512000)
+        self.assertEqual(json.loads((self.history / "agent.settings").read_text(encoding="utf-8"))["file_limit"], 512000)
         self.assertIn("up to 512 KB", self.app.status_label.cget("text"))
 
 

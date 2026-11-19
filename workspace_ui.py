@@ -15,17 +15,17 @@ from capabilities_view import CapabilitiesView
 from background_saves import BackgroundSaves
 from deploy_dialog import DeployDialog
 from html_preview import HtmlPreviews, is_html
-from chat_store import ChatStore
+from chat_store import ChatStore, matches as chat_matches
 from hourly_status import HourlyStatusReport
 from coding_agent import FILE_LIMIT_CHOICES, estimate_tokens, run_agent
 from developer_tools import build_project_context, extract_code_blocks, fetch_model_capabilities, list_project_files, read_project_file
 from message_widgets import render_message
 import network_gate
 from response_metrics import metrics_summary, response_metrics
-from shared_memory import MAX_NOTES, SharedMemory, memory_note
+from shared_memory import MAX_NOTES, MEMORY_RECEIPT, SharedMemory, memory_note
 from appearance import DARK_THEMES, Appearance
 from status_bar import StatusBar, mono_family
-from compute_dashboard import ComputeDashboard
+from compute_dashboard import ComputeDashboard, saved_peer_records
 from developer_panel import DeveloperPanelMixin
 from feedback_ui import FeedbackMixin
 from hybrid_ui import HybridMixin, QUALITY_GUIDANCE
@@ -42,13 +42,7 @@ def _response_poll_interval(is_waiting, is_loading_models, lifecycle_busy, proje
     return POLL_IDLE_INTERVAL_MS
 
 
-def _history_matches(record, query):
-    """Search individual fields without copying the entire conversation."""
-    if not query:
-        return True
-    fields = (record["title"], record["model"], record.get("project_path", ""), record.get("draft", ""))
-    return (any(query in field.casefold() for field in fields)
-            or any(query in message["content"].casefold() for message in record["messages"]))
+_history_matches = chat_matches  # Long-standing name, used by tests and profile_workflows.py.
 
 
 def file_limit_label(value):
@@ -1172,10 +1166,9 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
             if note is not None:
                 if not self.add_shared_note(note):
                     return "break"
-                receipt = "Saved to shared memory. This note is available in other chats."
-                self.conversation.extend([dict(role="user", content=prompt), dict(role="assistant", content=receipt)])
+                self.conversation.extend([dict(role="user", content=prompt), dict(role="assistant", content=MEMORY_RECEIPT)])
                 self.display_message("You", prompt, "user")
-                self.display_message("AI Assist", receipt, "ai")
+                self.display_message("AI Assist", MEMORY_RECEIPT, "ai")
                 self.input_box.delete("1.0", END)
                 self.input_box.edit_reset()
                 self.persist_current()
@@ -1251,14 +1244,9 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         if self.compute_dashboard is not None and not self.compute_dashboard.closed:
             self.compute_dashboard.focus()
             return
-        def trusted_records():
-            # Enrollment records only, not proof that a peer is currently online.
-            # Do not open any sockets or enable sharing by reading these records.
-            if self.chat_store is None:
-                return {}
-            from peer_pairing import TrustStore
-            return TrustStore(self.chat_store.directory.parent / "pairing")._read("paired_servers.json")
-        self.compute_dashboard = ComputeDashboard(self, peer_records=trusted_records)
+        store = self.chat_store
+        self.compute_dashboard = ComputeDashboard(
+            self, peer_records=lambda: saved_peer_records(store.directory) if store is not None else {})
 
     def open_shared_memory(self):
         if self.closing:
@@ -1298,27 +1286,38 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         tk.Button(actions, text="Cancel", command=window.destroy).pack(side="right", padx=8)
         tk.Button(actions, text="Clear notes", command=lambda: editor.delete("1.0", END)).pack(side="left")
 
-    def agent_worker(self, request, host, model, root, messages, context, cancel):
+    def agent_callbacks(self, request, cancel):
+        """The agent's (event, approval) callbacks, for any engine. Both run on the
+        agent's worker thread and reach the window only through workspace_events;
+        approval blocks until the person decides in review_action, or cancels."""
         def event(item):
             self.workspace_events.put(("agent_event", request, item, None))
+
         def approval(action):
             decision = {"approved": False, "event": threading.Event(), "action": action}
             self.workspace_events.put(("approval", request, decision, None))
             while not decision["event"].wait(.1):
                 if cancel.is_set() or self.closed:
                     return False
-            if decision["approved"] and not cancel.is_set():
-                if decision.get("destination"):
-                    return {"approved": True, "destination": decision["destination"]}
-                return True
-            return False
+            if not decision["approved"] or cancel.is_set():
+                return False
+            if decision.get("destination"):
+                return {"approved": True, "destination": decision["destination"]}
+            return True
+
+        return event, approval
+
+    def agent_worker(self, request, host, model, root, messages, context, cancel):
+        event, approval = self.agent_callbacks(request, cancel)
         try:
             metadata_result = queue.Queue()
+
             def inspect_model():
                 try:
                     metadata_result.put((fetch_model_capabilities(host, model), None))
                 except Exception as error:
                     metadata_result.put((None, error))
+
             threading.Thread(target=inspect_model, daemon=True).start()
             while True:
                 if cancel.is_set():
@@ -1334,6 +1333,7 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
                 raise RuntimeError("This model does not advertise tool calling. Select Qwen Coder or another tool-capable model in the sidebar.")
             if self.active_hybrid_config:
                 snapshot = dict(self.active_hybrid_config)
+
                 def worker(worker_messages, emit):
                     return run_agent(host, model, root, worker_messages, emit, approval,
                                      cancel_event=cancel, context_length=context, file_limit=self.agent_file_limit)

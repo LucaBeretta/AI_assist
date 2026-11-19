@@ -120,12 +120,12 @@ class ColibriWorkspaceTests(unittest.TestCase):
         self.app.send_button.invoke()
 
     def state(self):
-        return json.loads((self.colibri / "c" / "state.json").read_text())
+        return json.loads((self.colibri / "c" / "state.json").read_text(encoding="utf-8"))
 
     def write_state(self, **changes):
         state = self.state()
         state.update(changes)
-        (self.colibri / "c" / "state.json").write_text(json.dumps(state))
+        (self.colibri / "c" / "state.json").write_text(json.dumps(state), encoding="utf-8")
 
     def switch_to_colibri(self):
         self.app.engine_choice.set("Colibri")
@@ -213,7 +213,7 @@ class ColibriWorkspaceTests(unittest.TestCase):
             self.wait_for(lambda: panel.installing is None and not panel.loading, "context change", timeout=15)
             self.assertIn("restarted with context 32,768 tokens", panel.message.cget("text"))
             self.assertIn("setup --ctx 32768 --yes --json --no-browser",
-                          (self.colibri / "c" / "calls.log").read_text().splitlines())
+                          (self.colibri / "c" / "calls.log").read_text(encoding="utf-8").splitlines())
 
             other = dict(CATALOG[1], id="qwen36-35b", name="Qwen3.6-35B", fits=True, status="good",
                          family="qwen36", recommended=False)
@@ -226,7 +226,7 @@ class ColibriWorkspaceTests(unittest.TestCase):
                 panel.choose(next(row for row, _ in panel.card_buttons if row["id"] == "qwen36-35b"))
             self.wait_for(lambda: panel.installing is None and not panel.loading, "fake install", timeout=20)
             self.assertEqual(self.state()["model"], "qwen36-35b")
-            self.assertEqual(json.loads((self.colibri / "c" / "setup.json").read_text())["ctx"], 0)
+            self.assertEqual(json.loads((self.colibri / "c" / "setup.json").read_text(encoding="utf-8"))["ctx"], 0)
             self.assertIn("Qwen3.6-35B is set up and starting", panel.message.cget("text"))
             replacement = FakeGateway([], model="qwen36-35b")
             self.addCleanup(replacement.close)

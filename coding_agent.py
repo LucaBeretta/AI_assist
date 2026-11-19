@@ -13,7 +13,6 @@ import json
 import os
 from pathlib import Path, PureWindowsPath
 import queue
-import signal
 import stat
 import subprocess
 import tempfile
@@ -23,6 +22,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from app_core.processes import terminate_tree
 import developer_tools as projects
 import network_gate
 from response_metrics import metrics_summary
@@ -31,6 +31,11 @@ from response_metrics import metrics_summary
 _MAX_FILE_BYTES = 64000
 # Sizes the user can allow the agent to read and edit (Developer > Files).
 FILE_LIMIT_CHOICES = (64000, 128000, 256000, 512000, 1000000)
+# Model requests in one agent turn; the status bar shows progress against it.
+MAX_STEPS = 12
+_MAX_OUTPUT_CHARS = 20000
+_MAX_RESPONSE_BYTES = 1024 * 1024
+_MAX_TOOL_CALLS = 8
 # Per-run settings for the worker thread running the agent: the chosen file
 # limit and the model's context, which decides when a file is read in parts.
 _run = threading.local()
@@ -43,9 +48,8 @@ def _file_limit():
 def estimate_tokens(size):
     """About four characters per token: a rough guide, not a tokenizer."""
     return max(1, int(size) // 4)
-_MAX_OUTPUT_CHARS = 20000
-_MAX_RESPONSE_BYTES = 1024 * 1024
-_MAX_TOOL_CALLS = 8
+
+
 _SYSTEM = (
     "You are the local AI Assist coding agent. Use the provided native tools to inspect, "
     "edit, and verify the selected project. Never claim to have edited files or run a "
@@ -299,32 +303,8 @@ def _write_file(project, arguments, approve_action, cancel_event, on_event, dest
 
 
 def _terminate_process_tree(process):
-    if process.poll() is not None:
-        return
-    if os.name == "nt":
-        try:
-            subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
-                           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                           timeout=5, check=False, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        except (OSError, subprocess.TimeoutExpired):
-            pass
-        if process.poll() is None:
-            process.kill()
-    else:
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-            process.wait(timeout=1)
-        except ProcessLookupError:
-            pass
-        except subprocess.TimeoutExpired:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-    try:
-        process.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        process.kill()
+    # A stopped or timed-out command gets one second to exit cleanly.
+    terminate_tree(process, grace=1.0)
 
 
 def _run_command(project, arguments, approve_action, cancel_event, on_event=None):
@@ -365,7 +345,8 @@ def _run_command(project, arguments, approve_action, cancel_event, on_event=None
                     decoded = decoder.decode(chunk)
                 with lock:
                     remaining = _MAX_OUTPUT_CHARS - count[0]
-                    output.append(decoded[:remaining]) if remaining else None
+                    if remaining:
+                        output.append(decoded[:remaining])
                     count[0] += min(remaining, len(decoded))
                     truncated[0] = truncated[0] or len(decoded) > remaining
                 if not chunk:
@@ -523,7 +504,7 @@ def _chat(host, model, messages, context_length, cancel_event):
 
 
 def run_agent(host, model, project_root, messages, on_event, approve_action,
-              cancel_event=None, context_length=4096, max_steps=12, chat_fn=None, file_limit=None):
+              cancel_event=None, context_length=4096, max_steps=MAX_STEPS, chat_fn=None, file_limit=None):
     """Run the agent with ``file_limit`` bytes as the largest file it may read or
     edit (default 64,000; FILE_LIMIT_CHOICES lists what the app offers)."""
     if file_limit is None:
@@ -539,7 +520,7 @@ def run_agent(host, model, project_root, messages, on_event, approve_action,
 
 
 def _run_agent(host, model, project_root, messages, on_event, approve_action,
-               cancel_event=None, context_length=4096, max_steps=12, chat_fn=None):
+               cancel_event=None, context_length=4096, max_steps=MAX_STEPS, chat_fn=None):
     """Run tools on a worker thread, returning the updated native chat history.
 
     ``approve_action`` must return exactly True to allow a reviewed operation.

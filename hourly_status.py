@@ -1,3 +1,10 @@
+"""The optional hourly check-in: after an hour of work and a quiet room, a short
+local summary of recent chats, this computer's health, and update status.
+
+Off by default. When on, the microphone gives sound levels only (quiet_audio);
+no audio is kept or sent. The summary uses a local Ollama model when one is
+selected, otherwise a fixed suggestion."""
+
 from datetime import datetime, timezone
 import json
 import os
@@ -249,7 +256,7 @@ class HourlyStatusReport:
         snapshot = hourly_summary.work_snapshot(chats)
         reflection = hourly_summary.fallback_feedback(snapshot)
         reflected_by_model = False
-        local_model = model and not model.casefold().endswith(("-cloud", ":cloud"))
+        local_model = bool(model) and not privacy.is_cloud_model(model)
         if snapshot["prompts"] and local_model and backend == "Ollama" and privacy.is_local_url(host):
             prompt = "Recent chat titles and the user's own prompts from the last hour:\n" + json.dumps(
                 {"topics": snapshot["topics"], "prompts": snapshot["prompts"]}, ensure_ascii=False)

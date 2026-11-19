@@ -25,6 +25,17 @@ class ChatStoreError(ValueError):
     """A saved chat is invalid, unreadable, or could not be safely written."""
 
 
+def matches(record, query):
+    """Whether a chat contains ``query`` (already casefolded) in its title, model,
+    project path, draft or any message. Stops at the first match, without copying
+    the conversation; every interface's search uses this one rule."""
+    if not query:
+        return True
+    fields = (record["title"], record["model"], record.get("project_path", ""), record.get("draft", ""))
+    return (any(query in field.casefold() for field in fields)
+            or any(query in message["content"].casefold() for message in record["messages"]))
+
+
 def _utc_now():
     return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
@@ -202,12 +213,8 @@ class ChatStore:
                 continue
             if mode is not None and chat["mode"] != mode:
                 continue
-            if query:
-                searchable = [chat["title"], chat["model"], chat["project_path"], chat["draft"]]
-                searchable.extend(message["content"] for message in chat["messages"])
-                if not any(query in text.casefold() for text in searchable):
-                    continue
-            chats.append(chat)
+            if matches(chat, query):
+                chats.append(chat)
         return sorted(chats, key=lambda chat: (_timestamp(chat["updated_at"], "updated_at"), chat["id"]),
                       reverse=True)
 

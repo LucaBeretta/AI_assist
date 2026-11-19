@@ -116,6 +116,11 @@ class TrustStore:
         with self._lock:
             return self._read("paired_servers.json").get(peer_id)
 
+    def paired_servers(self):
+        """Every saved server enrollment. Not evidence that any of them is online."""
+        with self._lock:
+            return self._read("paired_servers.json")
+
     def authenticate_client(self, peer_id, token):
         if not _safe_id(peer_id) or not isinstance(token, str):
             return False
@@ -196,7 +201,10 @@ class PairingWindow:
             if self._pin is None or time.monotonic() >= self._expiry or self._attempts <= 0:
                 return False
             self._attempts -= 1
-            if not isinstance(pin, str) or not hmac.compare_digest(self._pin, pin):
+            # Bytes, not str: compare_digest raises TypeError for non-ASCII text, and JSON
+            # may carry lone surrogates, which only "surrogatepass" can encode.
+            if not isinstance(pin, str) or not hmac.compare_digest(
+                    self._pin.encode(), pin.encode("utf-8", "surrogatepass")):
                 if self._attempts == 0:
                     self._pin = None
                 return False
@@ -253,22 +261,25 @@ class DiscoveryResponder:
         self._thread.start()
 
     def _listen(self):
+        # stop() clears self._socket from another thread; keep this thread's own reference.
+        sock = self._socket
+        if sock is None:
+            return
+        query = _json_packet({"magic": MAGIC, "version": PROTOCOL, "discover": True})
         response = _json_packet({"magic": MAGIC, "version": PROTOCOL,
                                  "node_id": self.node_id, "name": self.name,
                                  "port": self.port})
         while not self._done.is_set():
             try:
-                payload, (address, source_port) = self._socket.recvfrom(MAX_PACKET + 1)
+                payload, (address, source_port) = sock.recvfrom(MAX_PACKET + 1)
             except socket.timeout:
                 continue
             except OSError:
-                break
-            if payload != _json_packet({"magic": MAGIC, "version": PROTOCOL, "discover": True}):
-                continue
-            if not permitted_ipv4(address):
+                break  # stop() closed the socket.
+            if payload != query or not permitted_ipv4(address):
                 continue
             try:
-                self._socket.sendto(response, (address, source_port))
+                sock.sendto(response, (address, source_port))
             except OSError:
                 pass
 
@@ -383,7 +394,8 @@ class PairingHost:
 
     def stop(self):
         self.responder.stop()
-        self.httpd.shutdown() if self._thread else None
+        if self._thread:
+            self.httpd.shutdown()  # Only a running serve_forever() can be shut down.
         self.httpd.server_close()
         if self._thread:
             self._thread.join(timeout=3)

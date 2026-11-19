@@ -95,7 +95,7 @@ class AppearanceTests(unittest.TestCase):
 
     def test_saved_warm_classic_preferences_are_preserved(self):
         Path(self.folder.name, "appearance.settings").write_text(
-            json.dumps({"theme": "Warm", "style": "Classic"}))
+            json.dumps({"theme": "Warm", "style": "Classic"}), encoding="utf-8")
         appearance = Appearance(self.app)
         self.assertEqual((appearance.theme, appearance.style), ("Warm", "Classic"))
         self.assertEqual(self.app.COLORS["background"], "#faf9f5")
@@ -157,14 +157,14 @@ class AppearanceTests(unittest.TestCase):
             self.assertEqual(code.cget("selectforeground"), "#ffffff")
 
     def test_legacy_settings_load_and_new_preferences_do_not_pollute_history(self):
-        Path(self.folder.name, "appearance.json").write_text(json.dumps({"theme": "Dark", "style": "Modern"}))
+        Path(self.folder.name, "appearance.json").write_text(json.dumps({"theme": "Dark", "style": "Modern"}), encoding="utf-8")
         appearance = Appearance(self.app)
         self.assertEqual((appearance.theme, appearance.style), ("Dark", "Modern"))
         appearance.open()
         picker = next(widget for widget in appearance.window.winfo_children() if isinstance(widget, ttk.Combobox))
         picker.set("Light")
         picker.event_generate("<<ComboboxSelected>>")
-        saved = json.loads(Path(self.folder.name, "appearance.settings").read_text())
+        saved = json.loads(Path(self.folder.name, "appearance.settings").read_text(encoding="utf-8"))
         self.assertEqual(saved, {"theme": "Light", "style": "Modern"})
         self.assertEqual(self.app.chat_store.list_chats(), [])
         self.assertEqual(self.app.chat_store.errors, [])

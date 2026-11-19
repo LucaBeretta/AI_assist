@@ -2,11 +2,15 @@
 
 No GPU, Ollama or network service is required. Headless-safe: no Tk root.
 """
+from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import patch
 
 import compute_telemetry
-from compute_dashboard import display_bytes, format_snapshot, normalize_peer_rows, usage_percent
+from compute_dashboard import (display_bytes, format_snapshot, normalize_peer_rows, saved_peer_records,
+                               usage_percent)
+from peer_pairing import TrustStore
 
 
 class DashboardFormattingTests(unittest.TestCase):
@@ -65,9 +69,24 @@ class TelemetryTests(unittest.TestCase):
 
     def test_loopback_only_for_model_polling(self):
         self.assertTrue(compute_telemetry._is_loopback_ollama("http://127.0.0.1:11434"))
+        self.assertTrue(compute_telemetry._is_loopback_ollama("http://127.0.0.2:11434"))
         for host in ("http://8.8.8.8", "http://192.168.1.4:11434",
-                     "https://localhost:11434", "http://local.example"):
+                     "https://localhost:11434", "http://local.example", "http://user:pw@127.0.0.1:11434"):
             self.assertFalse(compute_telemetry._is_loopback_ollama(host), host)
+
+    def test_sampler_follows_the_ollama_the_app_uses(self):
+        with patch.dict("os.environ", {"OLLAMA_HOST": "127.0.0.1:11500"}):
+            self.assertEqual(compute_telemetry.TelemetrySampler().host, "http://127.0.0.1:11500")
+        self.assertEqual(compute_telemetry.TelemetrySampler("http://127.0.0.1:9").host, "http://127.0.0.1:9")
+
+
+class SavedPeerTests(unittest.TestCase):
+    def test_saved_peers_are_read_beside_the_chats_folder(self):
+        with tempfile.TemporaryDirectory() as folder:
+            chats = Path(folder) / "chats"
+            self.assertEqual(saved_peer_records(chats), {})
+            TrustStore(Path(folder) / "pairing").save_client("node_1", "b" * 64, "secret", "192.168.1.9", 50001)
+            self.assertEqual(saved_peer_records(chats)["node_1"]["address"], "192.168.1.9")
 
     def test_data_sampler_does_not_send_peer_requests(self):
         with patch("compute_telemetry.detect_hardware", return_value={

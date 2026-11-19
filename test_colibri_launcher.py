@@ -227,15 +227,17 @@ class LauncherTests(unittest.TestCase):
         self.assertFalse(rows[1]["fits"])
         with self.assertRaisesRegex(colibri_client.ColibriError, "no model set up"):
             colibri_client.start_server(self.colibri)
-        state = json.loads((self.colibri / "c" / "state.json").read_text())
+        state = json.loads((self.colibri / "c" / "state.json").read_text(encoding="utf-8"))
         state.update(model="qwen3-coder-30b", ready=True)
-        (self.colibri / "c" / "state.json").write_text(json.dumps(state))
+        (self.colibri / "c" / "state.json").write_text(json.dumps(state), encoding="utf-8")
         report = colibri_client.start_server(self.colibri)
         self.assertEqual(colibri_client.server_state(report), "ready")
         self.assertEqual(report["family"], "qwen36")
         self.assertEqual(colibri_client.server_url(report), "http://127.0.0.1:8123/v1")
         self.assertTrue(colibri_client.is_local_url("http://127.0.0.1:8123/v1"))
         self.assertFalse(colibri_client.is_local_url("http://192.168.1.20:8000/v1"))
+        # The internet gate's rule: all of 127.0.0.0/8 is this computer.
+        self.assertTrue(colibri_client.is_local_url("http://127.0.0.2:8000/v1"))
         self.assertIn("start --json --no-browser", self.calls())
         colibri_client.stop_server(self.colibri)
         self.assertEqual(colibri_client.server_state(colibri_client.status(self.colibri)), "stopped")
@@ -276,9 +278,9 @@ class LauncherTests(unittest.TestCase):
             colibri_client.install_model(self.colibri, "x", lambda *item: None, threading.Event(), ctx=True)
 
     def test_install_cancel_stops_the_process(self):
-        state = json.loads((self.colibri / "c" / "state.json").read_text())
+        state = json.loads((self.colibri / "c" / "state.json").read_text(encoding="utf-8"))
         state["step_seconds"] = 5
-        (self.colibri / "c" / "state.json").write_text(json.dumps(state))
+        (self.colibri / "c" / "state.json").write_text(json.dumps(state), encoding="utf-8")
         cancel = threading.Event()
         threading.Timer(0.5, cancel.set).start()
         started = time.monotonic()
@@ -290,7 +292,7 @@ class LauncherTests(unittest.TestCase):
     def test_missing_launcher_and_bad_output(self):
         with self.assertRaisesRegex(colibri_client.ColibriError, "not found"):
             colibri_client.status(self.folder)
-        (self.colibri / "c" / "coli").write_text("import sys\nprint('boom', file=sys.stderr)\nsys.exit(3)\n")
+        (self.colibri / "c" / "coli").write_text("import sys\nprint('boom', file=sys.stderr)\nsys.exit(3)\n", encoding="utf-8")
         with self.assertRaisesRegex(colibri_client.ColibriError, "exit 3.*boom"):
             colibri_client.status(self.colibri)
 
