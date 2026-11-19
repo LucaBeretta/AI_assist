@@ -16,6 +16,7 @@
   <script defer src="premium.js"></script>
   <script defer src="parity.js"></script>
   <script defer src="security.js"></script>
+  <script defer src="compute.js"></script>
 </head>
 <body>
 <div class="app">
@@ -47,6 +48,7 @@
         <button id="nav-models" class="nav-item" type="button" aria-current="false">
           <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"></rect><path d="M9 9h6v6H9z"></path></svg><span data-i18n="Models"></span>
         </button>
+        <button id="nav-compute" class="nav-item" type="button" aria-current="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"></path></svg><span data-i18n="Compute"></span></button>
         <button id="nav-capabilities" class="nav-item" type="button" aria-current="false">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6v4h4v8h-4v4H9v-4H5V8h4z"></path></svg><span data-i18n="Capabilities"></span>
         </button>
@@ -302,6 +304,16 @@
           </div>
         </div>
       </div>
+      <section id="compute-view" class="view" aria-labelledby="compute-title" hidden>
+        <header class="header"><h1 id="compute-title" data-i18n="Compute"></h1><p id="compute-note" class="setting-hint" role="status"></p></header>
+        <div class="compute-grid">
+          <section class="compute-panel"><h2>CPU</h2><p id="compute-cpu-name"></p><p id="compute-cpu" class="compute-reading"></p><progress id="compute-cpu-meter" max="100" hidden></progress></section>
+          <section class="compute-panel"><h2>GPU</h2><p id="compute-gpu-name"></p><p id="compute-gpu" class="compute-reading"></p><progress id="compute-gpu-meter" max="100" hidden></progress></section>
+          <section class="compute-panel"><h2>RAM</h2><p id="compute-ram" class="compute-reading"></p><progress id="compute-ram-meter" max="100" hidden></progress></section>
+          <section class="compute-panel compute-models"><h2 data-i18n="Models"></h2><p id="compute-model-note" class="setting-hint"></p><div class="compute-model-lists"><div><h3 data-i18n="Loaded now"></h3><ul id="compute-loaded"></ul></div><div><h3 data-i18n="Installed"></h3><ul id="compute-installed"></ul></div></div></section>
+          <section class="compute-panel"><h2 data-i18n="Paired devices"></h2><p class="setting-hint" data-i18n="Pairing records do not prove a device is online. No remote telemetry is requested."></p><ul id="compute-peers"></ul></section>
+        </div>
+      </section>
       <section id="capabilities-view" class="view" aria-labelledby="capabilities-title" hidden>
         <header class="header"><h1 id="capabilities-title" data-i18n="Capabilities"></h1><button id="capabilities-refresh" class="btn" type="button" data-i18n="Refresh"></button></header>
         <div class="models-scroll"><div class="models-page"><p class="setting-hint" data-i18n="Capabilities reported by the selected model. Unreported features remain unknown."></p><div id="capabilities-result" class="model-list" role="status"></div></div></div>

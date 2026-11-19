@@ -661,6 +661,7 @@ window.app = (() => {
       window.workspaceui?.onEvent(event);
       window.welcomeui?.onEvent(event);
       if (window.securityui?.onEvent(event)) continue;
+      if (window.computeui?.onEvent(event)) continue;
       if (window.parityui?.onEvent(event)) continue;
       if (event.type === "model_loading" || event.type === "model_loaded") {
         const text = event.type === "model_loading"
@@ -1028,8 +1029,9 @@ window.app = (() => {
   element("open-palette").addEventListener("click", openPalette);
 
   // ---------- views (Chats / Developer / Models) ----------
-  const views = {chat: ["chat-view", "nav-chats"], dev: ["dev-view", "nav-dev"], models: ["models-view", "nav-models"], welcome: ["welcome-view", null], capabilities: ["capabilities-view", "nav-capabilities"]};
+  const views = {chat: ["chat-view", "nav-chats"], dev: ["dev-view", "nav-dev"], models: ["models-view", "nav-models"], welcome: ["welcome-view", null], capabilities: ["capabilities-view", "nav-capabilities"], compute: ["compute-view", "nav-compute"]};
   function showView(name) {
+    window.computeui?.onVisible(name === "compute");
     for (const [key, [view, nav]] of Object.entries(views)) {
       element(view).hidden = key !== name;
       if (nav) element(nav).setAttribute("aria-current", key === name ? "page" : "false");
@@ -1042,6 +1044,7 @@ window.app = (() => {
   element("nav-dev").addEventListener("click", () => showView("dev"));
   element("nav-models").addEventListener("click", () => showView("models"));
   element("nav-capabilities").addEventListener("click", () => showView("capabilities"));
+  element("nav-compute").addEventListener("click", () => showView("compute"));
   element("open-models").addEventListener("click", () => showView("models"));
 
   async function selectModel(name, backend = "Ollama") {

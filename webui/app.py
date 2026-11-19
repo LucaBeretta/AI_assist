@@ -41,6 +41,8 @@ from webui.jobs import Jobs
 from webui.parity import ParityApi, hybrid_settings
 from webui.privacy import PrivacyApi
 from app_core.privacy import privacy_status
+from compute_telemetry import TelemetrySampler
+from webui.compute import ComputePoller
 import network_gate
 
 
@@ -112,6 +114,15 @@ class Api(PrivacyApi, ParityApi):
         self._jobs = Jobs(self._bridge.emit)
         self._hybrid = hybrid_settings(self._store.directory)
         self._init_privacy()
+        self._compute = ComputePoller(TelemetrySampler(self._engine.ollama_url()), self._bridge.emit)
+
+    @_json_method
+    def set_compute_active(self, active):
+        return self._compute.set_active(active)
+
+    @_json_method
+    def compute_state(self):
+        return self._compute.state()
 
     @_json_method
     def set_web_preferences(self, values):
@@ -1333,6 +1344,7 @@ class Api(PrivacyApi, ParityApi):
             self._bridge.emit("error", error=str(error))
 
     def _close(self, timeout=2):
+        self._compute.close()
         self._close_privacy()
         self._status.close()
         with self._lock:

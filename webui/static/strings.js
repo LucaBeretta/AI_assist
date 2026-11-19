@@ -410,7 +410,18 @@ window.i18n = (() => {
   "disabled": "disattivato",
   "changed": "modificato",
   "firewall off": "firewall disattivato",
-  "ignored": "non applicabile"
+  "ignored": "non applicabile",
+  "Compute": "Risorse",
+  "Reading local telemetry…": "Leggo le risorse locali…",
+  "No GPU reading": "Dati GPU non disponibili",
+  "No loaded models": "Nessun modello caricato",
+  "No installed models": "Nessun modello installato",
+  "Local Ollama only": "Solo Ollama locale",
+  "No paired devices": "Nessun dispositivo associato",
+  "Paired devices": "Dispositivi associati",
+  "Pairing records do not prove a device is online. No remote telemetry is requested.": "L’associazione non indica che un dispositivo sia online. Non viene richiesta telemetria remota.",
+  "paired · live telemetry unavailable": "associato · telemetria live non disponibile",
+  "{v0} more": "altri {v0}"
 };
   const en = Object.fromEntries(Object.keys(it).map(key => [key, key]));
   const messages = {en, it};

@@ -65,6 +65,19 @@ vm.runInNewContext(fs.readFileSync(process.argv[1], 'utf8'), {document, window, 
 
 class StaticTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_compute_pauses_when_hidden_and_does_not_invent_missing_metrics(self):
+        self.run_scenario(r'''
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'compute.js'),'utf8'),{document,window,Map,Set,Error,String,Number,Boolean,Array,Date});
+        window.pywebview.api.set_compute_active=async active=>{calls.push(['compute',active]);return {ok:true,data:null};};
+        await window.computeui.onVisible(true);
+        window.app.onEvent([{type:'compute',data:{snapshot:{cpu:{percent:null},ram:{},gpus:[]},values:{device:'Local',system:'Windows',cpu:'CPU',cpu_usage:'unavailable',ram:'unavailable',gpus:[],loaded:[],installed:[],models_available:false},peers:[],error:''}}]);
+        assert.equal(elements.get('compute-cpu').textContent,'unavailable');
+        assert.equal(elements.get('compute-cpu-meter').hidden,true);
+        await window.computeui.onVisible(false);
+        assert.deepEqual(calls.at(-1),['compute',false]);
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
     def test_internet_dialog_blocks_on_enter_escape_and_close_and_escapes_details(self):
         self.run_scenario(r'''
         vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'security.js'),'utf8'),{document,window,Map,Set,Error,String,Number,Boolean,Array,Date});
