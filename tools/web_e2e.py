@@ -293,13 +293,45 @@ try:
                 or (e.get("method") == "Runtime.consoleAPICalled" and e["params"]["type"] == "error")]
     check("no script errors or CSP violations", not problems, json.dumps(problems)[:800])
 finally:
-    # The browser starts child processes; stop the whole tree so no old page keeps polling.
+    # Close the browser through DevTools. On Windows the launched process may hand
+    # over to a detached one, so anything still using this test's profile is stopped too.
+    try:
+        version = json.load(urllib.request.urlopen(f"http://127.0.0.1:{DEBUG_PORT}/json/version", timeout=5))
+        CDP(version["webSocketDebuggerUrl"]).send("Browser.close")
+    except (OSError, ValueError, KeyError, RuntimeError, ConnectionError):
+        pass
     if os.name == "nt":
         subprocess.run(["taskkill", "/PID", str(edge.pid), "/T", "/F"], capture_output=True)
     else:
-        os.killpg(edge.pid, signal.SIGKILL)
+        try:
+            os.killpg(edge.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+    def stop_profile_processes():
+        """Stop every process using this test's profile; how many were found."""
+        if os.name == "nt":
+            script = ("$found = @(Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like $env:E2E_PROFILE }); "
+                      "$found | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }; "
+                      "$found.Count")
+            output = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
+                                    env=dict(os.environ, E2E_PROFILE=f"*{PROFILE}*"), capture_output=True, text=True).stdout
+            return int(output.strip() or 0) if output.strip().isdigit() else 0
+        return 1 if subprocess.run(["pkill", "-9", "-f", PROFILE], capture_output=True).returncode == 0 else 0
+
+    # Child processes can still be starting or exiting: repeat until a pass finds none.
+    for _ in range(10):
+        time.sleep(1)
+        if not stop_profile_processes():
+            break
+    else:
+        print(f"Warning: some browser processes using {PROFILE} could not be stopped.")
     server.kill()
     server.wait(timeout=10)
+    server.stdout.close()
+    time.sleep(1)  # let the browser release its profile files
+    for folder in (DATA, project, PROFILE):
+        shutil.rmtree(folder, ignore_errors=True)
 
 failed = [name for name, ok, _ in results if not ok]
 print(f"\n{len(results) - len(failed)}/{len(results)} checks passed")
