@@ -10,6 +10,8 @@ import queue
 import threading
 import time
 import tkinter as tk
+from tkinter import messagebox, simpledialog
+import platform
 from collections import deque
 
 from compute_telemetry import TelemetrySampler
@@ -157,6 +159,8 @@ class ComputeDashboard:
         self.placement = DashboardPlacement()
         self._placement_after = None
         self._restoring = True
+        self._alerts_stop = None
+        self._alerts_thread = None
         p = DASHBOARD_COLORS
 
         self.window = tk.Toplevel(self.root)
@@ -194,6 +198,14 @@ class ComputeDashboard:
             padx=10, pady=4, bd=0, relief="flat", cursor="hand2",
             takefocus=True)
         self.refresh_button.pack(side="right")
+        if platform.system() == "Darwin":
+            self.alerts_button = tk.Button(
+                header, text="ALERTS OFF", font=("Segoe UI", 9),
+                command=self.toggle_availability_alerts, bg=p["chip"], fg=p["ink"],
+                activebackground=p["outline"], activeforeground=p["ink"],
+                padx=8, pady=4, bd=0, relief="flat", cursor="hand2",
+                takefocus=True)
+            self.alerts_button.pack(side="right", padx=(0, 6))
 
         footer = tk.Frame(self.window, bg=p["background"], height=25)
         footer.pack(side="bottom", fill="x", padx=14, pady=(0, 5))
@@ -457,6 +469,46 @@ class ComputeDashboard:
             self.status.configure(text=(f"STALE · {age}s" if age > 15 else f"UPDATED {age}s AGO"))
         self._after_id = self.root.after(250, self._tick)
 
+    def toggle_availability_alerts(self):
+        """Mac-only, explicitly opted-in monitor for authenticated paired nodes."""
+        if self.closed or platform.system() != "Darwin":
+            return
+        if self._alerts_stop is not None:
+            self._alerts_stop.set()
+            self._alerts_stop = None
+            self.alerts_button.config(text="ALERTS OFF")
+            self.privacy_label.config(text="● LOCAL METRICS · LAN ALERTS OFF · SHARING MANUAL")
+            return
+        from paired_node_watch import pairing_directory, watch_paired_nodes
+        from peer_pairing import TrustStore
+        store = TrustStore(pairing_directory())
+        if not store._read("paired_servers.json"):
+            messagebox.showinfo("AI Assist pairing",
+                                "Pair your Windows computer first. Alerts work only for trusted nodes.",
+                                parent=self.window)
+            return
+        client_id = simpledialog.askstring(
+            "AI Assist · LAN alerts",
+            "Client ID used when pairing this Mac (example: mac_1):",
+            parent=self.window)
+        if not client_id:
+            return
+        from paired_node_watch import CLIENT_ID_RE
+        if CLIENT_ID_RE.fullmatch(client_id) is None:
+            messagebox.showerror("Invalid client ID",
+                                 "Use the original pairing client ID (letters, numbers, _ or -).",
+                                 parent=self.window)
+            return
+        stop = threading.Event()
+        self._alerts_stop = stop
+        self._alerts_thread = threading.Thread(
+            target=watch_paired_nodes,
+            kwargs={"client_id": client_id, "stop_event": stop, "store": store},
+            name="ai-assist-availability-watch", daemon=True)
+        self._alerts_thread.start()
+        self.alerts_button.config(text="ALERTS ON")
+        self.privacy_label.config(text="● LOCAL METRICS · VERIFIED LAN ALERTS ON · SHARING MANUAL")
+
     def toggle_fullscreen(self, _event=None):
         if self.closed:
             return
@@ -486,6 +538,9 @@ class ComputeDashboard:
     def close(self):
         if self.closed:
             return
+        if self._alerts_stop is not None:
+            self._alerts_stop.set()
+            self._alerts_stop = None
         if self._placement_after is not None:
             try:
                 self.window.after_cancel(self._placement_after)
