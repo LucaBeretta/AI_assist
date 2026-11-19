@@ -318,14 +318,17 @@ def _edit_file(project, arguments, approve_action, cancel_event, on_event):
 def _read_file(project, arguments, on_event):
     """Read a file, or a line range. A file too large for the model's context is
     returned in parts, with the line numbers to ask for next."""
-    _safe_target(project, arguments.get("path"))
-    content = projects.read_project_file(project, arguments.get("path"), max_bytes=_file_limit())
+    target, _ = _safe_target(project, arguments.get("path"))
     start = arguments.get("start_line", 1)
     end = arguments.get("end_line")
     if isinstance(start, bool) or not isinstance(start, int) or start < 1:
         raise ValueError("start_line must be a positive line number.")
     if end is not None and (isinstance(end, bool) or not isinstance(end, int) or end < start):
         raise ValueError("end_line must be a line number at or after start_line.")
+    if target.stat().st_size > _file_limit() and end is not None:
+        content = projects.read_project_file(project, arguments.get("path"), max_bytes=_file_limit(), start_line=start, end_line=end)
+        return f"File: {arguments['path']} (lines {start}-{end}, bounded range of a large file)\n" + content
+    content = projects.read_project_file(project, arguments.get("path"), max_bytes=_file_limit())
     lines = content.splitlines(keepends=True)
     context = getattr(_run, "context_length", None) or 4096
     budget = max(2000, context)  # characters for one read: about a quarter of the context

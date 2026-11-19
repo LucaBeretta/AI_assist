@@ -193,7 +193,7 @@ def list_project_files(root, limit=250):
     return sorted(files, key=lambda item: (item["path"].casefold(), item["path"]))[:limit]
 
 
-def read_project_file(root, relative_path, max_bytes=64000):
+def read_project_file(root, relative_path, max_bytes=64000, start_line=None, end_line=None):
     """Read one project file as UTF-8, rejecting secrets, escapes, and binaries."""
     _positive_integer(max_bytes, "The file size limit")
     project = _project_root(root)
@@ -204,6 +204,26 @@ def read_project_file(root, relative_path, max_bytes=64000):
         metadata = target.stat()
         if not stat.S_ISREG(metadata.st_mode):
             raise ValueError(f"Cannot read '{label}': choose a regular text file.")
+        if start_line is not None or end_line is not None:
+            if (type(start_line) is not int or type(end_line) is not int
+                    or not 1 <= start_line <= end_line):
+                raise ValueError("Choose positive, inclusive start_line and end_line values.")
+            chunks, selected, scanned = [], 0, 0
+            with target.open("rb") as source:
+                for number in range(1, end_line + 1):
+                    data = source.readline(max_bytes + 1)
+                    if not data:
+                        break
+                    scanned += len(data)
+                    if len(data) > max_bytes or scanned > 64 * 1024 * 1024:
+                        raise ValueError("The line or scan exceeds the bounded range reading limit.")
+                    text = _decode_text(data)
+                    if number >= start_line:
+                        selected += len(data)
+                        if selected > max_bytes:
+                            raise ValueError(f"The selected range exceeds the {max_bytes:,}-byte limit; request fewer lines.")
+                        chunks.append(text)
+            return "".join(chunks)
         if metadata.st_size > max_bytes:
             raise ValueError(f"Cannot read '{label}': file exceeds the {max_bytes:,}-byte limit.")
         with target.open("rb") as source:
