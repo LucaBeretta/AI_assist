@@ -333,6 +333,10 @@ def _terminate_process_tree(process):
         process.kill()
 
 
+# Used when the model gives no description; interfaces then show none.
+DEFAULT_COMMAND_DESCRIPTION = "Run this shell command in the selected project."
+
+
 def _run_command(project, arguments, approve_action, cancel_event, on_event=None):
     command = arguments.get("command")
     if not isinstance(command, str) or not command.strip() or len(command) > 12000 or "\x00" in command:
@@ -340,7 +344,7 @@ def _run_command(project, arguments, approve_action, cancel_event, on_event=None
     timeout = arguments.get("timeout_seconds", 60)
     if isinstance(timeout, bool) or not isinstance(timeout, int) or not 1 <= timeout <= 120:
         raise ValueError("Command timeout must be between 1 and 120 seconds.")
-    description = arguments.get("description") or "Run this shell command in the selected project."
+    description = arguments.get("description") or DEFAULT_COMMAND_DESCRIPTION
     if not isinstance(description, str):
         raise ValueError("Command description must be text.")
     _check_cancelled(cancel_event)

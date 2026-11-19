@@ -60,6 +60,8 @@ AI Assist works offline. Nothing it does reaches the internet until you approve 
 
 **Developer agent commands.** A command can start any program (git, npm, curl), and Windows cannot firewall "programs started by AI Assist" without cutting off the whole PC. So every command needs two confirmations: **Run command**, then **Run**, which unlocks after three seconds on a second step that explains the command runs outside the gate. Each confirmed command is written to the connection log and announced with a notification.
 
+Each command review also shows **what AI Assist can tell** about it, worked out on this computer: what each program does, the files and web addresses it names, and warnings for hidden or encoded commands, administrator rights, system changes, deleting, going online, installing, paths outside the project, unchecked scripts and unknown programs. It is a reading aid, not a guarantee, and it never replaces a confirmation. The model's own description is shown separately as "The AI says", because a model can be wrong or misled by what it read.
+
 ### Firewall lock
 
 Ollama runs as its own native programs, so the gate cannot see inside them. **Settings > Firewall lock...** (Windows) adds Windows Firewall rules that block every program in Ollama's folder, and any native program in the colibri folder, from internet addresses. The rules apply even when AI Assist is closed and when you use Ollama directly. This computer and your local network keep working. A startup task turns the rules back on after a restart.

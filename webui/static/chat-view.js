@@ -146,6 +146,26 @@ export function createChatView(ctx) {
       bodyNode);
   }
 
+  /**
+   * AI Assist's own reading of a command: warnings first, then what each part does and the
+   * files it names. At the second check only the warnings are repeated.
+   * @param {any} reading @param {boolean} brief
+   */
+  function readingBlock(reading, brief) {
+    if (!reading) return null;
+    const flags = reading.warnings.length ? h("ul", { class: "review-flags", "aria-label": "Warnings" },
+      reading.warnings.map((/** @type {any} */ warning) => h("li", { class: `review-flag is-${warning.kind}` }, warning.text))) : null;
+    if (brief) return flags;
+    return h("section", { class: "review-reading", "aria-label": "What AI Assist can tell" },
+      h("h3", null, "What AI Assist can tell"),
+      flags,
+      reading.steps.length ? h("ul", { class: "review-steps" }, reading.steps.map((/** @type {string} */ step) => h("li", null, step))) : null,
+      reading.files.length ? h("p", null, h("strong", null, "Files: "),
+        reading.files.map((/** @type {any} */ file) => `${file.path} (${file.effect})`).join(", ")) : null,
+      reading.addresses.length ? h("p", null, h("strong", null, "Web addresses: "), reading.addresses.join(", ")) : null,
+      h("p", { class: "muted" }, reading.note));
+  }
+
   /** One review: what the agent wants to do, and the buttons to answer. @param {any} review */
   function reviewCard(review) {
     const action = review.action;
@@ -159,10 +179,11 @@ export function createChatView(ctx) {
       ? (second
         ? h("p", { class: "review-warning" }, "It runs as a separate program with your account, outside the internet gate: "
           + "AI Assist cannot see or stop what it does online. Run it only if you expect what it does.")
-        : h("p", { class: "muted" }, `Folder: ${action.cwd}`, action.description ? h("br") : null, action.description || ""))
+        : h("p", { class: "muted" }, `Folder: ${action.cwd}`, action.description ? h("br") : null,
+          action.description ? `The AI says: “${action.description}”` : ""))
       : h("p", { class: "muted" }, `File: ${action.destination || action.path}. Review the exact change before applying it.`);
     const shown = command
-      ? h("pre", { class: "review-command", tabindex: "0" }, h("code", null, action.command))
+      ? [h("pre", { class: "review-command", tabindex: "0" }, h("code", null, action.command)), readingBlock(action.reading, second)]
       : h("pre", { class: "review-diff", tabindex: "0", "aria-label": `Changes to ${action.path}` }, h("code", null,
         diffLines(action.diff || "").map((line) => h("span", { class: `diff-line ${line.kind}` }, line.text + "\n"))));
     /** One answer at a time: both buttons wait for the server's reply. @param {string} choice */

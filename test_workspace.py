@@ -517,6 +517,11 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         with patch("workspace_ui.network_gate.note_outside") as noted:
             self.app.review_action(decision)
             window = self.app.approvals[-1][1]
+            # AI Assist's own reading is shown beside the model's words.
+            labels = [widget.cget("text") for widget in descendants(window) if isinstance(widget, tk.Label)]
+            self.assertIn("WHAT AI ASSIST CAN TELL", labels)
+            self.assertTrue(any(text.startswith("⚠ Deletes files: rm build") for text in labels), labels)
+            self.assertTrue(any("The AI says: “Clean”" in text for text in labels), labels)
             self.app.resolve_approval(decision, window, True)  # as if a button skipped both checks
             self.assertFalse(decision["event"].is_set())
             self.assertTrue(window.winfo_exists())

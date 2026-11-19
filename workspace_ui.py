@@ -12,6 +12,7 @@ from tkinter import END, filedialog, messagebox, scrolledtext, simpledialog, ttk
 from app_core import approvals, backups, documents
 from app_core.activity import activity_record
 from app_core.checkpoints import CheckpointError, CheckpointStore
+from app_core.command_reading import read_command
 from app_core.explain import ACTION_LABELS, explain
 from backup_ui import BackupWindow
 from welcome_ui import WelcomeGuide, ready
@@ -24,7 +25,7 @@ from deploy_dialog import DeployDialog
 from html_preview import HtmlPreviews, is_html
 from chat_store import ChatStore
 from hourly_status import HourlyStatusReport
-from coding_agent import FILE_LIMIT_CHOICES, estimate_tokens, run_agent
+from coding_agent import DEFAULT_COMMAND_DESCRIPTION, FILE_LIMIT_CHOICES, estimate_tokens, run_agent
 from developer_tools import build_project_context, extract_code_blocks, fetch_model_capabilities, list_project_files, read_project_file
 from message_widgets import render_message
 import network_gate  # noqa: F401  (patched through this module by tests; approvals log via app_core)
@@ -1487,13 +1488,18 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
         heading = tk.Label(window, text=title, bg=c["background"], fg=c["ink"], font=("Segoe UI", 15, "bold"), wraplength=760, anchor="w")
         heading.pack(fill="x", padx=22, pady=(20, 10))
         if action["kind"] == "run_command":
-            detail = f"Folder: {action.get('cwd', self.project_path)}\nRuns with your account. Review the command before running."
+            description = action.get("description") or ""
+            said = f"The AI says: “{description}”\n" if description and description != DEFAULT_COMMAND_DESCRIPTION else ""
+            detail = f"Folder: {action.get('cwd', self.project_path)}\n{said}Runs with your account. Review the command before running."
             text = action["command"]
         else:
             detail = f"Destination: {action.get('destination', str(Path(self.project_path) / action.get('path', '')))}\nReview the exact proposed changes before applying them."
             text = action.get("diff") or action.get("content", "")
         details = tk.Label(window, text=detail, bg=c["background"], fg=c["muted"], font=("Segoe UI", 10), wraplength=760, justify="left", anchor="w")
         details.pack(fill="x", padx=22, pady=(0, 10))
+        if action["kind"] == "run_command":
+            window.geometry("820x720")
+            self.command_reading_panel(window, read_command(action["command"], action.get("cwd", self.project_path)))
         buttons = tk.Frame(window, bg=c["background"])
         buttons.pack(side="bottom", fill="x", padx=22, pady=18)
         primary = self.button(buttons, "Apply change" if action["kind"] == "write_file" else "Run command",
@@ -1510,6 +1516,32 @@ class WorkspaceMixin(HybridMixin, FeedbackMixin, DeveloperPanelMixin):
             body.insert(END, line, "add" if line.startswith("+") else "remove" if line.startswith("-") else ())
         body.config(state="disabled")
         window.protocol("WM_DELETE_WINDOW", lambda: self.resolve_approval(decision, window, False))
+
+    SERIOUS_WARNINGS = ("hidden", "admin", "system", "delete")
+
+    def command_reading_panel(self, window, reading):
+        """AI Assist's own reading of a command (app_core.command_reading): warnings first,
+        then what each part does and the files it names. It helps; it proves nothing."""
+        c = self.COLORS
+        panel = tk.Frame(window, bg=c["surface"], highlightthickness=1, highlightbackground=c["border"])
+        panel.pack(fill="x", padx=22, pady=(0, 10))
+        tk.Label(panel, text="WHAT AI ASSIST CAN TELL", bg=c["surface"], fg=c["muted"], font=("Segoe UI", 8, "bold"),
+                 anchor="w").pack(fill="x", padx=12, pady=(8, 2))
+        for warning in reading["warnings"]:
+            tk.Label(panel, text="⚠ " + warning["text"], bg=c["surface"], wraplength=740, justify="left", anchor="w",
+                     fg=c["error"] if warning["kind"] in self.SERIOUS_WARNINGS else c["amber"],
+                     font=("Segoe UI", 10, "bold")).pack(fill="x", padx=12)
+        lines = [f"•  {step}" for step in reading["steps"]]
+        if reading["files"]:
+            lines.append("Files: " + ", ".join(f"{item['path']} ({item['effect']})" for item in reading["files"]))
+        if reading["addresses"]:
+            lines.append("Web addresses: " + ", ".join(reading["addresses"]))
+        if lines:
+            tk.Label(panel, text="\n".join(lines), bg=c["surface"], fg=c["ink"], font=("Segoe UI", 10), wraplength=740,
+                     justify="left", anchor="w").pack(fill="x", padx=12, pady=(4, 0))
+        tk.Label(panel, text=reading["note"], bg=c["surface"], fg=c["muted"], font=("Segoe UI", 9), wraplength=740,
+                 justify="left", anchor="w").pack(fill="x", padx=12, pady=(4, 8))
+        return panel
 
     COMMAND_CONFIRM_SECONDS = approvals.COMMAND_CONFIRM_SECONDS
 

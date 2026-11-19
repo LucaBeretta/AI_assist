@@ -210,6 +210,13 @@ button.chip { cursor: pointer; }
 .review-command, .review-diff { margin: 0; max-height: 22rem; overflow: auto; padding: var(--space-3); border-radius: var(--radius-md);
   background: var(--code-bg); font-size: var(--text-sm); white-space: pre; }
 .review-diff { padding: var(--space-2) 0; }
+.review-reading { display: grid; gap: var(--space-2); padding: var(--space-3) var(--space-4); border-radius: var(--radius-md);
+  background: var(--surface-2); font-size: var(--text-sm); }
+.review-reading h3 { font-size: var(--text-sm); text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin: 0; }
+.review-reading ul { margin: 0; padding-left: var(--space-5); display: grid; gap: 2px; }
+.review-flags { list-style: none; margin: 0; padding: 0 !important; display: grid; gap: var(--space-1); }
+.review-flag { padding: var(--space-1) var(--space-3); border-left: 3px solid var(--warning); color: var(--text); }
+.review-flag.is-hidden, .review-flag.is-admin, .review-flag.is-delete, .review-flag.is-system { border-left-color: var(--danger); }
 .review-actions { justify-content: flex-end; }
 .agent-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; font-size: var(--text-sm); }
 .agent-step { display: flex; gap: var(--space-2); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }

@@ -291,6 +291,11 @@ try:
             if heading in (None, "finished"):
                 break
             if heading.startswith("Run this command"):
+                read = cdp.js("document.querySelector('.review .review-reading')?.innerText || ''")
+                check("the command comes with AI Assist's own reading", "WHAT AI ASSIST CAN TELL" in read.upper() and "cannot prove" in read,
+                      read[:200])
+                cdp.js("document.querySelector('.review').scrollIntoView({block: 'start'})")
+                cdp.shot("03c-command-review.png")
                 cdp.js("document.querySelector('.review .button-primary').click()")
                 if cdp.wait("document.querySelector('.review.is-second .button-primary')?.disabled"
                             " && document.querySelector('.review.is-second .button-primary').textContent.startsWith('Run (')", 10):

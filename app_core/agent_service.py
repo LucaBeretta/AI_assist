@@ -23,9 +23,10 @@ import threading
 from app_core import activity, approvals, settings
 from app_core.chat_service import MAX_MESSAGE_CHARS, ServiceError, _Emitter
 from app_core.checkpoints import CheckpointError, CheckpointStore
+from app_core.command_reading import read_command
 from app_core.conversation import agent_messages, developer_system_prompt
 from chat_store import ChatStoreError
-from coding_agent import AgentCancelled, run_agent
+from coding_agent import DEFAULT_COMMAND_DESCRIPTION, AgentCancelled, run_agent
 
 MAX_REVIEW_CHARS = 200_000
 NO_FINAL_MESSAGE = "The agent finished without a final message. Check Activity for its results."
@@ -39,6 +40,11 @@ def review_view(action):
     if isinstance(action.get("diff"), str):
         view["diff"] = action["diff"][:MAX_REVIEW_CHARS]
         view["diff_shortened"] = len(action["diff"]) > MAX_REVIEW_CHARS
+    if action.get("kind") == "run_command":
+        # AI Assist's own reading, shown apart from the model's description.
+        view["reading"] = read_command(action.get("command", ""), action.get("cwd", ""))
+        if view.get("description") == DEFAULT_COMMAND_DESCRIPTION:
+            view.pop("description")  # the model gave none
     return view
 
 
