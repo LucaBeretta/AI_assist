@@ -1,108 +1,74 @@
-# AI Assist: branch `colibri`
+# AI Assist: Ollama e Colibri nella nuova interfaccia
 
-Questo branch parte dall'**ultima versione di Luca**, quella con backend Colibri, streaming, impostazioni, anteprima HTML, deploy su Vercel e memoria condivisa, e ci aggiunge sopra il colibri "come l'abbiamo ragionato noi", più alcune funzioni per chat e agente. Tutto resta locale: AI Assist usa il tuo Ollama e il tuo colibri, e va su internet solo per scaricare i modelli.
-
----
+AI Assist usa un'unica interfaccia desktop web con pywebview: WebView2 su Windows, WKWebView su macOS. Il motore resta Python e le chat già salvate si riaprono senza conversioni. I modelli lavorano sul server configurato; download, controllo aggiornamenti e pubblicazione Vercel usano internet quando richiesti.
 
 ## In breve
 
-| Novità | A cosa serve |
+| Schermata | A cosa serve |
 |---|---|
-| **colibri gestito dall'app** | AI Assist trova colibri, lo avvia e lo ferma da solo: niente terminale aperto con `coli serve` |
-| **Selettore Engine** nella sidebar | Passare da Ollama a Colibri con un clic (resta anche la finestra Settings → AI backend di Luca) |
-| **Scheda "colibri engine"** | Consigli di colibri per il tuo PC, installazione dei modelli, scelta del contesto |
-| **Chat che riaprono sul motore giusto** | Riaprendo una chat Colibri, l'app torna su Colibri e riseleziona il modello |
-| **Pulsante Stop** | Ferma una risposta o l'agente, tenendo il testo già arrivato |
-| **Modifiche a blocchi (`edit_file`)** | L'agente cambia solo le righe necessarie invece di riscrivere il file |
-| **Limite file a scelta** | L'agente può lavorare su file fino a 1 MB, letti a pezzi, con avvisi se è troppo pesante |
-| **Velocità di colibri** | Token al secondo nella sidebar; conferma prima di un agente lento |
-| **Supporto Mac** | Consigli corretti sui chip Apple e avvio con doppio clic |
-| **Backup delle chat** | Tutte le chat in un unico zip |
+| **Chat** | Conversazioni, streaming e Stop, allegati, contesto sempre visibile, compattazione e versioni delle risposte |
+| **Developer** | Progetto, file fissati, piano, approvazioni di modifiche e comandi, Activity e punti di ripristino |
+| **Models / Modelli** | Hardware, consigli, download Ollama e gestione del motore Colibri |
+| **Capabilities / Funzionalità** | Capacità dichiarate dal modello; ciò che non dichiara resta sconosciuto |
+| **Settings / Impostazioni** | Lingua, tema, memoria condivisa, prompt salvati, scaricamento dalla memoria, aggiornamenti e backup |
 
----
+## 1. Avvio
 
-## 1. colibri gestito da AI Assist
+Su Windows fai doppio clic su **Start AI Assist.cmd**; su Mac su **Start AI Assist.command**. Il launcher cerca Python con pywebview. Se manca, propone un Python privato nella cartella `runtime`, verifica il checksum e installa `requirements.txt`, senza modificare gli altri Python.
 
-[colibri](https://github.com/JustVugg/colibri) fa girare modelli molto grandi (Qwen3-Coder, Qwen3.6, DeepSeek V4, GLM-5.2, Kimi K3…). Tiene in RAM la parte del modello che serve sempre e legge il resto dall'SSD mentre risponde: è più lento, ma i modelli possono essere molto più grandi.
+Da terminale:
 
-**Prima installazione (una volta sola):** scarica colibri da GitHub ed esegui `START-HERE.bat` (Windows) oppure `./start-here.sh` (Mac/Linux).
+```sh
+python -m pip install -r requirements.txt
+python AIassist.py
+```
 
-**Nella versione di Luca** colibri va avviato a mano (`coli serve`) e AI Assist si collega al server. **In questo branch**, quando AI Assist trova la cartella di colibri e il server è su questo computer:
-- scegliendo **Engine → Colibri**, AI Assist avvia colibri da solo;
-- **Run all** lo avvia e **Stop all** lo ferma; se è spento, si avvia anche inviando un messaggio;
-- colibri tiene attivo **un modello alla volta**;
-- la cartella viene trovata da sola in `COLIBRI_DIR`, accanto ad AI Assist, oppure in Home, Documenti, Scrivania o Download (anche `colibri-main` estratto da uno ZIP). In alternativa si sceglie con **Choose colibri folder…**.
+`--web` resta un alias facoltativo. Su Windows l'app parte con `pythonw` separato dal terminale: chiudere il terminale non chiude l'app. Gli errori finiscono in `%LOCALAPPDATA%\AI Assist\last-run.log`. Il primo avvio propone hardware, modello consigliato, download e prima chat; si può saltare.
 
-Un colibri **su un altro computer**, o senza cartella conosciuta, funziona come nella versione di Luca: si indica l'indirizzo in Settings → AI backend e l'app lo usa così com'è.
+## 2. Colibri gestito da AI Assist
 
-## 2. Scheda "colibri engine (RAM + SSD)"
+Installa prima Colibri con le sue istruzioni. In **Modelli → Motore Colibri**, scegli la cartella con **Sfoglia**, carica il catalogo e scegli un modello compatibile. L'app usa i comandi del launcher Colibri per installazione, contesto, avvio e arresto. La cartella può essere trovata anche con `COLIBRI_DIR` o nelle posizioni locali comuni.
 
-In **Find & download models**, con Engine su Colibri la finestra si apre direttamente su questa scheda. Accanto c'è quella di Ollama.
+Colibri usa un modello alla volta. Le operazioni sul server vengono bloccate mentre una chat o una revisione lo usa. Un server remoto si usa già avviato: installazione e avvio/arresto richiedono una cartella locale conosciuta. `COLIBRI_URL` sceglie il server; `COLI_API_KEY` fornisce la chiave facoltativa senza salvarla nelle impostazioni web.
 
-- I **consigli di colibri per il tuo PC**, presi dal suo comando `coli setup --list --json`. Per ogni modello vedi download e RAM necessaria, se gira tutto in RAM o legge dal disco, se è adatto all'agente Developer, e se ci sta sul tuo PC (o perché no).
-- Una riga in cima confronta i due motori: il modello veloce consigliato con Ollama e quello consigliato con colibri.
-- **Install & use** scarica il modello, prepara colibri e lo avvia. Se annulli, la volta dopo il download riprende da dove era arrivato.
-- **Context** sceglie il contesto di colibri, sia per un'installazione nuova sia, con **Apply to the current model**, per il modello attuale (colibri si riavvia da solo).
+## 3. Selettore motore e chat
 
-## 3. Selettore Engine e chat
+Il selettore nel composer raggruppa i modelli per **Ollama / Colibri**. Le opzioni non disponibili indicano il motivo. Ogni chat conserva motore, modello e contesto. Il menu del contesto permette di compattare o creare una nuova chat nello stesso ambiente. I Progetti raggruppano chat con istruzioni, cartella e impostazioni comuni.
 
-- Nella sidebar c'è **ENGINE: Ollama / Colibri**. È la stessa scelta della finestra Settings → AI backend di Luca: le due restano sincronizzate.
-- Cambiare motore apre una chat nuova; quella di prima resta salvata.
-- **Riaprendo una chat** fatta con l'altro motore, l'app ci passa da sola e riseleziona il modello appena il motore risponde. Nella versione di Luca bisognava cambiare motore a mano.
-- Se cambi motore mentre l'app sta facendo un controllo in background, il cambio viene messo in coda e applicato appena il controllo finisce, invece di essere rifiutato.
+## 4. Pulsante Stop e recupero
 
-## 4. Pulsante Stop
+Stop interrompe una risposta e conserva il testo arrivato. Invio durante lo streaming non la ferma. Le bozze vengono salvate; dopo un'interruzione si può conservare o scartare una risposta parziale. Le chat in incognito restano solo in memoria e non entrano nel backup né nella memoria condivisa.
 
-Mentre il modello risponde, **Send** diventa **Stop**. Vale per le risposte (Ollama e Colibri) e per l'agente.
-- Se fermi una risposta, la parte già scritta resta nella chat e viene salvata.
-- Premere Invio durante una risposta non la ferma.
+## 5. Developer: modifiche e revisione qualità
 
-## 5. Agente Developer: modifiche a blocchi e file grandi
+Il Developer web usa un modello Ollama con strumenti. Scegli una cartella esistente e fissa i file prima del compito. **Prima un piano** richiede l'approvazione del piano; ogni modifica e comando passa poi dalla propria approvazione. I diff possono essere applicati a blocchi e i punti di ripristino recuperano i file del compito. I comandi usano i permessi del tuo account.
 
-**`edit_file`:** l'agente indica il blocco esatto da sostituire e il testo nuovo. Il diff da approvare è piccolo, è più veloce (soprattutto con colibri) e rispetta gli a capo di Windows. `write_file` resta per i file nuovi o le riscritture complete. Ogni modifica passa sempre dalla tua approvazione.
+Il limite file salvato parte da 64 KB e supporta valori fino a 1 MB; i file grandi possono essere letti per intervalli di righe. Colibri può fare una revisione qualità senza strumenti dopo un solo lavoro Ollama: si configura nelle Impostazioni e si sceglie per il compito. Lo scambio di memoria gestisce solo il modello locale scelto e una cartella Colibri conosciuta. Fermare la sola revisione conserva il lavoro già completato. La revisione è un consiglio, non una prova che tutto funzioni.
 
-**Limite file a scelta** (Developer → scheda Files → *Largest file the agent reads*): 64 KB (predefinito, come prima), 128 KB, 256 KB, 512 KB o 1 MB.
-- Prima, oltre i 64.000 byte l'agente si fermava con *"file exceeds the 64,000-byte limit"*.
-- Scegliendo un limite alto, l'app mostra cosa significa per il **contesto del modello** e per la **memoria libera** del computer, e chiede conferma.
-- Un file più grande di circa un quarto del contesto viene dato all'agente **a pezzi**, con l'indicazione delle righe da leggere dopo. Nell'Activity compare l'avviso *"…the agent reads it in parts"*.
-- La scelta viene ricordata.
+## 6. Stato, memoria e scorciatoie
 
-## 6. Velocità di colibri e avviso prima dell'agente
+La barra in basso mostra motore, modello, quota GPU/CPU, VRAM, contesto, token al secondo e passo dell'agente quando i dati sono disponibili. Indica anche quando si usa un server remoto. Nelle Impostazioni puoi aggiungere, modificare e dimenticare ricordi; dal menu della chat scegli quelli da usare.
 
-- Nella sidebar compare la velocità misurata da colibri sull'ultima risposta, per esempio *"~3.4 tok/s on the last answer"*.
-- La prima volta che lanci l'agente su colibri in una sessione, l'app chiede conferma se colibri è lento (sotto i 15 token al secondo).
-- Se il modello colibri appartiene a una famiglia che non supporta i tool, l'agente viene bloccato subito con un messaggio chiaro.
+- **Ctrl+K:** cerca chat e comandi.
+- **Ctrl+N:** nuova chat; **Ctrl+Shift+N:** chat in incognito.
+- **Esc:** Stop; **↑ nel composer vuoto:** modifica l'ultimo messaggio.
+- **Ctrl+/:** elenco scorciatoie; **Ctrl+Shift+L:** tema Night/Day.
+- **Ctrl+più / Ctrl+meno / Ctrl+0:** zoom; **/** nel composer: prompt salvati.
 
 ## 7. Mac
 
-- **Avvio:** doppio clic su `Start AI Assist.command`. Cerca da solo un Python con Tkinter; con Homebrew serve `brew install python-tk`. La prima volta, se macOS lo blocca: clic destro → **Apri**.
-- **Chip Apple:** la GPU usa la stessa memoria del sistema. AI Assist considera disponibile per la GPU circa 2/3 della RAM (3/4 sopra i 36 GB), quindi i consigli sono quelli di un Mac con GPU.
+**macOS non è ancora stato collaudato su hardware reale.** Il launcher è `Start AI Assist.command`; la finestra usa WKWebView. Se macOS lo blocca al primo avvio, prova clic destro → **Apri**. I test dei consigli sui chip Apple simulano il rilevamento della memoria unificata: non sostituiscono il collaudo sul Mac.
 
 ## 8. Backup delle chat
 
-In **Chat options → Back up all chats…** crei uno zip con le chat originali in `chats/` (si ripristinano copiandole nella cartella delle chat ad app chiusa), le stesse in Markdown in `readable/`, e un `README.txt`. Sono incluse anche le chat ancora in fase di salvataggio.
+In **Impostazioni → Esporta** crei un backup di chat e progetti. Le chat in incognito sono escluse. La cartella dati resta quella precedente: `%LOCALAPPDATA%\AI Assist\chats` su Windows, `~/.aiassist/chats` altrove, oppure quella indicata da `AI_ASSIST_DATA_DIR`. Titoli, formato delle chat e preferenze `appearance.settings` restano compatibili.
 
----
-
-## Cosa è stato cambiato rispetto alla versione di Luca
-
-- **Nuovi file:** `colibri_launcher.py` (usa il comando `coli` di colibri: stato, consigli, installazione, contesto, avvio e arresto), `colibri_panel.py` (la scheda colibri), `Start AI Assist.command`, questo `LEGGIMI-colibri.md`.
-- **Modificati:** `backend_ui.py` (gestione di colibri sopra il suo backend, cambio motore, conferma agente), `workspace_ui.py` (Engine, Stop, riapertura chat, limite file, backup), `AIassist.py` (streaming interrompibile), `coding_agent.py` (`edit_file`, limite a scelta, lettura a pezzi), `chat_store.py` (backup), `model_downloads.py` e `hardware_panel.py` (scheda colibri, Mac), `model_advisor.py` (chip Apple), `README.md`.
-- **Il client Colibri di Luca** (`colibri_backend.py`) è usato così com'è per chat e agente.
-- **Test di Luca aggiornati in pochi punti**, dove il comportamento concordato è diverso: con Colibri il pulsante dei modelli resta attivo (apre la scheda colibri), e riaprire una chat Colibri cambia motore. Aggiunto inoltre `edit_file` all'elenco dei tool atteso.
-
-## Test
-
-- **259 test superati**: i 228 di Luca più 31 nuovi. La suite completa è stata ripetuta più volte senza errori.
-- colibri è simulato con un finto comando `coli` e un finto server nello stesso formato del vero, compreso lo streaming.
+## Test e verifiche rimaste
 
 ```sh
-python -m unittest discover -v
-python -m compileall -q .
+python -m unittest discover
 ```
 
-## Cosa resta da verificare
+Su Windows il runner `python run_windows_tests.py` esegue i test su un desktop separato invisibile. I test di logica non aprono finestre; modelli e comandi esterni sono simulati. I test dei link simbolici richiedono i relativi permessi Windows.
 
-- **Un modello colibri vero in uso:** provato solo con il server simulato. Sul tuo PC parti dal modello consigliato nella scheda colibri.
-- **Mac:** il rilevamento dei chip Apple è testato simulando i comandi di sistema, non su un Mac vero.
-- **Controllo aggiornamenti di Luca:** confronta i file con il suo repository, quindi su questo branch segnalerà sempre "differenze" finché le modifiche non vengono unite.
+Restano da verificare sul campo modelli Colibri reali, installazioni e download, pubblicazione Vercel e macOS. Il controllo aggiornamenti confronta i file con il repository di Luca: una copia di sviluppo può quindi mostrare differenze anche senza un aggiornamento da installare.

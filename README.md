@@ -1,186 +1,114 @@
 # AI Assist
 
-A local Ollama workspace with saved chats, a developer agent, code previews, model capabilities, and hardware-aware downloads. Built with Python and Tkinter; no pip packages are required.
+A local Ollama and Colibri workspace with saved chats, a developer agent, code previews, model capabilities, and hardware-aware downloads. The desktop interface uses HTML, CSS and JavaScript inside pywebview; the model engine remains Python.
 
 ## Requirements
 
-- Python 3 with Tkinter available.
-- [Ollama](https://ollama.com/) installed and running, with at least one model downloaded.
+- Python 3 and the packages in `requirements.txt`, or the launcher's private Python setup.
+- Ollama with a downloaded model, or a configured Colibri installation/server.
+- On Windows, pywebview uses WebView2. On macOS, it uses WKWebView. **macOS has not yet been tested on real hardware.**
 
-The app uses only the Python standard library; no pip packages are required.
+The interface loads local files with no CDN, build step or application HTTP server. Model inference uses the configured server. Downloads, update checks, remote servers and an explicitly requested Vercel deployment require network access.
 
 ## Run
 
-Download a model, for example:
+Double-click **Start AI Assist.cmd** on Windows or **Start AI Assist.command** on macOS. Each launcher checks for pywebview and prefers an existing private runtime. If no suitable Python is found, it offers a checksum-verified private Python download into `runtime`, then installs `requirements.txt`. It needs no administrator password and does not change other Python installations. Ollama and Colibri are installed separately.
+
+On Windows the app starts detached with `pythonw` when available: closing the launcher does not close the app. Startup errors go to `%LOCALAPPDATA%\AI Assist\last-run.log`. Set `AI_ASSIST_PYTHON` to prefer a particular interpreter.
+
+To run from a terminal:
 
 ```sh
-ollama pull deepseek-r1:8b
-```
-
-Start Ollama, then run the app from this folder:
-
-```sh
+python -m pip install -r requirements.txt
 python AIassist.py
 ```
 
-On Windows, you can double-click **Start AI Assist.cmd** instead. It finds a Python whose Tkinter can open the window, starts the app from the correct folder, and keeps startup errors visible. If `.py` files are associated with Python, you can also double-click `AIassist.py` directly.
+`python AIassist.py --web` remains accepted and opens the same interface. `python gui_runtime.py --probe` checks the dependency without opening a window. On macOS, right-click the launcher and choose **Open** if needed, or run `chmod +x "Start AI Assist.command"`. The macOS launcher and native rendering still need a check on a Mac.
 
-On macOS, double-click **Start AI Assist.command**. It looks for a Python 3 that includes Tkinter (the python.org installer does; with Homebrew also run `brew install python-tk`). If macOS refuses to open it the first time, right-click it and choose **Open**, or run `chmod +x "Start AI Assist.command"`. On Apple silicon (M1 and later) the recommendations count the memory the GPU shares with the system (about 2/3 of RAM, 3/4 above 36 GB), so Macs get GPU-sized suggestions rather than CPU-only ones.
-
-macOS requires **Tk 8.6 or newer**. The launcher prefers Python installations from python.org and Homebrew, checks that a real Tk window can initialize, and prints the selected interpreter and Tcl/Tk versions. It skips incompatible installations instead of opening a broken window. Set `AI_ASSIST_PYTHON` to prefer a particular Python executable. Apple's older Tk 8.5 is unsupported; see [Python's macOS Tcl/Tk guidance](https://www.python.org/download/mac/tcltk/).
-
-**No suitable Python? Nothing to install by hand.** If neither launcher finds an installed Python that can open the window, it offers to download a private Python 3.13 with Tk (about 25 MB on macOS, 45 MB on Windows) from [python-build-standalone](https://github.com/astral-sh/python-build-standalone). It is used only after its SHA-256 checksum matches [python-runtime.txt](python-runtime.txt), it is stored only in this folder's `runtime` subfolder, and it needs no administrator password and changes no other Python. Later launches use it automatically; delete `runtime` to remove it. Ollama itself is still installed separately from [ollama.com/download](https://ollama.com/download).
-
-If the Mac interface appears blank or its fields are unreadable, install a current Python from python.org and launch with **Start AI Assist.command** again. To collect runtime details from the project folder, run `python3 gui_runtime.py --probe`; the launcher prints equivalent details for the interpreter it actually selects. The app aligns native macOS window appearance with its Light/Dark theme where supported, and uses labelled input areas with contrasting outlines on both Mac and Windows. Actual rendering on each macOS/Tk combination still needs a check on that Mac.
-
-Choose a model in the sidebar before chatting. Click **Refresh models** after adding models or restarting Ollama. Switching models starts a new conversation.
-
-The workspace starts in the **Night** console theme. The ☀ / ☾ button in the header (or Ctrl+Shift+L) switches between Night and **Day** and remembers the choice; **Settings > Appearance...** still offers Light, Dark and Warm, or Classic headings, and existing appearance preferences are preserved. A status bar along the bottom shows, from live data: the engine and whether it answers, the model and where it runs (GPU, CPU or both from Ollama's `/api/ps`; RAM + SSD for Colibri), the context the last answer used, the GPU memory of loaded models, the last speed in tokens/s, the developer agent's step, and whether prompts stay on this computer (*local only*, or a warning for a remote server or an Ollama cloud model). The model chip in the header opens **Model controls**. The sidebar keeps recent chats visible, with context size, Refresh, Run all, Stop all, and runtime details under **Model controls...**. Conversation width stays comfortable on large screens, and starter suggestions reflow in the developer workspace.
-
-Chat replies appear while they are generated. The finished reply is formatted with copy and code-export actions. If a stream fails before completion, the app reports the failure rather than saving a partial answer as complete. While a reply or the developer agent runs, **Send** becomes **Stop**; stopping a reply keeps the part already written (Enter never stops it). The status line shows Ollama's reported loading and prompt-processing times and generation rate when available; click model status to view the last summary. Developer step timings appear in **Activity**.
+The first-run page shows the computer's hardware and recommended models, offers a model download with progress, and opens the first chat. It can be skipped.
 
 ## Chats and developer workspace
 
-- **New chat** immediately creates and selects a saved entry, clearing any search that would hide it. Messages and drafts save locally. Search, resume, rename, export, or delete chats from the sidebar and **Chat options**. **Chat options > Back up all chats...** writes one .zip with every chat as JSON (copy those files back into the chats folder to restore) and as readable Markdown, including chats still being saved.
-- **Developer** uses a chosen project folder and a model that advertises tool calling, such as `qwen3-coder:30b`. The agent can inspect text files, propose edits, and run commands. It changes existing files by replacing exact blocks (`edit_file`), so small changes stay small; it writes whole files only for new files or full rewrites. Each edit shows its diff before **Apply change**; each command shows its text and working folder before **Run command**. **Reject** declines an action, and **Stop agent** cancels work and pending reviews.
+- **Chat** streams selectable Markdown and code. The composer selects the engine/model and context. Context usage stays visible; its menu compacts the conversation or starts a new chat with the same environment. Stop keeps the partial reply. Chats support drafts, recovery of interrupted replies, attachments, answer versions and incognito sessions. Incognito chats remain in memory and are excluded from exports.
+- **Developer** uses an existing project folder and an Ollama model with native tools. Browse for a folder, pin files and describe a task. Plan first asks for approval before actions; file diffs and shell commands have their own approvals. Activity distinguishes real tool results from model prose. Checkpoints can restore task changes. Colibri is available for chat and optional quality review; the web Developer tool executor currently requires Ollama.
+- **Models** shows hardware, installed/loaded Ollama models, recommendations and download progress. Its Colibri panel manages a known local Colibri installation.
+- **Capabilities** shows tools, vision, thinking and context metadata reported by the selected model. Unreported support remains unknown.
+- **Settings** contains language, Night/Day appearance, idle model unloading, shared memory, saved prompts, update checks, Colibri quality review and chat export.
 
-Opening **Developer** starts at a project chooser, with explicit links to resume previous developer conversations. Switching sections keeps the developer session you already opened during this app session. **Files** filters project paths and lets you pin context; double-click a file or press Enter to read it in **Source**. **Changes** retains the agent's applied diffs with the conversation (up to 40,000 characters per diff), **Output** holds generated code, and **Activity** records commands and tool results. Suggested tasks cover understanding code, building features, fixing bugs, running tests, and reviewing code. HTML preview and Vercel deployment are optional actions under **Project > Tools**.
+The chat sidebar supports search, rename and deletion, date groups and projects. Projects share instructions, a folder and a default environment. Right-click a chat for instructions and memory selection. Existing chats keep their titles, messages and tool history; their storage format is unchanged. Attachments and pinned paths remain subject to the configured file limit and project access rules. Images require reported vision support; PDF text extraction uses the offline `pypdf` dependency.
+
+### Keyboard shortcuts
+
+| Shortcut | Action |
+|---|---|
+| Ctrl+K | Search chats or run a command |
+| Ctrl+N | New chat |
+| Ctrl+Shift+N | New incognito chat |
+| Esc | Stop the active response or task |
+| Up in an empty composer | Edit the last user message |
+| Ctrl+/ | Show shortcuts |
+| Ctrl+Shift+L | Switch Night/Day |
+| Ctrl+plus / Ctrl+minus / Ctrl+0 | Zoom in, out or reset |
+| Ctrl+Enter in Developer | Run the task |
+
+Type `/` in the composer to insert a saved prompt. Zoom and language preferences are saved. Code blocks have Copy, Save as and, for HTML, Preview actions.
 
 ### Ollama + Colibri quality review
 
-In **Developer**, open **Two-engine review...** to let the engines cooperate. Select **Ollama** and a tool-capable worker model in the sidebar, choose **Start & find Colibri models** to select its reviewer, enable **Use both engines for Developer tasks**, and save. Colibri must already have a model configured; its folder is selected under Find & download models. API keys remain session-only in the existing backend settings.
+In **Settings → Colibri quality review**, enter the reviewer model and optionally enable the default. The Developer checkbox selects review for an individual task. Configure Colibri first in Models.
 
-Ollama remains the only tool executor: it implements the request and runs approved checks. Colibri then receives one bounded, read-only review request with the latest requirements, worker summary, recorded command outcomes, and excerpts from up to four changed project files. The review focuses on professional code, project conventions, polished interface design, useful comments and notes, and missing checks. It is labelled advisory and cannot edit, run commands, prove visual correctness, or turn model claims into verification evidence. **Use review feedback** prepares a focused improvement request in your draft; review it and choose **Run agent**. **Give feedback** also accepts your own criteria. Ordinary chats and single-engine tasks keep their existing behavior.
+Ollama executes the approved task once. Colibri then receives one bounded review containing requirements, worker results, recorded command outcomes and changed-file excerpts. The review has no tools and is labelled advisory: it cannot prove visual correctness or turn model claims into verification evidence.
 
-**Release local models between stages** stops a known local Colibri server, releases/reloads only the selected local Ollama worker, then unloads that worker before starting Colibri. The reviewer is stopped afterward so the next worker request can reclaim the GPU. AI Assist does not explicitly unload unrelated Ollama models; Ollama's own scheduler still controls residency and may evict models to fit a request. Remote servers are not stopped. With manually managed local Colibri, choose its folder or disable this option. Setup discovery uses the same explicit handoff; the selected worker reloads on its next request.
+**Manage local memory handoff** releases only the selected local Ollama worker and manages a known local Colibri server between stages. Remote servers are not stopped. Choose a local Colibri folder or disable handoff for a manually managed server. Conflicting uses of the worker and reviewer are blocked during this operation.
 
-This mode is off by default. It bounds cost to one additional review request (at most 768 output tokens and a 120-second HTTP deadline), uses a conservative partial-context budget, and records stage/handoff timings in **Activity**. It is intended to improve review coverage, not guarantee faster or better answers: model loading and review can add time. A failed or cancelled review preserves completed worker changes and native tool history; the worker is never automatically retried. A disconnected remote server may continue inference until it handles the disconnect.
+Review is off by default. It adds at most one 768-token review request with a 120-second HTTP deadline. A failed or cancelled review preserves completed worker changes and history; the worker is never automatically retried. Loading and review can add time. Activity records the stages.
 
 ### Feedback and verification
 
-Each answer has **Give feedback**. Describe what should improve and, optionally, what a good result looks like. The app adds a follow-up to your draft, preserving the original answer and any unsent text; review it and choose **Send** or **Run agent**. Typing `feedback` or `/feedback` opens feedback on the latest answer locally. Giving feedback never automatically repeats edits or commands.
+**Give feedback** on an answer prepares a follow-up draft with your comments and optional success criteria. Review the draft before sending it. Feedback does not send a request or repeat edits automatically.
 
-In Developer, **Check result** prepares a verification follow-up for review. The command summary uses actual recorded exit outcomes for the latest task, rather than the assistant's claims. It distinguishes successful, failed, and timed-out commands, and warns when files changed after the last command. A successful command is evidence of that command's outcome; it does not establish that every requirement is met. With no recorded command checks, the app says so. Feedback and success criteria are saved as ordinary conversation drafts and follow-ups; command evidence is saved with Activity.
-
-To write into a specific folder, open **Developer**, enter its path under **Folder for reading and writing files**, and click **Use folder**, or choose **Browse folders…**. **Use folder** creates missing folders. Then ask, for example, “Create a Python script named `main.py` in this folder.” New-file proposals open a **Save As** picker so you can choose the folder and filename. Cancelling declines the write. Review the full destination and diff, then click **Apply change**. If you choose an existing file, its actual overwrite diff is reviewed first. An explicitly chosen destination may be outside the project; that approval applies only to that file, and does not expand the agent's general file access. New subfolders can be created by the agent's file tool. The selected project folder is saved with the developer chat; changing it starts a new conversation. Reviewed shell commands still run with your account's permissions.
-- **Files** sets **Largest file the agent reads**: 64 KB (default), 128 KB, 256 KB, 512 KB or 1 MB. A larger choice shows what it means for the current context and free memory before it applies. A file larger than about a quarter of the model's context is returned to the agent in parts, with the line numbers to read next, and edited block by block. **Files** also lets you pin selected project files to context. Generated code appears in **Code**, with explicit copy/save actions. **Activity** records tool results and command output. Native tool history is retained when a developer chat is resumed.
-- **Capabilities** distinguishes actual app features from the selected model's reported support. It shows the native context maximum separately from the app's configured context.
-
-Saved chats retain their conversation and native developer-tool history. The model can only use what fits in its context window. When developer history grows too large, requests preserve bounded excerpts of the original user request and recent dialogue alongside the latest request and recent tool work. Reopen the same chat to continue it, pin important project files, and choose a larger context when hardware permits.
+Developer commands run with your account's permissions from the chosen project directory; they are not an operating-system sandbox. Review the destination, diff and command before approving. Model file paths remain confined to the project, with secret, binary, dependency and generated paths excluded. Read sizes, context and tool execution are bounded. The saved agent file limit defaults to 64 KB and supports choices up to 1 MB; large text can be read in bounded line ranges.
 
 ### Shared memory across chats
 
-Shared memory is enabled by default for both regular chats and the developer agent. Say **“Remember that I prefer Python”**, `/remember I prefer Python`, or **“Add to shared memory: I prefer Python”** to save a persistent note. **“Add this to shared memory”** saves the previous assistant reply. Each message also has an **Add to memory** button for saving that exact message. Explicit memory commands are handled by the app locally and confirmed only after the note is saved, without relying on a model's claim. Disabled memory and write failures show an error and keep the prompt for retrying.
+Use **Settings → Shared memory** to enable/disable notes, add, edit or forget them. A chat's right-click menu selects its memories. Replies show the memories used for that request. Incognito requests do not read or write shared memory. Changing notes affects future requests and does not remove text already in a conversation.
 
-Click **Shared memory** in the sidebar to view, edit, or clear notes, or disable shared memory. Up to 4,000 characters of notes are stored locally in `shared.memory` beside the chat files and restored on restart.
-
-The app also retrieves bounded excerpts from up to two other saved conversations when their titles or sampled dialogue match the current message. This uses saved chat text, without an extra model request. Recall is incomplete and limited by context size; use explicit notes for preferences that must carry across chats. The current request and selected folder take precedence over remembered context. Historical assistant claims do not establish that files exist or commands ran.
-
-**Clear notes** takes effect when you click **Save**; it leaves conversations available for recall. Disable the shared-memory checkbox and save to stop using both notes and cross-chat excerpts. Deleting a chat removes it from future recall; separately saved notes remain until edited or cleared. Memory applies to future requests, so changing it does not remove text already present in a conversation or interrupt an active request.
-
-Commands run with your account's permissions from the selected project directory; the shell is not an operating-system sandbox. Model-supplied file paths stay inside the selected project; a user-selected Save As destination permits a reviewed write to that one file. Secret, binary, dependency, and generated paths remain excluded. Command output, tool steps, context, scan work, and execution time are bounded.
-
-History defaults to `%LOCALAPPDATA%\AI Assist\chats` on Windows, or `~/.aiassist/chats` elsewhere. Set `AI_ASSIST_DATA_DIR` to change it. Each chat has its own atomically replaced JSON file; history is stored outside the repository by default.
-
-Chat writes run on one background worker, preserving the order of saves, renames, and deletions. Pending changes remain available when switching chats. Closing waits for queued writes while keeping the window responsive; a failed write leaves the window open and reports the error so it can be retried.
+History defaults to `%LOCALAPPDATA%\AI Assist\chats` on Windows or `~/.aiassist/chats` elsewhere. `AI_ASSIST_DATA_DIR` changes the data directory. Chat JSON files are replaced atomically. Settings → Export saves a backup with chat and project data; incognito sessions are excluded. Previously saved chats and `appearance.settings` preferences remain readable.
 
 ## Model downloads
 
-Click **Download models** to browse Ollama's current popular chat models, search the list, and choose an exact download size. The list is fetched live from [Ollama's popular library](https://ollama.com/library?sort=popular); its download counts measure Ollama popularity, not worldwide usage. Model downloads show progress and can be cancelled. After installation, choose **Use in chat** or select the model in the sidebar. Your current conversation stays in place until you switch models.
+Open **Models** for hardware-based recommendations and installed models. Downloads show progress and can be stopped; a model can then be selected in the chat composer. Loaded models can be unloaded explicitly or after the configured idle period. Recommendations are estimates, not guarantees of speed or GPU placement. The status bar reports model placement, context, VRAM and measured token speed when available.
 
-The **Recommended for this PC** tab reads your CPU, available RAM, graphics card, GPU memory, Ollama version, and model-disk space locally. It matches current download variants to conservative memory estimates. Each recommended model has its own **Download** / **Use in chat** button and **Setup guide** with exact commands and GPU verification steps. **Rescan hardware** updates the report after you unload models or change your setup.
+## Preview HTML
 
-Recommendations distinguish available GPU memory from capacity after unloading other models. Download size is not runtime memory: context cache and overhead also count. **Use in chat** on a recommended card explicitly applies a 4096-token context to loading and chat requests for the current app session. Check `ollama ps` to verify actual GPU placement. Recommendations for a remote Ollama server cannot use your local PC's specifications to establish fit.
-
-Browsing requires internet access, and Ollama must be running to install models. Copy the complete application folder, including all Python modules, when moving the app. The launcher inside this repository starts this copy; the parent-folder launcher also forwards to this repository when present.
-
-- **Enter:** send a message.
-- **Shift+Enter:** insert a new line.
-- **Ctrl+N:** start a new chat with the current model.
-- **Copy:** copy the complete message.
-
-## Preview HTML in your browser
-
-Click **Preview** on a complete HTML code block in a chat, or choose it in **Developer → Code** and click **Preview HTML in browser**. Generated HTML is written to a temporary preview folder without changing your project.
-
-For saved pages, select an `.html` or `.htm` file in **Developer → Files** and click **Preview HTML in browser**. With no file selected, the button opens `index.html`. Project previews serve relative CSS, JavaScript, images, and other assets from the selected folder. Refresh the browser after editing a saved file.
-
-Previews use a local HTTP server bound to `127.0.0.1` on an available port. The app does not publish or deploy anything. Close AI Assist to stop the preview servers and remove temporary HTML. Generated snippets should include their own styles and scripts; save linked assets into a project to preview them together. This is a static preview, so framework builds and backend servers must be run separately.
+Preview opens a project HTML file or a generated HTML code block in a separate preview window. Main chat output remains sanitized Markdown; executable preview content has no application API bridge. Relative project assets stay with the project file. Close the preview independently or close the app.
 
 ## Deploy a web project to Vercel
 
-In **Developer**, click **Deploy to Vercel…**. Choose the generated web project's folder, enter the Vercel project name, optionally enter your team slug and custom domain, then click **Deploy to production**. This uploads the local project and may update its existing production site. The desktop Tkinter application itself is not a website; select a web project instead.
+In **Developer → Publish web project**, choose **Deploy to Vercel**. Enter an existing web project folder, a Vercel project name and optional team/domain. Confirm the upload before deploying to production. This publishes that web project, not the desktop app.
 
-Create an access token at https://vercel.com/account/tokens with access to the intended account or team. Paste it into the masked **Vercel access token** field, or set VERCEL_TOKEN in the environment before starting AI Assist. The app keeps the token in memory and does not save it to settings, chat history, or project files. Node.js, the Vercel CLI, and terminal login are not required for this deployment flow.
-
-The dialog uploads source files through the Vercel REST API, creates a production deployment, and waits up to 15 minutes for its build to reach READY. Existing project build settings and environment variables remain managed in Vercel. New projects receive the settings required for their first deployment; plain HTML projects use the static framework setting. Enter the team slug or team ID for team-owned projects. With Team empty, the app selects the token's only available team; if several teams are available, it asks you to choose before uploading. The token must have access to that team.
-
-The uploader excludes dependency folders, local environments, Git metadata, local AI Assist data, .env files, and common credential files. Root .vercelignore rules override .gitignore rules; nested .gitignore files are supported. Rules support slash-separated globs, **, directory patterns, and ! negation; ignored parent directories must be included before their children. Files and directory links are skipped. The uploader limits projects to 10,000 files, 50 MB per file, and 100 MB total. Configure production secrets in the Vercel dashboard instead of uploading environment files.
-
-After a successful build, the app adds and assigns the requested custom domain. DNS and ownership verification may still be required at your domain provider or in Vercel. A domain error leaves the working deployment URL available. **Stop** stops local uploads and build monitoring after the current HTTP request finishes (up to 30 seconds); a submitted deployment may continue on Vercel. Check the dashboard before retrying an interrupted request. Tests simulate the API and never publish files.
-
-Reference: [Vercel REST API](https://vercel.com/docs/rest-api), [create a deployment](https://vercel.com/docs/rest-api/deployments/create-a-new-deployment).
+Install Vercel CLI separately (`npm install -g vercel`) and sign in with `vercel login`. Output and the returned URL appear in the dialog. Cancellation stops local work; a deployment already submitted to Vercel may continue, so check its dashboard. Deployment is blocked while an agent changes the same project.
 
 ## Configuration
 
+`OLLAMA_HOST` selects the Ollama server, defaulting to `http://localhost:11434`. Select a model and requested context in the composer. Server/model support and available memory determine the actual allocation; Capabilities shows advertised limits separately from measured usage. Larger contexts need more memory.
+
 ### Colibri backend
 
-Open **Settings ? AI backend: Ollama...** from the top menu, choose **Colibri**, enter the server URL (default `http://127.0.0.1:8000/v1`), and click **Connect**. AI Assist discovers the model IDs served by Colibri and streams chat responses. Your backend and URL are remembered for the next launch. An optional API key stays in memory for this session; alternatively set `COLI_API_KEY`. `COLIBRI_URL` overrides the saved Colibri URL at startup.
+Install Colibri separately using its setup instructions. In **Models → Colibri engine**, Browse for its folder, load the model catalog, install a supported model, set the context, or start/stop its server. These actions reuse Colibri's own launcher. Folder discovery also checks `COLIBRI_DIR` and common local installation locations. Colibri serves one model at a time.
 
-Install Colibri separately using its [official setup guide](https://github.com/JustVugg/colibri#get-started-in-one-step). On Windows, download/extract Colibri and run `START-HERE.bat`, then follow its model setup prompts. The manual server command from its `c` folder is:
-
-```sh
-./coli serve --model /path/to/model --host 127.0.0.1 --port 8000
-```
-
-For a Windows release archive, use `coli.cmd serve --model D:\models\your-model --host 127.0.0.1 --port 8000`. In a source checkout, use `py -3 c\coli serve --model D:\models\your-model`. If the server enforces `COLI_API_KEY`, enter that same key in AI Assist.
-
-**Managed by AI Assist.** When the Colibri folder is known and the server URL is on this computer, AI Assist drives Colibri's own launcher (`coli status|start|stop|setup --json`) instead of asking you to keep a terminal open:
-
-- The **Engine** picker in the sidebar switches between Ollama and Colibri (the same choice as the Settings dialog). The folder is found in `COLIBRI_DIR`, beside AI Assist, or in your home, Documents, Desktop or Downloads folder (including `colibri-main` from a ZIP); otherwise choose it in the colibri tab.
-- Colibri serves one model at a time. Selecting the engine, **Run all**, or sending a message starts it; **Stop all** stops it. The sidebar shows Colibri's measured speed on the last answer.
-- **Find & download models** opens on **colibri engine (RAM + SSD)**: Colibri's own assessment of this PC (`coli setup --list --json`) with download size, RAM needed, whether a model runs from RAM or streams experts from the SSD, and whether it supports the coding agent's tools, plus a line comparing it with the Ollama (GPU) pick. **Install & use** runs `coli setup --model <id>` (resumable download, engine build, server start). Downloads show speed and estimated time remaining when Colibri reports them. **Context** sets Colibri's context for an install, and **Apply to the current model** restarts it with a new one.
-- The first developer-agent request in a session asks for confirmation unless the last answer ran at 15 tokens per second or more; a model family without tool calls is refused before the agent starts.
-
-A server on another computer, or one without a known folder, is used as it runs: its models are listed and chats work, while installs and start/stop stay in Colibri.
-
-Developer mode uses Colibri's OpenAI tool-calling API and keeps AI Assist's existing file/command approval dialogs. Engine support varies (for example, GLM and Qwen support native tools, while some other engines reject tool requests); see [Colibri's API documentation](https://github.com/JustVugg/colibri/blob/main/docs/api.md). Capability flags and native context limits remain unknown when the model API does not advertise them. The developer agent retains a conservative local history/output budget; the server controls actual context allocation. Slow streaming/prefill is allowed up to a 30-minute socket inactivity timeout. Interrupted or truncated responses are reported as failures.
-
-Saved chats record their backend. Existing chats default to Ollama. Opening a chat switches to the engine it was written with and selects its model once that engine answers. Changing backend starts a new chat and preserves the previous one; a switch requested during a background model check applies as soon as the check ends.
+`COLIBRI_URL` overrides the server URL (default `http://127.0.0.1:8000/v1`); `COLI_API_KEY` provides an optional session credential. Existing backend settings remain readable. A remote server can serve chats, but local installation and start/stop controls require a known local folder. The composer groups models by Ollama and Colibri; unavailable choices show a reason.
 
 ### App updates
 
-AI Assist checks the latest commit on `LucaBeretta/AI_assist` on GitHub once after startup. Open **Settings ? Check for updates...** to see details, retry a failed check, or **Download latest**. Checks run in the background and require internet access; Git is not required, so downloaded ZIP copies work too.
-
-The checker compares shipped Python modules and Windows launchers with GitHub file hashes, allowing for Windows line endings. Missing or different files are reported as possible updates or local changes, since an edited/development copy can also differ. It checks the repository's default branch rather than only tagged releases. Network errors and GitHub request limits are reported without interrupting chats.
-
-To update, extract the downloaded ZIP into a new folder and start that copy. The checker does not overwrite files. Saved chats remain in the configured data folder; if you set `AI_ASSIST_DATA_DIR`, keep the same setting for the new copy.
-
-`OLLAMA_HOST` optionally sets the Ollama server address; the default is `http://localhost:11434`.
-
-`OLLAMA_MODEL` can name your preferred installed model at startup. Otherwise, the app uses an already running model or the first installed model. You can change the selection in the sidebar.
-
-**Context tokens** in the sidebar sets the requested context for the selected model's next chat or developer request. The choice is saved with the conversation. **Server default** leaves ordinary chat context to Ollama; the developer agent uses a 4096-token fallback. Larger settings allow more history and project context but need more memory. They do not guarantee model support or GPU placement; inspect **Capabilities** and run `ollama ps`. Recommended model cards still apply their conservative 4096-token setting.
+Use **Settings → Check for updates** to compare this copy with Luca's GitHub default branch. It runs in the background without requiring Git. Different files can mean local development changes as well as an update. Downloading source does not overwrite this copy; extract it into a new folder and keep the same data-directory setting.
 
 ## Development and tests
 
 ```sh
-python -m unittest discover -v
-python -m compileall -q .
+python -m unittest discover
 ```
 
-Tests isolate chat history and project changes in temporary directories. Ollama responses are simulated for reproducible checks; subprocess integration tests also run harmless real Python commands and verify timeout cleanup. Real symlink tests may be skipped when Windows does not grant symlink privileges; resolved-path confinement is also checked without that privilege.
+Engine and web API tests inject providers and windows; they do not require a display or a real model. On Windows, `python run_windows_tests.py` runs the suite on a separate, invisible desktop when testing native integrations. Link tests may be skipped when Windows does not permit creating symbolic links. Colibri and Vercel tests use local fixtures or fake commands, not real downloads or deployments.
 
-The modules separate workspace UI, atomic chat persistence, project inspection, reviewed agent tools, model metadata, downloads, and hardware recommendations. Blocking network, scanning, and command work runs outside the Tk thread; UI updates arrive through queues. Idle polling is slower than active polling, draft saves skip unchanged data, history uses cached records, and activity output appends incrementally.
-
-History search checks individual fields and stops at the first match, including titles, models, project paths, drafts, and messages. Project text validation uses a compiled control-character check. Model-library HTML traversal is iterative, avoiding recursion limits on deeply nested pages and repeated text copying through ancestor nodes.
-
-### Profiling
-
-Profile creating, listing, searching, opening, and saving synthetic long conversations without Ollama or a display:
-
-```sh
-python profile_workflows.py --chats 20 --messages 200
-```
-
-This uses a temporary history directory and prints cumulative timings. Add `--output history.prof` to retain profiler data. For actual UI workflows, run `python -m cProfile -o ui.prof AIassist.py`, open a long chat, search history, type a draft, and close normally. Inspect the result with `python -m pstats ui.prof` (`sort cumulative`, then `stats 25`). UI profiling covers the main thread; background work needs separate profiling, as in the synthetic storage workflow. Compare runs with the same workload and hardware; local microbenchmarks do not measure model inference speed.
+`ollama_engine.py` contains the unchanged Ollama engine. Plain status and handoff logic lives in `status_values.py` and `hybrid_memory.py`. `webui/app.py` exposes JSON methods; workers emit through `webui/bridge.py`. The frontend is vanilla JavaScript with offline assets and English/Italian strings. No worker receives native UI objects.
