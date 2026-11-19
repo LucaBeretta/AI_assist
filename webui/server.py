@@ -3,6 +3,9 @@
 Endpoints (all JSON, all under /api, all needing a session except /api/session):
 
     POST   /api/session                       exchange a launch code for a token
+    POST   /api/monitor-launch                full session creates one monitor launch code
+    POST   /api/monitor-session               exchange single-use code for read-only monitor token
+    GET    /api/compute                       local read-only telemetry
     GET    /api/status                        engine, privacy, what this interface can do
     GET    /api/models                        installed models and where they run
     GET    /api/models/details?name=          capabilities and context of one model
@@ -315,6 +318,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     ROUTES = [
         ("POST", r"/api/session", "session", False),
+        ("POST", r"/api/monitor-session", "monitor_session", False),
+        ("POST", r"/api/monitor-launch", "monitor_launch", True),
         ("GET", r"/api/status", "status", True),
         ("GET", r"/api/models", "models", True),
         ("GET", r"/api/models/details", "model_details", True),
@@ -387,7 +392,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_json(405 if allowed else 404, {"error": "Not allowed." if allowed else "Not found."})
             return
         _, pattern, name, needs_session = route
-        if needs_session and not self.workspace.sessions.valid(self.headers.get("Authorization")):
+        if needs_session and not (self.workspace.sessions.valid(self.headers.get("Authorization")) or
+                (name == "compute" and self.workspace.sessions.valid_monitor(self.headers.get("Authorization")))):
             self.send_json(401, {"error": "This page's session ended. Open the link printed where AI Assist started."})
             return
         try:
@@ -472,6 +478,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if token is None:
             raise HttpError(401, "This link was already used or has expired. Open the newest link printed where "
                                  "AI Assist started.")
+        return {"token": token}
+
+    def api_monitor_launch(self, body):
+        """Only a full workspace session can mint one-time read-only access."""
+        return {"code": self.workspace.sessions.new_monitor_code()}
+
+    def api_monitor_session(self, body):
+        token = self.workspace.sessions.exchange_monitor(body.get("code"))
+        if token is None:
+            raise HttpError(401, "Monitor link expired or already used. Open a new monitor window.")
         return {"token": token}
 
     def api_status(self, body):
