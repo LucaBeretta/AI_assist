@@ -25,12 +25,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # 3.13 is the runtime the launchers install; 3.14 is the newest; 3.9 is the oldest supported.
+          # 3.13 is the runtime the launchers install; 3.14 is the newest; 3.9 is the oldest
+          # supported, and GitHub offers it only up to Ubuntu 24.04.
           - { os: windows-latest, python: "3.13" }
           - { os: windows-latest, python: "3.14" }
           - { os: macos-latest, python: "3.13" }
           - { os: ubuntu-latest, python: "3.13" }
-          - { os: ubuntu-latest, python: "3.9" }
+          - { os: ubuntu-24.04, python: "3.9" }
     steps:
       - uses: actions/checkout@v6
         with:
@@ -42,14 +43,18 @@ jobs:
         run: python -c "import sys, tkinter; print(sys.version); print('Tk', tkinter.TkVersion)"
       - name: Every file compiles
         run: python -m compileall -q .
-      - name: Tests (Linux, on a virtual screen)
-        if: runner.os == 'Linux'
+      - name: Tests (on Linux, on a virtual screen for the Tk tests)
+        shell: bash
         run: |
-          command -v xvfb-run || (sudo apt-get update && sudo apt-get install -y xvfb)
-          xvfb-run -a python -m unittest discover -v
-      - name: Tests
-        if: runner.os != 'Linux'
-        run: python -m unittest discover -v
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            command -v xvfb-run || (sudo apt-get update && sudo apt-get install -y xvfb)
+            screen="xvfb-run -a"
+          fi
+          $screen python -m unittest discover -v 2>&1 | tee unittest.log
+      - name: Failures as public notes
+        if: failure()
+        shell: bash
+        run: test -f unittest.log && python tools/ci_notes.py unittest.log
 
   page:
     name: Page tests (Node)
