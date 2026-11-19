@@ -1,35 +1,14 @@
 import tempfile
-import http.client
-from types import SimpleNamespace
 from pathlib import Path
 import unittest
-from unittest.mock import patch, Mock
+from unittest.mock import patch
 
-from update_ui import UpdateChecker
 from update_checker import blob_hash, check_update, github_json
 import urllib.error
 
 
 class UpdateTests(unittest.TestCase):
-    def test_close_cancels_startup_timer(self):
-        root = Mock()
-        root.after.return_value = "startup-timer"
-        checker = UpdateChecker(SimpleNamespace(root=root, closed=False, closing=False))
-        checker.close()
-        checker.close()
-        root.after_cancel.assert_called_once_with("startup-timer")
 
-    def test_interrupted_http_check_reports_failure_and_allows_retry(self):
-        checker = UpdateChecker(SimpleNamespace(root=Mock(), closed=False, closing=False))
-        def immediate_thread(*, target, daemon):
-            return SimpleNamespace(start=target)
-        with patch("update_ui.threading.Thread", side_effect=immediate_thread), patch(
-                "update_ui.check_update", side_effect=http.client.IncompleteRead(b"partial")):
-            checker.check()
-            checker.poll()
-        self.assertFalse(checker.busy)
-        self.assertIsNone(checker.result)
-        self.assertIn("Could not check", checker.message)
 
     def check(self, directory, files, truncated=False):
         responses = [[{"sha": "a" * 40, "commit": {"tree": {"sha": "b" * 40}}}],

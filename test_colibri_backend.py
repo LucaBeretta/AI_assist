@@ -2,13 +2,9 @@
 
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
-from contextlib import ExitStack
-import os
 from pathlib import Path
 import tempfile
 import threading
-import time
-import tkinter as tk
 import unittest
 from unittest.mock import Mock, patch
 
@@ -244,90 +240,6 @@ class ColibriTests(unittest.TestCase):
         for url in ("file:///tmp", "https://user:secret@host", "http://host/v1?key=secret", "http://host/api/chat"):
             with self.assertRaises(ValueError):
                 normalize_url(url)
-
-
-class BackendGuiTests(unittest.TestCase):
-    def test_colibri_startup_chat_and_switch_back_to_ollama(self):
-        from tk_app import AIAssistantGUI
-        with tempfile.TemporaryDirectory() as directory, ExitStack() as mocks:
-            Path(directory, "backend.settings").write_text(json.dumps({"backend": "Colibri", "url": "http://localhost:8000/v1"}))
-            mocks.enter_context(patch.dict(os.environ, {"AI_ASSIST_DATA_DIR": directory, "COLIBRI_URL": "", "COLI_API_KEY": ""}))
-            mocks.enter_context(patch("update_ui.UpdateChecker.check"))
-            ensure = mocks.enter_context(patch("ollama_engine.ensure_ollama"))
-            mocks.enter_context(patch("ollama_engine.list_ollama_models", return_value=["glm"]))
-            mocks.enter_context(patch("ollama_engine.running_models", return_value={"glm"}))
-            mocks.enter_context(patch("colibri_backend.ColibriClient.models", return_value=["glm"]))
-            # No colibri folder: the server is used as it runs (no launcher control).
-            mocks.enter_context(patch("colibri_launcher.find_directory", return_value=None))
-            mocks.enter_context(patch("capabilities_view.fetch_model_capabilities", return_value={"capabilities": []}))
-
-            def reply(client, messages, model, on_chunk=None, on_metrics=None):
-                on_chunk("Hello from Colibri")
-                return "Hello from Colibri"
-
-            mocks.enter_context(patch.object(ColibriClient, "chat", reply))
-            try:
-                root = tk.Tk()
-            except tk.TclError as error:
-                self.skipTest(str(error))
-            root.withdraw()
-            errors = []
-            root.report_callback_exception = lambda *error: errors.append(error)
-            app = AIAssistantGUI(root)
-
-            def wait(predicate):
-                until = time.monotonic() + 5
-                while not predicate() and time.monotonic() < until:
-                    root.update()
-                    time.sleep(.01)
-                self.assertTrue(predicate())
-
-            try:
-                wait(lambda: not app.startup_pending and not app.busy())
-                self.assertEqual(app.backend, "Colibri")
-                ensure.assert_not_called()
-                self.assertEqual(app.model_name.get(), "glm")
-                for widget in (app.run_all_button, app.stop_all_button, app.context_picker):
-                    self.assertEqual(str(widget.cget("state")), "disabled")
-                # Find & download models stays available: its colibri tab explains how to install colibri.
-                self.assertEqual(str(app.download_models_button.cget("state")), "normal")
-                self.assertIn("Colibri", app.connection_label.cget("text"))
-                app.start_new_chat()
-                identity = app.current_chat["id"]
-                app.input_box.insert("1.0", "Hi")
-                app.send_prompt()
-                wait(lambda: not app.is_waiting and not app.pending_saves)
-                record = app.chat_store.load(identity)
-                self.assertEqual(record["backend"], "Colibri")
-                self.assertEqual(record["messages"][-1]["content"], "Hello from Colibri")
-                app.open_backend()
-                children = app.backend_window.winfo_children()
-                picker = next(widget for widget in children if widget.winfo_class() == "TCombobox")
-                picker.set("Ollama")
-                entries = [widget for widget in children if widget.winfo_class() == "TEntry"]
-                entries[-1].insert(0, "do-not-save-this-key")
-                actions = children[-1]
-                next(widget for widget in actions.winfo_children() if widget.cget("text") == "Connect").invoke()
-                wait(lambda: not app.busy() and not app.pending_saves)
-                self.assertEqual(app.backend, "Ollama")
-                ensure.assert_called()
-                self.assertNotEqual(str(app.download_models_button.cget("state")), "disabled")
-                self.assertNotIn("do-not-save-this-key", Path(directory, "backend.settings").read_text())
-                app.open_chat(identity)
-                # The chat reopens on the engine it was written with, and its model returns.
-                self.assertEqual(app.backend, "Colibri")
-                self.assertEqual(app.engine_choice.get(), "Colibri")
-                self.assertEqual(app.current_chat["backend"], "Colibri")
-                wait(lambda: not app.busy() and app.model_name.get() == "glm")
-                self.assertFalse(errors, errors)
-                wait(lambda: not app.pending_saves)
-            finally:
-                app.saver.stop()
-                app.capabilities_view.close()
-                app.html_previews.close()
-                for callback in root.tk.call("after", "info"):
-                    root.after_cancel(callback)
-                root.destroy()
 
 
 if __name__ == "__main__":

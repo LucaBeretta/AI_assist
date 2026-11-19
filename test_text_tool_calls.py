@@ -92,7 +92,7 @@ class TextToolCallParsingTests(unittest.TestCase):
         self.assertEqual(small, 1024)
 
     def test_agent_context_uses_choice_then_loaded_model_then_16k(self):
-        from workspace_ui import agent_context_length
+        from workspace_values import agent_context_length
         loaded = lambda: {"qwen3-coder:30b": {"context_length": 32768}}
         self.assertEqual(agent_context_length(8192, "qwen3-coder:30b", loaded), 8192)
         self.assertEqual(agent_context_length(None, "qwen3-coder:30b", loaded), 32768)

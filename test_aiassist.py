@@ -1,6 +1,6 @@
 import unittest
 
-from workspace_ui import (
+from workspace_values import (
     POLL_ACTIVE_INTERVAL_MS, POLL_IDLE_INTERVAL_MS, _response_poll_interval, _history_matches,
 )
 

@@ -3,6 +3,8 @@
 import json
 from pathlib import Path
 
+from appearance import DEFAULT_THEME
+
 
 def rectangle(value):
     if (not isinstance(value, dict) or set(value) != {"x", "y", "width", "height"}
@@ -53,6 +55,6 @@ def saved_theme(directory):
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
         theme = value.get("theme") if isinstance(value, dict) else None
-        return theme if theme in {"Night", "Day", "Dark", "Light", "Warm"} else "Night"
+        return theme if theme in {"Night", "Day", "Dark", "Light", "Warm"} else DEFAULT_THEME
     except (OSError, ValueError):
-        return "Night"
+        return DEFAULT_THEME

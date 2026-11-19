@@ -2,6 +2,7 @@
 
 import unittest
 import threading
+import json
 from unittest.mock import patch
 
 import coding_agent
@@ -18,6 +19,24 @@ class PinTests(unittest.TestCase):
         record = self.store.load(self.chat)
         record["project_path"] = str(self.project)
         self.store.save(record)
+
+    def test_changing_the_limit_refreshes_already_pinned_context(self):
+        source = "# Selected source\n" + "x" * 70000
+        (self.project / "large.py").write_text(source, encoding="utf-8", newline="\n")
+        self.assertFalse(self.api.pin_file(self.chat, "large.py")["ok"])
+        (self.store.directory / "agent.settings").write_text(json.dumps({"file_limit": 128000}), encoding="utf-8")
+        self.assertTrue(self.api.pin_file(self.chat, "large.py")["ok"])
+        self.assertEqual(self.api.open_chat(self.chat)["pinned_files"][0]["size_bytes"], len(source))
+
+    def test_project_worker_passes_the_selected_limit_to_pinned_context(self):
+        (self.project / "a.py").write_text("source", encoding="utf-8")
+        self.api.pin_file(self.chat, "a.py")
+        (self.store.directory / "agent.settings").write_text(json.dumps({"file_limit": 128000}), encoding="utf-8")
+        with patch("developer_tools.build_project_context", wraps=developer_tools.build_project_context) as build:
+            stream = self.api.send(self.chat, "Inspect", "fake:7b", None)["stream_id"]
+            self.events.wait("done", stream)
+        self.assertTrue(build.called)
+        self.assertTrue(all(call.kwargs["max_file_bytes"] == 128000 for call in build.call_args_list))
 
     def test_pin_open_usage_send_and_unpin(self):
         (self.project / "a.py").write_text("important source\n" * 100)

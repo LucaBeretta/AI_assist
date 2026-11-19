@@ -21,7 +21,7 @@ class IsolatedRunnerTests(unittest.TestCase):
     @unittest.skipUnless(os.name == "nt", "This runner is Windows-specific")
     def test_worker_refuses_a_different_desktop_before_loading_tests(self):
         result = subprocess.run([sys.executable, "-E", str(Path(__file__).with_name("run_windows_tests.py")),
-            "--worker", "ai_assist_tests_not_the_actual_desktop", "--pattern", "test_message_widgets.py"],
+            "--worker", "ai_assist_tests_not_the_actual_desktop", "--pattern", "test_webui_static.py"],
             capture_output=True, text=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Refusing GUI tests", result.stderr)
