@@ -6,6 +6,10 @@ on:
       - 'integration/compute-dashboard-web'
   workflow_dispatch:
 
+concurrency:
+  group: aiassist-compute-integration-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
