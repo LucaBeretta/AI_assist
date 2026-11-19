@@ -36,6 +36,7 @@ from webui.window_state import rectangle, visible_rectangle, saved_theme
 from webui.status import StatusPush
 from status_bar import snapshot_values, generation_rate, is_cloud_model, is_local
 from webui.local_files import write_utf8
+from webui.prompts import PromptStore
 
 
 log = logging.getLogger(__name__)
@@ -113,6 +114,41 @@ class Api:
         self._memories = Memories(self._store.directory)
         self._status_chat = None
         self._status = StatusPush(self.status_snapshot, self._bridge.emit)
+        self._prompts = PromptStore(self._store.directory)
+
+    @_json_method
+    def list_prompts(self):
+        with self._lock:
+            return {"ok": True, "prompts": self._prompts.list()}
+
+    @_json_method
+    def save_prompt(self, name, text):
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("The web UI is closing.")
+            prompt = self._prompts.save(name, text)
+        self._bridge.emit("prompts_changed")
+        return {"ok": True, "prompt": prompt}
+
+    @_json_method
+    def delete_prompt(self, name):
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("The web UI is closing.")
+            self._prompts.delete(name)
+        self._bridge.emit("prompts_changed")
+        return {"ok": True}
+
+    @_json_method
+    def set_chat_instructions(self, chat_id, text):
+        if not isinstance(text, str) or len(text) > 1000000:
+            raise ValueError("Chat instructions must be text of at most 1,000,000 characters.")
+        with self._lock:
+            self._require_idle(chat_id)
+            record = self._load_chat(chat_id)
+            record["environment"]["instructions"] = text
+            record["_agent_history_stale"] = True
+            return {"ok": True, "chat": self._save_chat(record)}
 
     def _start_status(self):
         self._status.start()
