@@ -516,6 +516,7 @@ window.app = (() => {
       if (event.type === "ready") { refreshModels().catch(showError); continue; }
       if (event.type === "status") { status(event.text); continue; }
       if (appEvent(event)) continue;
+      if (event.task_id) { window.devui?.onEvent(event); continue; }  // Developer task events
       if (!event.stream_id) { if (event.type === "error") showError(new Error(event.error)); continue; }
       const stream = streams.get(event.stream_id) || {id: event.stream_id, chat_id: event.chat_id, text: "", active: true, operation:event.operation || "chat"};
       streams.set(event.stream_id, stream);
@@ -615,6 +616,7 @@ window.app = (() => {
       else if (ctrl && key === ",") { event.preventDefault(); openSettings(); }
       else if (event.key === "Escape") {
         if (element("context-menu").open) closeContextMenu();
+        else if (window.devui && !element("dev-view").hidden) { if (window.devui.isRunning()) window.devui.stop(); }
         else if (editingIndex !== null) cancelEditing();
         else if (!element("stop").disabled) element("stop").click();
       }
