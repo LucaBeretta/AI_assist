@@ -218,6 +218,9 @@ class ColibriWorkspaceTests(unittest.TestCase):
 
             panel.context_choice.set("32,768 tokens")
             self.wait_for(lambda: str(panel.context_button.cget("state")) == "normal", "apply enabled")
+            # The panel refuses while the app is busy ("Wait for the current chat or model
+            # operation..."), so each step waits for the app as a person would.
+            self.wait_for(lambda: not self.app.busy(), "app idle before the context change")
             panel.context_button.invoke()
             self.wait_for(lambda: panel.installing is None and not panel.loading, "context change", timeout=15)
             self.assertIn("restarted with context 32,768 tokens", panel.message.cget("text"))
@@ -230,6 +233,7 @@ class ColibriWorkspaceTests(unittest.TestCase):
             self.wait_for(lambda: not panel.loading and any(row["id"] == "qwen36-35b" for row, _ in panel.card_buttons),
                           "new catalog")
             panel.context_choice.set("Automatic")
+            self.wait_for(lambda: not self.app.busy(), "app idle before the install", timeout=20)
             with patch("colibri_panel.messagebox.askyesno", return_value=True):
                 panel.choose(next(row for row, _ in panel.card_buttons if row["id"] == "qwen36-35b"))
             self.wait_for(lambda: panel.installing is None and not panel.loading, "fake install", timeout=20)
