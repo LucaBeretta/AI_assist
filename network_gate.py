@@ -796,7 +796,17 @@ def notification_command(title, body):
                 "-e", "end run", title, body], None
     if shutil.which("notify-send"):
         return ["notify-send", "--app-name=AI Assist", "--", title, body], None
+    if shutil.which("gdbus"):
+        return ["gdbus", "call", "--session", "--dest", "org.freedesktop.Notifications",
+                "--object-path", "/org/freedesktop/Notifications", "--method", "org.freedesktop.Notifications.Notify",
+                _gvariant_text("AI Assist"), "0", _gvariant_text(""), _gvariant_text(title), _gvariant_text(body),
+                "[]", "{}", "10000"], None
     return None, None
+
+
+def _gvariant_text(text):
+    # gdbus parses each argument as GVariant text, so a string must be a quoted literal.
+    return "'" + text.replace("\\", "\\\\").replace("'", "\\'") + "'"
 
 
 def _notice(title, body, key):

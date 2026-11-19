@@ -1,5 +1,6 @@
-# Private Python that the launchers download into ./runtime only when no
-# installed Python can open AI Assist's window (Tkinter with Tk 8.6 or newer).
+# Private Python that the launchers download into ./runtime (./runtime/linux on
+# Linux) only when no installed Python can open AI Assist's window (Tkinter
+# with Tk 8.6 or newer), after two confirmations.
 # Source: https://github.com/astral-sh/python-build-standalone/releases
 # To update, change the release in "base" and every file name and SHA-256
 # digest together (the release page lists each asset's digest).
@@ -10,3 +11,5 @@ aarch64-apple-darwin    cpython-3.13.18+20261026-aarch64-apple-darwin-install_on
 x86_64-apple-darwin     cpython-3.13.18+20261026-x86_64-apple-darwin-install_only.tar.gz     708be9e7df297f68bdae589ea9e62a621db5abe7708f79e851c41410347452d1
 x86_64-pc-windows-msvc  cpython-3.13.18+20261026-x86_64-pc-windows-msvc-install_only.tar.gz  ebe90cc1dce2dd2d7afa1f0aa9b6c269c7c0174aeabdc6a801381602b7283424
 aarch64-pc-windows-msvc cpython-3.13.18+20261026-aarch64-pc-windows-msvc-install_only.tar.gz 13f8bb6ff296a826dd903ea732255ca02fc3a4db4287c2b0ebe0781360b6028d
+x86_64-unknown-linux-gnu  cpython-3.13.18+20261026-x86_64-unknown-linux-gnu-install_only.tar.gz  126343c54daff4068efc1ac269518d0cc202d57857794948103dd1454e8881be
+aarch64-unknown-linux-gnu cpython-3.13.18+20261026-aarch64-unknown-linux-gnu-install_only.tar.gz b48451865bde9a39e2f3e71d7fdcbf1f32615f50f24d78dc50d04ede6501cf81
