@@ -1103,8 +1103,10 @@ class Api:
 def main():
     try:
         webview = importlib.import_module("webview")
-    except ImportError:
-        print("The web UI needs pywebview. Run: python -m pip install -r requirements.txt", file=sys.stderr)
+    except ImportError as error:
+        # Name the real missing module: pywebview itself can be installed while one of its dependencies is not.
+        print(f"The web UI needs pywebview and its dependencies ({error}). Run: python -m pip install -r requirements.txt",
+              file=sys.stderr)
         return 1
     bridge = None
     api = None
