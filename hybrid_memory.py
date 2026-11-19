@@ -58,4 +58,3 @@ def memory_callbacks(snapshot, host, model, cancel):
             launcher.stop_server(snapshot["directory"])
 
     return state, before_worker, before_review, after_review
-

@@ -30,6 +30,7 @@ import developer_tools as projects
 import diff_hunks
 from task_checkpoints import CheckpointStore
 from response_metrics import metrics_summary, response_metrics
+import network_gate
 
 
 _MAX_FILE_BYTES = 64000
@@ -489,8 +490,10 @@ def _run_command(project, arguments, approve_action, cancel_event, on_event=None
     windows = os.name == "nt"
     executable = ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command] if windows else ["/bin/sh", "-c", command]
     options = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)} if windows else {"start_new_session": True}
+    # Python started by the command loads the internet gate; other programs it runs cannot be checked.
     process = subprocess.Popen(executable, cwd=str(project), stdin=subprocess.DEVNULL,
-                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT, **options)
+                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                               env=network_gate.child_environment("developer agent command"), **options)
     output = []
     count = [0]
     truncated = [False]
@@ -646,7 +649,10 @@ def _chat(host, model, messages, context_length, cancel_event):
 
     def request_worker():
         try:
-            with urllib.request.urlopen(request, timeout=180) as response:
+            with network_gate.task(f"Run a developer agent step with {model}",
+                                   sends="Your request, the conversation, and the project files and command "
+                                         "output the agent has read."), \
+                    urllib.request.urlopen(request, timeout=180) as response:
                 data = response.read(_MAX_RESPONSE_BYTES + 1)
             if len(data) > _MAX_RESPONSE_BYTES:
                 raise RuntimeError("Ollama returned too much agent output.")

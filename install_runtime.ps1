@@ -36,8 +36,11 @@ $expected = $entry[2].ToLowerInvariant()
 Write-Host 'AI Assist can set up its own private Python and web UI dependencies (about 45 MB download).'
 Write-Host "It is stored only in: $runtime"
 Write-Host 'No administrator rights are needed and other Python installations are not changed.'
-$answer = Read-Host 'Download and set it up now? [Y/n]'
-if ($answer -match '^\s*[Nn]') { exit 2 }
+Write-Host 'This downloads Python from GitHub and web dependencies from PyPI, so it needs two confirmations.'
+$answer = Read-Host 'Download it now? [y/N]'
+if ($answer -notmatch '^\s*[Yy]') { exit 2 }
+$answer = Read-Host "Second check: type yes to download $file"
+if ("$answer".Trim() -ne 'yes') { exit 2 }
 
 function Remove-Staging {
     if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }

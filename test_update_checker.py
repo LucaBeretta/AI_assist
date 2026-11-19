@@ -1,5 +1,5 @@
 import tempfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import unittest
 from unittest.mock import patch
 
@@ -8,6 +8,7 @@ import urllib.error
 
 
 class UpdateTests(unittest.TestCase):
+
 
 
     def check(self, directory, files, truncated=False):
@@ -29,6 +30,36 @@ class UpdateTests(unittest.TestCase):
             Path(folder, "AIassist.py").write_bytes(b"old")
             result = self.check(folder, {"AIassist.py": b"new", "new_module.py": b"new"})
             self.assertEqual(result["differences"], ["AIassist.py", "new_module.py"])
+
+    def test_the_child_gate_loader_is_checked_but_other_subfolders_are_not(self):
+        with tempfile.TemporaryDirectory() as folder:
+            Path(folder, "AIassist.py").write_bytes(b"app")
+            Path(folder, "child_gate").mkdir()
+            Path(folder, "child_gate", "sitecustomize.py").write_bytes(b"old")
+            result = self.check(folder, {"AIassist.py": b"app", "child_gate/sitecustomize.py": b"new",
+                                         "docs/tool.py": b"not shipped"})
+        self.assertEqual(result["differences"], ["child_gate/sitecustomize.py"])
+
+    def test_the_apps_packages_and_web_page_are_checked(self):
+        with tempfile.TemporaryDirectory() as folder:
+            Path(folder, "AIassist.py").write_bytes(b"app")
+            Path(folder, "webui", "static").mkdir(parents=True)
+            Path(folder, "webui", "static", "app.js").write_bytes(b"old")
+            result = self.check(folder, {"AIassist.py": b"app", "app_core/chat_service.py": b"new",
+                                         "webui/server.py": b"new", "webui/static/app.js": b"new",
+                                         "webui/static/styles.css": b"new", "webui/tests/markdown.test.mjs": b"test",
+                                         "app_core/test_x.py": b"test", "webui/static/notes.md": b"doc"})
+        self.assertEqual(sorted(result["differences"]), ["app_core/chat_service.py", "webui/server.py",
+                                                        "webui/static/app.js", "webui/static/styles.css"])
+
+    def test_every_shipped_file_in_this_copy_is_recognised(self):
+        from update_checker import is_shipped
+        here = Path(__file__).resolve().parent
+        for folder, pattern in (("app_core", "*.py"), ("webui", "*.py"), ("webui/static", "*")):
+            for path in sorted((here / folder).glob(pattern)):
+                if path.is_file():
+                    with self.subTest(path=path.name):
+                        self.assertTrue(is_shipped(PurePosixPath(path.relative_to(here).as_posix())))
 
     def test_incomplete_tree_is_not_reported_as_current(self):
         with self.assertRaises(ValueError):

@@ -5,6 +5,8 @@ from gui_runtime import redirect_missing_streams
 
 
 def main(argv=None):
+    import network_gate
+    network_gate.install()
     redirect_missing_streams()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--web", action="store_true", help="open the web UI (the default)")

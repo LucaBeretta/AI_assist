@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
+from app_core.settings import write_json
 
 
 DEFAULTS = {"idle_unload_minutes": 0, "first_run_complete": False, "zoom": 1.0, "language": "system"}
@@ -38,16 +39,5 @@ def save(directory, values):
     target = Path(directory) / "webui.settings"
     if target.is_symlink() or getattr(target, "is_junction", lambda: False)():
         raise ValueError("Web settings must not be a link.")
-    temporary = None
-    try:
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=directory,
-                                         suffix=".tmp", delete=False) as output:
-            temporary = Path(output.name)
-            json.dump(values, output, ensure_ascii=False)
-            output.flush()
-            os.fsync(output.fileno())
-        os.replace(temporary, target)
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
+    write_json(target, values)
     return values

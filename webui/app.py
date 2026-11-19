@@ -84,7 +84,7 @@ class Api(ParityApi):
     def __init__(self, bridge, store=None, engine=None, hardware=None, desktop=None, colibri=None):
         self._bridge = bridge
         self._store = store if store is not None else ChatStore()
-        self._engine = engine if engine is not None else importlib.import_module("ollama_engine")
+        self._engine = engine if engine is not None else importlib.import_module("app_core.runtime")
         self._lock = threading.RLock()
         self._streams = {}
         self._unsaved = {}

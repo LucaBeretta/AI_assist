@@ -5,6 +5,8 @@ from pathlib import Path
 import threading
 
 from colibri_backend import ColibriClient, normalize_url
+from app_core.settings import load_backend, read_json
+from app_core.providers import ColibriProvider
 import colibri_launcher as launcher
 
 
@@ -14,14 +16,14 @@ DEFAULT_URL = "http://127.0.0.1:8000/v1"
 class ColibriService:
     def __init__(self, directory):
         self.directory = Path(directory)
-        backend = launcher.load_settings(self.directory / "backend.settings")
-        self.default_backend = backend.get("backend") if backend.get("backend") in {"Ollama", "Colibri"} else "Ollama"
-        try:
-            saved_url = normalize_url(backend.get("url", DEFAULT_URL))
-        except (ValueError, AttributeError, TypeError):
-            saved_url = DEFAULT_URL
-        self._explicit_url = bool(os.environ.get("COLIBRI_URL")) or saved_url != DEFAULT_URL
-        self.url = normalize_url(os.environ.get("COLIBRI_URL") or saved_url)
+        self.default_backend, self.url = load_backend(self.directory / "backend.settings", normalize_url)
+        legacy = read_json(self.directory / "backend.settings")
+        if "backend" not in legacy and "url" in legacy and not os.environ.get("COLIBRI_URL"):
+            try:
+                self.url = normalize_url(legacy["url"])
+            except (ValueError, TypeError, AttributeError):
+                pass
+        self._explicit_url = bool(os.environ.get("COLIBRI_URL")) or self.url != DEFAULT_URL
         self._key = os.environ.get("COLI_API_KEY", "")
         self._folder = None
         self._lock = threading.Lock()
@@ -41,7 +43,7 @@ class ColibriService:
 
     def client(self):
         with self._lock:
-            return ColibriClient(self.url, self._key)
+            return ColibriProvider(self.url, self._key).client()
 
     def availability(self):
         folder = self.folder()

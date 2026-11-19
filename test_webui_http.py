@@ -9,7 +9,7 @@ import threading
 import unittest
 from unittest.mock import patch
 
-import ollama_engine
+from app_core import runtime
 from chat_store import ChatStore
 from test_webui_app import Events
 from webui.app import Api
@@ -57,9 +57,9 @@ class StreamHTTPTests(unittest.TestCase):
         self.addCleanup(folder.cleanup)
         self.store = ChatStore(Path(folder.name))
         self.events = Events()
-        self.api = Api(self.events, self.store, ollama_engine)
+        self.api = Api(self.events, self.store, runtime)
         self.addCleanup(self.api._close)
-        self.host = patch("ollama_engine.ollama_url", return_value=f"http://127.0.0.1:{self.server.server_port}")
+        self.host = patch("app_core.runtime.ollama_url", return_value=f"http://127.0.0.1:{self.server.server_port}")
         self.host.start()
         self.addCleanup(self.host.stop)
 

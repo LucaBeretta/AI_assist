@@ -1,7 +1,10 @@
 """Plain status values shared by the local model APIs and web UI."""
-import urllib.parse
+from app_core import privacy as core_privacy
+import network_gate
 
 AGENT_MAX_STEPS = 12
+is_local = core_privacy.is_local_url
+is_cloud_model = core_privacy.is_cloud_model
 
 
 def short_tokens(count):
@@ -24,18 +27,8 @@ def placement(detail):
     return f"gpu {share:.0%} · cpu"
 
 
-def is_local(url):
-    try:
-        host = urllib.parse.urlsplit(url if "://" in url else "http://" + url).hostname
-    except ValueError:
-        return False
-    return host in ("localhost", "127.0.0.1", "::1")
 
 
-def is_cloud_model(name):
-    """Ollama's cloud models run on Ollama's servers: names end in -cloud or :cloud."""
-    name = (name or "").lower()
-    return name.endswith("-cloud") or name.endswith(":cloud")
 
 
 def generation_rate(metrics):
@@ -80,16 +73,10 @@ def snapshot_values(*, engine="Ollama", connected=False, model="", details=None,
 
     agent_text = f"agent step {step} / {max_steps}" if agent_active and step else ""
 
-    if is_cloud_model(model):
-        privacy, privacy_role = "cloud model: prompts leave this computer", "amber"
-    elif url and not is_local(url):
-        privacy, privacy_role = "remote server", "amber"
-    else:
-        privacy, privacy_role = "local only", "success"
+    privacy, privacy_role = core_privacy.privacy_status(network_gate.status(), model, url)
     return {
         "engine": f"{engine.lower()} {state}", "engine_role": "success" if state == "ready" else "muted",
         "model": model_text, "context": context_text, "fraction": fraction,
         "vram": vram_text, "speed": speed_text, "agent": agent_text,
         "privacy": privacy, "privacy_role": privacy_role,
     }
-

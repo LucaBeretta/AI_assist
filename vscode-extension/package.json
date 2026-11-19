@@ -1,0 +1,93 @@
+{
+  "name": "ai-assist-local-agent",
+  "displayName": "AI Assist Local Agent",
+  "description": "Run the AI Assist coding agent locally in VS Code with Ollama.",
+  "version": "0.1.0",
+  "publisher": "ai-assist-local",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "AI",
+    "Other"
+  ],
+  "main": "./extension.js",
+  "extensionKind": [
+    "ui"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false
+    }
+  },
+  "activationEvents": [
+    "onView:aiAssist.chat"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "aiAssist.openChat",
+        "title": "AI Assist: Open Local Agent Chat"
+      },
+      {
+        "command": "aiAssist.newChat",
+        "title": "AI Assist: New Agent Chat"
+      },
+      {
+        "command": "aiAssist.refreshModels",
+        "title": "AI Assist: Refresh Local Models"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "aiAssist",
+          "title": "AI Assist",
+          "icon": "./media/ai-assist.svg"
+        }
+      ]
+    },
+    "views": {
+      "aiAssist": [
+        {
+          "id": "aiAssist.chat",
+          "name": "Local Agent",
+          "type": "webview"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "AI Assist Local Agent",
+      "properties": {
+        "aiAssist.repositoryPath": {
+          "type": "string",
+          "default": "..",
+          "description": "Path to the AI_Assist repository containing coding_agent.py. Relative paths are resolved from the extension folder."
+        },
+        "aiAssist.pythonPath": {
+          "type": "string",
+          "default": "python",
+          "description": "Python executable used to run the AI Assist agent bridge."
+        },
+        "aiAssist.ollamaHost": {
+          "type": "string",
+          "default": "http://localhost:11434",
+          "description": "Loopback Ollama address used by the local coding agent."
+        },
+        "aiAssist.contextLength": {
+          "type": "number",
+          "default": 4096,
+          "minimum": 2048,
+          "maximum": 1048576,
+          "description": "Context length requested from Ollama for agent turns."
+        },
+        "aiAssist.model": {
+          "type": "string",
+          "default": "",
+          "description": "Installed local Ollama model selected for agent conversations."
+        }
+      }
+    }
+  }
+}

@@ -1,22 +1,32 @@
-"""Ollama HTTP requests, model lifecycle and stoppable streaming; no UI objects."""
-import json
+"""Ollama's HTTP API, without any window code.
+
+AIassist.py keeps its long-standing module functions (``request_ollama``,
+``ollama_api``, ``running_details`` and so on) as thin compositions of these, so
+both interfaces send the same requests and apply the same limits.
+"""
+
 import http.client
+import json
 import os
-import queue
-import threading
-import subprocess
 import shutil
+import subprocess
 import time
 import urllib.error
-import urllib.request
 import urllib.parse
+import urllib.request
 
+import network_gate
 from response_metrics import response_metrics
 
+DEFAULT_URL = "http://localhost:11434"
+MAX_LINE_BYTES = 1024 * 1024
+MAX_STREAM_BYTES = 16 * 1024 * 1024
 
-def ollama_url():
-    """Convert Ollama's listening address into a usable client URL."""
-    host = os.environ.get("OLLAMA_HOST", "").strip() or "http://localhost:11434"
+
+def base_url(environ=None):
+    """Convert Ollama's listening address (``OLLAMA_HOST``) into a usable client URL."""
+    environ = os.environ if environ is None else environ
+    host = environ.get("OLLAMA_HOST", "").strip() or DEFAULT_URL
     if "://" not in host:
         host = f"http://{host}"
     parsed = urllib.parse.urlsplit(host)
@@ -26,40 +36,41 @@ def ollama_url():
     return parsed.geturl().rstrip("/")
 
 
-def list_ollama_models():
-    """Read the models installed on the configured Ollama server."""
-    host = ollama_url()
-    try:
-        with urllib.request.urlopen(f"{host}/api/tags", timeout=10) as response:
-            result = json.loads(response.read().decode("utf-8"))
-    except (urllib.error.URLError, TimeoutError) as error:
-        raise RuntimeError(
-            f"Could not load models from {host}. Start Ollama, then click Refresh."
-        ) from error
-    except json.JSONDecodeError as error:
-        raise RuntimeError("Ollama returned an invalid model list.") from error
-
+def model_names(result):
+    """Installed model names from an ``/api/tags`` answer."""
     models = result.get("models") if isinstance(result, dict) else None
     if not isinstance(models, list):
         raise RuntimeError("Ollama returned an invalid model list.")
     return sorted({
         model["name"] for model in models
-        if isinstance(model, dict) and isinstance(model.get("name"), str)
-        and model["name"].strip()
+        if isinstance(model, dict) and isinstance(model.get("name"), str) and model["name"].strip()
     })
 
 
-def ollama_api(path, payload=None, timeout=10, method=None):
+def list_models(base):
+    """Read the models installed on the Ollama server at ``base``."""
+    try:
+        with urllib.request.urlopen(f"{base}/api/tags", timeout=10) as response:
+            result = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError) as error:
+        raise RuntimeError(f"Could not load models from {base}. Start Ollama, then click Refresh.") from error
+    except json.JSONDecodeError as error:
+        raise RuntimeError("Ollama returned an invalid model list.") from error
+    return model_names(result)
+
+
+def api_json(base, path, payload=None, timeout=10, method=None):
+    """One JSON request to Ollama; RuntimeError for any failure or an ``error`` answer."""
     request = urllib.request.Request(
-        ollama_url() + path,
+        base + path,
         data=json.dumps(payload).encode("utf-8") if payload is not None else None,
         headers={"Content-Type": "application/json"},
         method=method,
     )
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            data = response.read()
-            result = {} if not data and method == "DELETE" else json.loads(data)
+            raw = response.read()
+            result = {} if not raw and method == "DELETE" else json.loads(raw)
         if not isinstance(result, dict) or result.get("error"):
             raise RuntimeError(str(result))
         return result
@@ -69,18 +80,17 @@ def ollama_api(path, payload=None, timeout=10, method=None):
         raise RuntimeError(f"Ollama request failed: {error}") from error
 
 
-def running_models():
-    result = ollama_api("/api/ps")
+def running_names(result):
+    """Names of the models loaded now, from an ``/api/ps`` answer."""
     models = result.get("models")
     if not isinstance(models, list):
         raise RuntimeError("Ollama returned an invalid running-model list.")
     return {m["name"] for m in models if isinstance(m, dict) and "name" in m}
 
 
-def running_details():
+def running_details(result):
     """Per running model: its size, the part in GPU memory, and its context length
-    when Ollama reports one (``/api/ps``). Used by the status bar."""
-    result = ollama_api("/api/ps")
+    when Ollama reports one (``/api/ps``)."""
     models = result.get("models")
     if not isinstance(models, list):
         raise RuntimeError("Ollama returned an invalid running-model list.")
@@ -88,24 +98,50 @@ def running_details():
     for model in models:
         if not isinstance(model, dict) or not isinstance(model.get("name"), str):
             continue
-        number = lambda key: model.get(key) if type(model.get(key)) is int and model.get(key) >= 0 else None
+
+        def number(key, model=model):
+            value = model.get(key)
+            return value if type(value) is int and value >= 0 else None
+
         details[model["name"]] = {"size": number("size") or 0, "size_vram": number("size_vram") or 0,
                                   "context_length": number("context_length")}
     return details
 
 
-def ensure_ollama(progress):
+def placement(detail):
+    """Where Ollama placed a running model: gpu, cpu, or the GPU share."""
+    if not detail or not detail.get("size"):
+        return ""
+    share = detail.get("size_vram", 0) / detail["size"]
+    if share >= 0.98:
+        return "gpu"
+    if share <= 0.02:
+        return "cpu"
+    return f"gpu {share:.0%} · cpu"
+
+
+def lifecycle_payload(model, start=True, context_length=None):
+    """The ``/api/generate`` body that loads (keeps resident) or unloads ``model``."""
+    payload = {"model": model, "stream": False, "keep_alive": -1 if start else 0}
+    if start and context_length is not None:
+        payload["options"] = {"num_ctx": context_length}
+    return payload
+
+
+def ensure_running(base, check, progress=lambda text: None, environ=None):
+    """Start a local ``ollama serve`` when ``check()`` fails; a remote server is never started."""
+    environ = os.environ if environ is None else environ
     try:
-        running_models()
+        check()
         return
     except RuntimeError:
         pass
-    host = urllib.parse.urlsplit(ollama_url()).hostname
+    host = urllib.parse.urlsplit(base).hostname
     if host not in ("localhost", "127.0.0.1", "::1"):
         raise RuntimeError("The configured remote Ollama server is offline. Start it on that computer.")
     executable = shutil.which("ollama")
     if not executable:
-        candidate = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Ollama", "ollama.exe")
+        candidate = os.path.join(environ.get("LOCALAPPDATA", ""), "Programs", "Ollama", "ollama.exe")
         if os.path.isfile(candidate):
             executable = candidate
     if not executable:
@@ -116,44 +152,39 @@ def ensure_ollama(progress):
                      creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     for _ in range(40):
         try:
-            running_models()
+            check()
             return
         except RuntimeError:
             time.sleep(0.5)
     raise RuntimeError("Ollama did not become ready. Check Ollama and click Refresh models.")
 
 
-def set_model_running(model, start=True, context_length=None):
-    payload = {"model": model, "stream": False, "keep_alive": -1 if start else 0}
-    if start and context_length is not None:
-        payload["options"] = {"num_ctx": context_length}
-    ollama_api("/api/generate", payload, timeout=300)
+def stream_chat(base, messages, model, context_length=None, on_chunk=None, on_metrics=None, keep_alive=-1):
+    """Stream one chat answer from ``/api/chat``; returns the complete text.
 
-
-def request_ollama(messages, model=None, context_length=None, on_chunk=None, on_metrics=None, keep_alive=-1):
-    """Send the conversation to the local Ollama chat API."""
-    host = ollama_url()
-    model = model or os.environ.get("OLLAMA_MODEL", "qwen3:30b")
+    Each text chunk goes to ``on_chunk`` as it arrives, and Ollama's timing
+    metadata to ``on_metrics`` at the end. An interrupted, oversized or empty
+    stream is an error, never a successful answer."""
     payload = {"model": model, "messages": messages, "stream": True, "keep_alive": keep_alive}
     if context_length is not None:
         payload["options"] = {"num_ctx": context_length}
     request = urllib.request.Request(
-        f"{host}/api/chat",
+        f"{base}/api/chat",
         data=json.dumps(payload).encode("utf-8"),
         headers={"Content-Type": "application/json"},
-        method="POST"
+        method="POST",
     )
-
     try:
-        with urllib.request.urlopen(request, timeout=120) as response:
+        with network_gate.task(f"Send your message to {model}"), \
+                urllib.request.urlopen(request, timeout=120) as response:
             parts = []
             received = 0
             while True:
-                line = response.readline(1024 * 1024 + 1)
+                line = response.readline(MAX_LINE_BYTES + 1)
                 if not line:
                     raise RuntimeError("The response connection closed before Ollama finished. Please retry.")
                 received += len(line)
-                if len(line) > 1024 * 1024 or received > 16 * 1024 * 1024:
+                if len(line) > MAX_LINE_BYTES or received > MAX_STREAM_BYTES:
                     raise RuntimeError("Ollama returned too much chat output.")
                 if not line.strip():
                     continue
@@ -179,12 +210,10 @@ def request_ollama(messages, model=None, context_length=None, on_chunk=None, on_
             details = error.read(2000).decode("utf-8", errors="replace").strip()
         finally:
             error.close()
-        raise RuntimeError(
-            f"Ollama returned HTTP {error.code}: {details or error.reason}"
-        ) from error
+        raise RuntimeError(f"Ollama returned HTTP {error.code}: {details or error.reason}") from error
     except urllib.error.URLError as error:
         raise RuntimeError(
-            f"Could not connect to Ollama at {host}. Start Ollama or run 'ollama serve', then try again."
+            f"Could not connect to Ollama at {base}. Start Ollama or run 'ollama serve', then try again."
         ) from error
     except TimeoutError as error:
         raise RuntimeError("The Ollama request timed out.") from error
@@ -197,40 +226,3 @@ def request_ollama(messages, model=None, context_length=None, on_chunk=None, on_
     if not content.strip():
         raise RuntimeError("Ollama's response did not contain a message.")
     return content.strip()
-
-class StreamStopped(Exception):
-    """Raised inside a stream callback to stop reading; the connection closes,
-    which tells Ollama or Colibri to stop generating."""
-
-
-def run_stoppable(request, parts, cancel_event):
-    """Run ``request()`` on its own thread. Returns (answer, error, stopped).
-
-    On Stop the caller gets the text received so far at once; the reader
-    thread ends at its next chunk, when the stream callback raises."""
-    if cancel_event is None:
-        try:
-            return request(), None, False
-        except (RuntimeError, ValueError) as error:
-            return None, str(error), False
-    finished = queue.Queue(maxsize=1)
-
-    def worker():
-        try:
-            finished.put((request(), None))
-        except StreamStopped:
-            finished.put((None, "stopped"))
-        except (RuntimeError, ValueError, OSError) as error:
-            finished.put((None, str(error)))
-
-    threading.Thread(target=worker, daemon=True).start()
-    while True:
-        if cancel_event.is_set():
-            return "".join(parts), None, True
-        try:
-            answer, error = finished.get(timeout=.1)
-        except queue.Empty:
-            continue
-        if error == "stopped" or cancel_event.is_set():
-            return "".join(parts), None, True
-        return answer, error, False

@@ -5,14 +5,14 @@ import json
 import unittest
 from unittest.mock import patch
 
-from ollama_engine import request_ollama
+from app_core.runtime import request_ollama
 from response_metrics import metrics_summary, response_metrics
 
 
 class StreamingTests(unittest.TestCase):
     def request(self, frames, **options):
         wire = b"\n".join(json.dumps(frame, ensure_ascii=False).encode("utf-8") for frame in frames)
-        with patch("ollama_engine.urllib.request.urlopen", return_value=io.BytesIO(wire)) as opened:
+        with patch("app_core.ollama.urllib.request.urlopen", return_value=io.BytesIO(wire)) as opened:
             answer = request_ollama([], "test:8b", **options)
             self.assertTrue(json.loads(opened.call_args.args[0].data)["stream"])
             return answer
@@ -37,7 +37,7 @@ class StreamingTests(unittest.TestCase):
 
     def test_malformed_and_oversized_frames_fail(self):
         for wire in (b"not json\n", b"\xff\n", b"[]\n", b"x" * (1024 * 1024 + 1)):
-            with self.subTest(size=len(wire)), patch("ollama_engine.urllib.request.urlopen", return_value=io.BytesIO(wire)):
+            with self.subTest(size=len(wire)), patch("app_core.ollama.urllib.request.urlopen", return_value=io.BytesIO(wire)):
                 with self.assertRaises(RuntimeError):
                     request_ollama([], "test:8b")
 

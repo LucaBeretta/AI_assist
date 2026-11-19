@@ -8,7 +8,8 @@ import unittest
 
 ROOT = Path(__file__).resolve().parent
 PLATFORMS = {"aarch64-apple-darwin", "x86_64-apple-darwin",
-             "x86_64-pc-windows-msvc", "aarch64-pc-windows-msvc"}
+             "x86_64-pc-windows-msvc", "aarch64-pc-windows-msvc",
+             "x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"}
 
 
 def manifest():
@@ -71,21 +72,34 @@ class LauncherWiringTests(unittest.TestCase):
 
     def test_launchers_use_the_manifest_and_verify_checksums(self):
         mac = (ROOT / "Start AI Assist.command").read_text(encoding="utf-8")
+        linux = (ROOT / "Start AI Assist.sh").read_text(encoding="utf-8")
         windows = (ROOT / "Start AI Assist.cmd").read_text(encoding="utf-8")
         installer = (ROOT / "install_runtime.ps1").read_text(encoding="utf-8")
-        self.assertIn("python-runtime.txt", mac)
+        for text in (mac, linux, installer):
+            self.assertIn("python-runtime.txt", text)
         self.assertIn("shasum -a 256", mac)
+        self.assertIn("sha256sum", linux)
         self.assertIn("install_runtime.ps1", windows)
-        self.assertIn("python-runtime.txt", installer)
         self.assertIn("Get-FileHash -Algorithm SHA256", installer)
-        for text in (mac, windows):
+        for text in (mac, linux, windows):
             self.assertIn("gui_runtime.py", text)
+        self.assertIn("runtime/linux", linux)
+
+    def test_every_download_needs_two_confirmations_and_defaults_to_no(self):
+        for name in ("Start AI Assist.command", "Start AI Assist.sh", "install_runtime.ps1"):
+            text = (ROOT / name).read_text(encoding="utf-8")
+            with self.subTest(name):
+                self.assertIn("[y/N]", text)
+                self.assertIn("Second check: type yes", text)
+                self.assertNotIn("[Y/n]", text)
 
     def test_private_runtime_is_not_committed_and_line_endings_are_pinned(self):
         self.assertIn("/runtime/", (ROOT / ".gitignore").read_text(encoding="utf-8").split())
         attributes = (ROOT / ".gitattributes").read_text(encoding="utf-8")
         self.assertRegex(attributes, r"\*\.cmd\s+text eol=crlf")
         self.assertRegex(attributes, r"\*\.command\s+text eol=lf")
+        self.assertRegex(attributes, r"\*\.sh\s+text eol=lf")
+        self.assertNotIn(b"\r\n", (ROOT / "Start AI Assist.sh").read_bytes())
 
 
 if __name__ == "__main__":

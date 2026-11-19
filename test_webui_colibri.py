@@ -10,7 +10,7 @@ import threading
 import unittest
 from unittest.mock import Mock, patch
 
-import ollama_engine
+from app_core import runtime
 import test_webui_app as fixtures
 from webui.app import Api
 from webui.colibri import ColibriService
@@ -110,7 +110,7 @@ class ColibriApiTests(unittest.TestCase):
                 patch("webui.colibri.launcher.find_directory", return_value="chosen") as find, \
                 patch("webui.colibri.launcher.status", return_value=report), \
                 patch("webui.colibri.launcher.start_server", return_value=report) as start, \
-                patch("webui.colibri.ColibriClient") as client:
+                patch("colibri_backend.ColibriClient") as client:
             client.return_value.models.return_value = ["served"]
             service = ColibriService(self.store.directory)
             value = service.availability()
@@ -168,7 +168,7 @@ class ColibriSocketTests(unittest.TestCase):
         (store.directory / "backend.settings").write_text(json.dumps({"url": f"http://127.0.0.1:{server.server_port}/v1"}), encoding="utf-8")
         with patch.dict(os.environ, {"COLIBRI_URL": "", "COLI_API_KEY": ""}):
             service = ColibriService(store.directory)
-        api = Api(events, store, ollama_engine, colibri=service)
+        api = Api(events, store, runtime, colibri=service)
         self.addCleanup(api._close)
         with patch("webui.colibri.launcher.find_directory", return_value=None):
             chat = api.new_chat()["chat"]["id"]

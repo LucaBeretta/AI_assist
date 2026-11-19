@@ -2,7 +2,7 @@
 import unittest
 from unittest.mock import patch
 
-import ollama_engine
+from app_core import runtime
 from appearance import DARK_THEMES, toggled_theme
 from status_values import generation_rate, is_cloud_model, is_local, placement, short_tokens
 
@@ -41,9 +41,9 @@ class HelperTests(unittest.TestCase):
 
     def test_running_details_reads_api_ps(self):
         reply = {"models": [{"name": "alpha:8b", "size": 8, "size_vram": 6, "context_length": 8192}, "junk"]}
-        with patch("ollama_engine.ollama_api", return_value=reply):
-            self.assertEqual(ollama_engine.running_details(),
+        with patch("app_core.runtime.ollama_api", return_value=reply):
+            self.assertEqual(runtime.running_details(),
                              {"alpha:8b": {"size": 8, "size_vram": 6, "context_length": 8192}})
-        with patch("ollama_engine.ollama_api", return_value={}):
+        with patch("app_core.runtime.ollama_api", return_value={}):
             with self.assertRaises(RuntimeError):
-                ollama_engine.running_details()
+                runtime.running_details()

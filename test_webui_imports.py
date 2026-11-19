@@ -16,7 +16,7 @@ class BlockNativeGui(importlib.abc.MetaPathFinder):
         if fullname.split(".")[0] == "tk" + "inter":
             raise AssertionError("The web API imported the legacy GUI")
 sys.meta_path.insert(0, BlockNativeGui())
-import ollama_engine
+from app_core import runtime
 import webui.app
 assert not any(name.split(".")[0] == target for name in sys.modules)
 '''

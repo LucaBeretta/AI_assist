@@ -61,7 +61,7 @@ class WebLaunchTests(unittest.TestCase):
     def test_default_and_explicit_web_flags_use_the_same_entry_point(self):
         import AIassist
         for flags in ([], ["--web"]):
-            with self.subTest(flags=flags), patch("AIassist.redirect_missing_streams") as redirect, patch("webui.app.main", return_value=7) as run:
+            with self.subTest(flags=flags), patch("network_gate.install"), patch("AIassist.redirect_missing_streams") as redirect, patch("webui.app.main", return_value=7) as run:
                 self.assertEqual(AIassist.main(flags), 7)
                 redirect.assert_called_once_with()
                 run.assert_called_once_with()

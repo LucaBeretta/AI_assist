@@ -25,6 +25,7 @@ class HtmlPreviewTests(unittest.TestCase):
         with urllib.request.urlopen(url) as response:
             self.assertIn(b"Preview", response.read())
             self.assertEqual(response.headers["Cache-Control"], "no-store")
+            self.assertTrue(response.headers["Content-Security-Policy"].startswith("default-src 'self'"))
         with urllib.request.urlopen(url.replace("index.html", "style.css")) as response:
             self.assertIn(b"red", response.read())
         (self.root / "index.html").write_text("Updated", encoding="utf-8")

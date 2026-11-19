@@ -7,6 +7,8 @@ import tempfile
 import threading
 import uuid
 
+from app_core.instance_lock import AlreadyRunning, InstanceLock
+
 
 log = logging.getLogger(__name__)
 
@@ -16,7 +18,7 @@ class SingleInstance:
         self.directory = Path(directory)
         self.signal = self.directory / "web-ui.activate"
         self.interval = interval
-        self._file = None
+        self._lock = InstanceLock(self.directory, "AI Assist desktop")
         self._thread = None
         self._stop = threading.Event()
         self._seen = None
@@ -27,30 +29,15 @@ class SingleInstance:
             raise ValueError("Instance files must not be links.")
 
     def acquire(self):
-        if self._file is not None:
+        if self._lock.handle is not None:
             return True
-        path = self.directory / "web-ui.lock"
-        self._regular(path)
-        source = path.open("a+b")
+        self._regular(self._lock.path)
+        self._regular(self._lock.owner_path)
         try:
-            source.seek(0)
-            if not source.read(1):
-                source.write(b"\0")
-                source.flush()
-            source.seek(0)
-            if os.name == "nt":
-                import msvcrt
-                msvcrt.locking(source.fileno(), msvcrt.LK_NBLCK, 1)
-            else:
-                import fcntl
-                fcntl.flock(source, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError as error:
-            source.close()
-            if error.errno not in (11, 13, 35, 36):
-                raise
+            self._lock.acquire()
+        except AlreadyRunning:
             self._notify()
             return False
-        self._file = source
         self._seen = self._read_signal()
         return True
 
@@ -76,7 +63,7 @@ class SingleInstance:
 
     def start(self, notify):
         """The callback only queues a signal; it must not operate a window."""
-        if self._file is None or self._thread is not None:
+        if self._lock.handle is None or self._thread is not None:
             return
         def poll():
             while not self._stop.is_set():
@@ -95,16 +82,4 @@ class SingleInstance:
         self._stop.set()
         if self._thread is not None:
             self._thread.join(1)
-        if self._file is not None:
-            source, self._file = self._file, None
-            try:
-                source.seek(0)
-                if os.name == "nt":
-                    import msvcrt
-                    msvcrt.locking(source.fileno(), msvcrt.LK_UNLCK, 1)
-                else:
-                    import fcntl
-                    fcntl.flock(source, fcntl.LOCK_UN)
-            finally:
-                source.close()
-        # Keep the inode: deleting a lock file races other processes opening it.
+        self._lock.release()

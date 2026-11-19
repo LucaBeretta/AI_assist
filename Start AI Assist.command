@@ -32,9 +32,10 @@ install_private_python() {
     else
         platform=x86_64-apple-darwin
     fi
-    base=$(awk '$1 == "base" { print $2 }' "$MANIFEST" 2>/dev/null)
-    file=$(awk -v p="$platform" '$1 == p { print $2 }' "$MANIFEST" 2>/dev/null)
-    sha=$(awk -v p="$platform" '$1 == p { print $3 }' "$MANIFEST" 2>/dev/null)
+    # A copy made on Windows has CRLF line endings; drop the CR before reading fields.
+    base=$(awk '{ sub(/\r$/, "") } $1 == "base" { print $2 }' "$MANIFEST" 2>/dev/null)
+    file=$(awk -v p="$platform" '{ sub(/\r$/, "") } $1 == p { print $2 }' "$MANIFEST" 2>/dev/null)
+    sha=$(awk -v p="$platform" '{ sub(/\r$/, "") } $1 == p { print $3 }' "$MANIFEST" 2>/dev/null)
     if [ -z "$base" ] || [ -z "$file" ] || [ "${#sha}" -ne 64 ]; then
         echo "python-runtime.txt has no valid entry for $platform."
         return 1
@@ -43,8 +44,13 @@ install_private_python() {
     echo "AI Assist can set up its own private Python and its web UI dependencies (about 25 MB download)."
     echo "It is stored only in: $RUNTIME_DIR"
     echo "No administrator password is needed and other Python installations are not changed."
-    read -r -p "Download and set it up now? [Y/n] " answer
-    case "$answer" in [Nn]*) return 1 ;; esac
+    echo "This downloads Python from GitHub and web dependencies from PyPI, so it needs two confirmations."
+    read -r -p "Download it now? [y/N] " answer
+    case "$answer" in [Yy]*) ;; *) return 1 ;; esac
+    read -r -p "Second check: type yes to download $file: " answer
+    if [ "$answer" != "yes" ]; then
+        return 1
+    fi
 
     staging="$RUNTIME_DIR/.staging"
     rm -rf "$staging"
