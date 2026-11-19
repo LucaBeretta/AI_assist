@@ -37,6 +37,7 @@ from webui.status import StatusPush
 from status_bar import snapshot_values, generation_rate, is_cloud_model, is_local
 from webui.local_files import write_utf8
 from webui.prompts import PromptStore
+from webui.colibri import ColibriService
 
 
 log = logging.getLogger(__name__)
@@ -91,7 +92,7 @@ def _json_method(method):
 
 
 class Api:
-    def __init__(self, bridge, store=None, engine=None, hardware=None, desktop=None):
+    def __init__(self, bridge, store=None, engine=None, hardware=None, desktop=None, colibri=None):
         self._bridge = bridge
         self._store = store if store is not None else ChatStore()
         self._engine = engine if engine is not None else importlib.import_module("AIassist")
@@ -115,6 +116,7 @@ class Api:
         self._status_chat = None
         self._status = StatusPush(self.status_snapshot, self._bridge.emit)
         self._prompts = PromptStore(self._store.directory)
+        self._colibri = colibri if colibri is not None else ColibriService(self._store.directory)
 
     @_json_method
     def list_prompts(self):
@@ -155,16 +157,11 @@ class Api:
 
     @_json_method
     def status_snapshot(self, chat_id=None):
-        try:
-            details = self._engine.running_details()
-            connected = True
-        except Exception:
-            details, connected = {}, False
         with self._lock:
             identity = chat_id if chat_id is not None else self._status_chat
             record = self._load_chat(identity) if identity else None
             model = record["model"] if record else ""
-            backend = record.get("backend", "Ollama") if record else "Ollama"
+            backend = record.get("backend", record["environment"]["backend"]) if record else self._colibri.default_backend
             metrics = deepcopy(record.get("last_response", {}).get("metrics", {})) if record else {}
             stream = next((item for item in self._streams.values() if item["chat_id"] == identity), None)
             if stream is not None:
@@ -173,22 +170,36 @@ class Api:
             task = self._developer.status(identity)
             if task:
                 metrics = task["metrics"]
-        usage = self._usage(record, details.get(model, {}).get("context_length")) if record else {}
+        report = None
+        if backend == "Colibri":
+            colibri = self._colibri.availability()
+            details, connected = {}, colibri["running"]
+            report = {"server": {"state": colibri["state"], "tokens_per_second": colibri.get("tokens_per_second")}}
+            host = colibri["host"]
+            loaded_context = colibri.get("context_length")
+        else:
+            try:
+                details, connected = self._engine.running_details(), True
+            except Exception:
+                details, connected = {}, False
+            host = self._engine.ollama_url()
+            loaded_context = details.get(model, {}).get("context_length")
+        usage = self._usage(record, loaded_context) if record else {}
         if stream is None and not task and type(metrics.get("prompt_eval_count")) is int:
             usage["used"] = metrics["prompt_eval_count"] + int(metrics.get("eval_count") or 0)
-        host = self._engine.ollama_url()
         values = snapshot_values(engine=backend, connected=connected, model=model, details=details,
-            metrics=metrics, choice=usage.get("total"), used=usage.get("used"), url=host,
+            metrics=metrics, choice=usage.get("total"), used=usage.get("used"), url=host, report=report,
             step=task.get("step", 0), agent_active=bool(task), max_steps=task.get("max_steps", 20))
         detail = details.get(model, {})
         size = detail.get("size", 0)
         gpu = min(1.0, max(0.0, detail.get("size_vram", 0) / size)) if size else None
         return {"ok": True, **values, "chat_id": identity, "backend": backend, "model_name": model,
-                "engine_state": "ready" if connected else "offline", "gpu_fraction": gpu,
+                "engine_state": colibri["state"] if backend == "Colibri" else "ready" if connected else "offline", "gpu_fraction": gpu,
                 "cpu_fraction": 1 - gpu if gpu is not None else None,
                 "vram_bytes": sum(item.get("size_vram", 0) for item in details.values()),
                 "context_used": usage.get("used"), "context_total": usage.get("total"),
-                "tokens_per_second": generation_rate(metrics), "agent_step": task.get("step", 0),
+                "tokens_per_second": colibri.get("tokens_per_second") if backend == "Colibri" else generation_rate(metrics),
+                "agent_step": task.get("step", 0),
                 "agent_max_steps": task.get("max_steps", 20),
                 "privacy_kind": "cloud model" if is_cloud_model(model) else "local only" if is_local(host) else "remote server"}
 
@@ -477,12 +488,24 @@ class Api:
                            for chat in self._store.list_chats()
                            if chat["id"] not in active and chat["messages"]
                            and chat["messages"][-1].get("partial") is True]
-        models = self._engine.list_ollama_models()
-        loaded = self._engine.running_details()
+            record = self._load_chat(self._status_chat) if self._status_chat else None
+            backend = record.get("backend", record["environment"]["backend"]) if record else self._colibri.default_backend
+        colibri = self._colibri.availability()
+        ollama_error = None
+        try:
+            models = self._engine.list_ollama_models()
+            loaded = self._engine.running_details()
+        except Exception as failure:
+            models, loaded, ollama_error = [], {}, str(failure)
+            if backend == "Ollama" and not colibri["running"]:
+                raise
+            if backend == "Ollama":
+                backend = "Colibri"
         self._warn_vram(loaded)
-        return {"ok": True, "engine": "Ollama", "host": self._engine.ollama_url(),
-                "models": models, "loaded": loaded, "settings": deepcopy(self._settings),
-                "interrupted": interrupted}
+        return {"ok": True, "engine": backend, "host": colibri["host"] if backend == "Colibri" else self._engine.ollama_url(),
+                "models": colibri["models"] if backend == "Colibri" else models,
+                "loaded": loaded, "settings": deepcopy(self._settings), "colibri": colibri,
+                "ollama": {"models": models, "loaded": loaded, "error": ollama_error}, "interrupted": interrupted}
 
     def _warn_vram(self, loaded):
         if len(loaded) < 2:
@@ -536,7 +559,7 @@ class Api:
         with self._lock:
             self._require_idle(chat_id)
             record = self._load_chat(chat_id)
-        self._require_vision(model, self._request_messages(record))
+        self._require_vision(model, self._request_messages(record), record.get("backend", record["environment"]["backend"]))
         with self._lock:
             self._require_idle(chat_id)
             if self._load_chat(chat_id) != record:
@@ -544,7 +567,9 @@ class Api:
             record["model"] = record["environment"]["model"] = model
             return {"ok": True, "chat": self._save_chat(record)}
 
-    def _require_vision(self, model, messages):
+    def _require_vision(self, model, messages, backend="Ollama"):
+        if backend == "Colibri" and any(message.get("images") for message in messages):
+            raise ValueError("Colibri does not report a vision capability. Use a vision model in Ollama for images.")
         if any(item.get("images") for item in messages):
             if not model or "vision" not in fetch_model_capabilities(self._engine.ollama_url(), model)["capabilities"]:
                 raise ValueError("Choose a model reporting the vision capability to use image attachments.")
@@ -556,7 +581,7 @@ class Api:
             self._require_idle(chat_id)
             record = self._load_chat(chat_id)
         if item["kind"] == "image":
-            self._require_vision(record["model"], [{"images": [item["data_base64"]]}])
+            self._require_vision(record["model"], [{"images": [item["data_base64"]]}], record.get("backend", record["environment"]["backend"]))
         with self._lock:
             self._require_idle(chat_id)
             if self._load_chat(chat_id) != record:
@@ -628,6 +653,8 @@ class Api:
                 raise ValueError("Another Developer task is already changing this project.")
             if not record["model"]:
                 raise ValueError("Choose a Developer model first.")
+            if record.get("backend", record["environment"]["backend"]) == "Colibri":
+                raise ValueError("The web Developer agent currently requires Ollama. Colibri is available for chat.")
             memories = self._memories.used(record)
             revision = memory_revision(memories)
             changed_memory = bool(record.get("_memory_revision")) and record["_memory_revision"] != revision
@@ -856,6 +883,7 @@ class Api:
             if self._closed:
                 raise RuntimeError("The web UI is closing.")
             record = self._store.new_record()
+            record["backend"] = record["environment"]["backend"] = self._colibri.default_backend
             if project_id is not None:
                 project = self._projects.load(project_id)
                 record["project_id"] = project_id
@@ -874,7 +902,9 @@ class Api:
                 record["incognito"] = True
                 record["environment"]["memory_ids"] = []
                 self._incognito_ids.add(record["id"])
-            return {"ok": True, "chat": self._save_chat(record)}
+            record = self._save_chat(record)
+            self._status_chat = record["id"]
+            return {"ok": True, "chat": record}
 
     @_json_method
     def new_chat_same_environment(self, chat_id):
@@ -894,7 +924,9 @@ class Api:
                 record["incognito"] = True
                 record["environment"]["memory_ids"] = []
                 self._incognito_ids.add(record["id"])
-            return {"ok": True, "chat": self._save_chat(record)}
+            record = self._save_chat(record)
+            self._status_chat = record["id"]
+            return {"ok": True, "chat": record}
 
     @_json_method
     def list_projects(self):
@@ -935,7 +967,7 @@ class Api:
 
     def _usage(self, record, loaded_context=None):
         total = record["context_length"] if record["context_length"] is not None else loaded_context
-        if total is None:
+        if total is None and record.get("backend", record["environment"]["backend"]) == "Ollama":
             try:
                 total = self._engine.running_details().get(record["model"], {}).get("context_length")
             except (OSError, RuntimeError, ValueError):
@@ -1015,7 +1047,7 @@ class Api:
                                 summary_chars=max(1, target * 7 // 2))
 
     @_json_method
-    def send(self, chat_id, text, model, context):
+    def send(self, chat_id, text, model, context, backend=None):
         if not isinstance(text, str) or not text.strip() or len(text) > 1000000:
             raise ValueError("Enter a message between 1 and 1,000,000 characters.")
         if not isinstance(model, str) or not model.strip() or len(model) > 300:
@@ -1028,14 +1060,17 @@ class Api:
             if model in self._unloading:
                 raise ValueError("This model is being unloaded; try again when it finishes.")
             record = self._load_chat(chat_id)
+            backend = backend if backend is not None else record.get("backend", record["environment"]["backend"])
+            if backend not in {"Ollama", "Colibri"}:
+                raise ValueError("Choose Ollama or Colibri.")
             if self._busy(chat_id):
                 raise ValueError("This chat already has an active stream.")
             if record["messages"] and record["messages"][-1].get("partial"):
                 raise ValueError("Keep or discard the interrupted reply before sending.")
             original = deepcopy(record)
             record["model"], record["context_length"] = model, context
-            record["backend"] = "Ollama"
-            record["environment"].update(backend="Ollama", model=model, context_length=context)
+            record["backend"] = backend
+            record["environment"].update(backend=backend, model=model, context_length=context)
             message = {"role": "user", "content": text}
             if record.get("attachments"):
                 message["attachments"] = record.pop("attachments")
@@ -1043,7 +1078,7 @@ class Api:
             record["draft"] = ""
         memories = self._memories.used(record)
         messages = self._request_messages(record, memories)
-        self._require_vision(model, messages)
+        self._require_vision(model, messages, backend)
         with self._lock:
             self._require_idle(chat_id)
             if model in self._unloading or self._load_chat(chat_id) != original:
@@ -1155,7 +1190,13 @@ class Api:
                 if stream["cancel"].is_set():
                     raise engine.StreamStopped()
                 if not stream.get("vision_checked"):
-                    self._require_vision(record["model"], stream["messages"])
+                    self._require_vision(record["model"], stream["messages"], record.get("backend", record["environment"]["backend"]))
+                if record.get("backend", record["environment"]["backend"]) == "Colibri":
+                    client = self._colibri.prepare(stream["cancel"],
+                        lambda text: self._bridge.emit("status", text=text, chat_id=record["id"]))
+                    if stream["cancel"].is_set():
+                        raise engine.StreamStopped()
+                    return client.chat(deepcopy(stream["messages"]), model=record["model"], on_chunk=chunk, on_metrics=metrics)
                 loading = ModelLoadProgress(self._bridge.emit, record["model"], stream["cancel"],
                                            stream_id=stream_id, chat_id=stream["chat_id"])
                 with stream["data_lock"]:
@@ -1235,7 +1276,8 @@ class Api:
 
     def _ensure_engine(self):
         try:
-            self._engine.ensure_ollama(lambda text: self._bridge.emit("status", text=text))
+            if self._colibri.default_backend == "Ollama":
+                self._engine.ensure_ollama(lambda text: self._bridge.emit("status", text=text))
             self._bridge.emit("ready")
         except Exception as error:
             self._bridge.emit("error", error=str(error))

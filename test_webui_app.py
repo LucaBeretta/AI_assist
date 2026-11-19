@@ -96,7 +96,7 @@ class ApiTests(unittest.TestCase):
 
     def test_api_signatures_remain_visible_to_pywebview(self):
         self.assertEqual(inspect.getfullargspec(Api.send).args,
-                         ["self", "chat_id", "text", "model", "context"])
+                         ["self", "chat_id", "text", "model", "context", "backend"])
 
     def setUp(self):
         folder = tempfile.TemporaryDirectory()
@@ -115,7 +115,10 @@ class ApiTests(unittest.TestCase):
                                       list_ollama_models=lambda: ["fake:7b"],
                                       running_details=lambda: {"fake:7b": {"context_length": 8192}},
                                       ensure_ollama=lambda callback: None)
-        self.api = Api(self.events, self.store, self.engine)
+        self.colibri = SimpleNamespace(default_backend="Ollama", availability=lambda: {
+            "installed": False, "running": False, "models": [], "host": "http://127.0.0.1:8000/v1",
+            "state": "offline", "context_length": None, "tokens_per_second": None})
+        self.api = Api(self.events, self.store, self.engine, colibri=self.colibri)
         self.addCleanup(self.api._close)
 
     def test_state_and_chat_methods_return_plain_data(self):

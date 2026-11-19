@@ -20,7 +20,7 @@ class ModelMemoryTests(unittest.TestCase):
         for invalid in (True, -1, 1441, "5", 1.5):
             self.assertFalse(self.api.set_idle_unload_minutes(invalid)["ok"])
         self.assertTrue(self.api.set_idle_unload_minutes(5)["ok"])
-        restarted = Api(self.events, self.store, self.engine)
+        restarted = Api(self.events, self.store, self.engine, colibri=self.colibri)
         self.addCleanup(restarted._close)
         self.assertEqual(restarted.state()["settings"]["idle_unload_minutes"], 5)
         options = []

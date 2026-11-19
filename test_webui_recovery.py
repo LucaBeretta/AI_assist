@@ -15,7 +15,7 @@ class RecoveryTests(unittest.TestCase):
     def test_draft_survives_restart_and_invalid_input_is_json(self):
         chat = self.api.new_chat()["chat"]["id"]
         self.assertTrue(self.api.save_draft(chat, "unfinished\nλ")["ok"])
-        restarted = Api(self.events, self.store, self.engine)
+        restarted = Api(self.events, self.store, self.engine, colibri=self.colibri)
         self.addCleanup(restarted._close)
         self.assertEqual(restarted.open_chat(chat)["chat"]["draft"], "unfinished\nλ")
         self.assertFalse(self.api.save_draft(chat, None)["ok"])
@@ -38,7 +38,7 @@ class RecoveryTests(unittest.TestCase):
             self.assertLess(time.monotonic(), deadline)
             time.sleep(0.01)
         self.assertEqual(self.api.state()["interrupted"], [])
-        restarted = Api(self.events, self.store, self.engine)
+        restarted = Api(self.events, self.store, self.engine, colibri=self.colibri)
         self.addCleanup(restarted._close)
         self.assertEqual(restarted.state()["interrupted"][0]["chat_id"], chat)
         self.api.save_draft(chat, "next question")
