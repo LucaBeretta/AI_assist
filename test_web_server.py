@@ -287,7 +287,9 @@ class SecurityTests(ServerCase):
             ("POST", r"/api/requests/(?P<request>[0-9a-f]{16})/cancel"), ("GET", r"/api/memory"), ("PUT", r"/api/memory"),
             ("POST", r"/api/memory/notes"), ("GET", r"/api/projects"), ("GET", r"/api/projects/(?P<chat>[0-9a-f-]{36})/files"),
             ("GET", r"/api/projects/(?P<chat>[0-9a-f-]{36})/file"), ("GET", r"/api/log"), ("PUT", r"/api/settings/engine")]))
-        self.assertEqual([name for _, _, name, public in Handler.ROUTES if not public], ["session"])
+        self.assertEqual([name for _, _, name, public in Handler.ROUTES if not public], ["session", "monitor_session"])
+        # The monitor session must be restricted to read-only compute telemetry.
+        self.assertFalse(self.workspace.sessions.valid("Bearer only-monitor"))
 
     def test_monitor_window_page_has_strict_static_policy(self):
         response, page = self.call("GET", "/monitor.html", token=False)
