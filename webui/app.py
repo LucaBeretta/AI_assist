@@ -417,15 +417,25 @@ class Api(SharingApi, PrivacyApi, ParityApi):
         catalog, catalog_error = [], None
         if hardware.get("server_local", True):
             # One read per session, shared by every screen; a refusal is remembered until the person asks again.
-            # The list and each family's sizes are several ollama.com pages: one task, so one approval.
+            # Ollama's list, its families' sizes and Hugging Face's list are several pages on two sites:
+            # one task that names both sites, so one approval.
             with self._catalog_lock:
                 if refresh or (self._catalog is None and self._catalog_error is None):
                     try:
-                        with network_gate.task("Read Ollama's online model list",
-                                               sends="Requests for a few pages of ollama.com (the model list and "
-                                                     "model sizes). No chats or files are sent."):
+                        with network_gate.task("Read model lists from Ollama and Hugging Face",
+                                               sends="Requests for a few pages of ollama.com and huggingface.co "
+                                                     "(model lists and model sizes). No chats or files are sent.",
+                                               hosts=("ollama.com", "huggingface.co")):
                             catalog = model_library.fetch_popular_models()
-                            self._catalog = model_advisor.recommend_models(hardware, catalog)
+                            cards = model_advisor.recommend_models(hardware, catalog)
+                            try:
+                                cards += model_advisor.recommend_hugging_face(
+                                    hardware, model_library.fetch_hugging_face_models(),
+                                    skip={card["name"] for card in cards})
+                            except (OSError, ValueError, RuntimeError):
+                                # Hugging Face suggestions are extra: Ollama's still stand without them.
+                                log.info("Hugging Face suggestions are unavailable", exc_info=True)
+                            self._catalog = cards
                         self._catalog_error = None
                     except (OSError, ValueError, RuntimeError) as error:
                         # Blocked by the internet gate or offline: this computer's hardware is still worth showing.

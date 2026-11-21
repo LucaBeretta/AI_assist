@@ -80,6 +80,10 @@ History defaults to `%LOCALAPPDATA%\AI Assist\chats` on Windows or `~/.aiassist/
 
 Open **Models** for hardware-based recommendations and installed models. Downloads show progress and can be stopped; a model can then be selected in the chat composer. Loaded models can be unloaded explicitly or after the configured idle period. Recommendations are estimates, not guarantees of speed or GPU placement. The status bar reports model placement, context, VRAM and measured token speed when available.
 
+Recommendations come from two public lists, read once per session after one approval that names both sites: Ollama's library on ollama.com, and Hugging Face's most downloaded GGUF chat models on huggingface.co. For each Hugging Face model, AI Assist picks the first quantization in the order Q4_K_M, Q5_K_M, Q4_K_S, Q6_K, Q8_0, IQ4_XS, Q3_K_M that fits this computer, using the same memory estimate as the Ollama suggestions, and shows up to three. Download counts show popularity, not quality. Nothing downloads until you click Download.
+
+Any single-file GGUF model on Hugging Face can also be downloaded by name in **Download another model**, for example `hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M` (repository, then quantization). Ollama fetches it from Hugging Face, and the internet approval says so.
+
 ## Privacy, Compute and local check-ins
 
 The mandatory internet gate starts before the native UI. External requests show what is sent and why, then require two confirmations. Block is the default, including Enter, Escape and closing the dialog; Allow unlocks after three seconds on the second step. Local Ollama traffic does not prompt. Model downloads, update checks, cloud models and deployment require approval. Settings → Privacy & internet shows the connection log and the Windows engine firewall lock. Firewall changes need explicit confirmation and may require administrator approval. Native engine networking is not covered by the Python audit hook; the firewall lock is Windows-only.

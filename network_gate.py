@@ -122,11 +122,13 @@ class Request:
 
 
 class _Task:
-    def __init__(self, purpose, sends, seconds):
+    def __init__(self, purpose, sends, seconds, hosts=()):
         self.purpose = purpose
         self.sends = sends
         self.deadline = time.monotonic() + seconds
         self.active = True
+        # Internet names declared up front, approved together in one request.
+        self.hosts = frozenset(_normal(host) for host in hosts if classify(host) == INTERNET)
 
     def live(self):
         return self.active and time.monotonic() < self.deadline
@@ -281,10 +283,14 @@ def in_task():
 
 
 @contextlib.contextmanager
-def task(purpose, sends="", minutes=10):
-    """Say why the code in this block may go online. Approvals given inside it end with it."""
+def task(purpose, sends="", minutes=10, hosts=()):
+    """Say why the code in this block may go online. Approvals given inside it end with it.
+
+    ``hosts`` lists internet names the block will contact. The first of them it
+    reaches asks once for all of them, so one approval covers, for example,
+    reading model lists from two sites. Any other name still asks on its own."""
     previous = getattr(_local, "task", None)
-    current = _Task(purpose, sends, minutes * 60)
+    current = _Task(purpose, sends, minutes * 60, hosts)
     _local.task = current
     try:
         yield
@@ -468,10 +474,12 @@ def _address_granted(ip):
             return True
     # DNS answers can rotate between the gate's lookup and the caller's.
     for key, grant in list(grants.items()):
-        if key[0] == "host" and _ip_text(key[1]) is None:
-            grant.addresses.update(_resolve(key[1]))
-            if ip in grant.addresses:
-                return True
+        names = key[1] if key[0] == "hosts" else (key[1],) if key[0] == "host" else ()
+        for name in names:
+            if _ip_text(name) is None:
+                grant.addresses.update(_resolve(name))
+        if names and ip in grant.addresses:
+            return True
     return False
 
 
@@ -614,12 +622,14 @@ def _current_task():
 
 
 def _authorize(key, kind, target, sends=""):
+    current = _current_task()
+    if current is not None and current.hosts and key[0] == "host" and key[1] in current.hosts:
+        key, target = ("hosts", current.hosts), " and ".join(sorted(current.hosts))
     grants = _grants()
     grant = grants.get(key)
     if grant is not None and grant.valid():
         return grant
     grants.pop(key, None)
-    current = _current_task()
     request = Request(
         kind=kind, target=target, purpose=current.purpose if current else "",
         sends=sends or (current.sends if current else ""), source=_source(),

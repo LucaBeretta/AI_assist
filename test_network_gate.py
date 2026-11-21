@@ -215,6 +215,38 @@ class HookTests(GateTestCase):
         self.assertEqual((len(self.asked), errors), (1, []))
 
 
+class DeclaredHostsTests(GateTestCase):
+    def lookup(self, host):
+        gate._hook("socket.getaddrinfo", (host, 443, 0, 0, 0))
+
+    def test_one_approval_covers_the_sites_a_task_declares_and_nothing_else(self):
+        self.answer = True
+        with gate.task("Read model lists", "Model list pages.", hosts=("ollama.com", "HuggingFace.co.", "localhost")):
+            self.lookup("ollama.com")
+            self.lookup("huggingface.co")
+            self.lookup("ollama.com")
+            self.assertEqual(len(self.asked), 1)
+            self.assertEqual(self.asked[0].target, "huggingface.co and ollama.com")
+            self.assertEqual(self.asked[0].purpose, "Read model lists")
+            self.assertEqual(self.asked[0].scope, "until this task finishes")
+            self.lookup("example.com")
+            self.assertEqual([request.target for request in self.asked[1:]], ["example.com"])
+            with socket.socket() as connection:
+                gate._hook("socket.connect", (connection, ("93.184.215.14", 443)))
+            self.assertEqual(len(self.asked), 2)
+        # The approval ended with its task.
+        self.lookup("huggingface.co")
+        self.assertEqual(self.asked[-1].target, "huggingface.co")
+
+    def test_refusing_the_shared_request_blocks_every_declared_site(self):
+        with gate.task("Read model lists", hosts=("ollama.com", "huggingface.co")):
+            with self.assertRaises(gate.InternetBlocked):
+                self.lookup("huggingface.co")
+            with self.assertRaises(gate.InternetBlocked):
+                self.lookup("ollama.com")
+        self.assertEqual(len(self.asked), 1)
+
+
 class OllamaTests(GateTestCase):
     def chat(self, model):
         body = json.dumps({"model": model, "messages": []}).encode("utf-8")
