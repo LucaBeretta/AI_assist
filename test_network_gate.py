@@ -228,6 +228,21 @@ class OllamaTests(GateTestCase):
         self.assertEqual(len(self.asked), 1)
         self.assertEqual(self.asked[0].kind, "Ollama model download")
         self.assertIn("llama3:8b", self.asked[0].target)
+        self.assertIn("online registry", self.asked[0].target)
+
+    def test_hugging_face_downloads_name_hugging_face_and_still_need_approval(self):
+        self.answer = True
+        for name in ("hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M", "HuggingFace.co/org/model-GGUF"):
+            body = json.dumps({"model": name, "stream": True}).encode("utf-8")
+            gate._hook("urllib.Request", ("http://127.0.0.1:11434/api/pull", body, {}, "POST"))
+        self.assertEqual(len(self.asked), 2)
+        for request in self.asked:
+            self.assertEqual(request.kind, "Ollama model download")
+            self.assertIn("from Hugging Face", request.target)
+            self.assertIn("Hugging Face", request.sends)
+        self.assertTrue(gate.hugging_face_model(" hf.co/a/b "))
+        for name in ("llama3:8b", "hf.co", "myhf.co/a/b", None):
+            self.assertFalse(gate.hugging_face_model(name))
 
     def test_cloud_models_need_approval_and_local_models_do_not(self):
         with patch.object(gate, "_remote_model", return_value=False):

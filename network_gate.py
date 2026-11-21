@@ -65,6 +65,8 @@ _OLLAMA_REGISTRY = {
     "/api/push": ("Ollama model upload", "Ollama uploads the model to its online registry."),
     "/api/create": ("Ollama model creation", "Ollama may download a base model from its online registry."),
 }
+# Ollama downloads GGUF models from Hugging Face when a name starts with one of these.
+_HUGGING_FACE_PREFIXES = ("hf.co/", "huggingface.co/")
 _OLLAMA_MODEL_PATHS = frozenset({"/api/chat", "/api/generate", "/api/embed", "/api/embeddings"})
 # Extensions that open their own connections from native code, out of the hook's sight.
 _NATIVE_NETWORK_MODULES = frozenset({"hf_xet", "hf_transfer", "pycurl"})
@@ -499,8 +501,13 @@ def _check_request(url, data):
         kind, sends = _OLLAMA_REGISTRY[path]
         model = _body_model(data)
         name = model if isinstance(model, str) else "a model"
-        _refuse_if_locked(kind, f"{name} (Ollama contacts its online registry)", sends)
-        _authorize(("ollama", path, name), kind, f"{name} (Ollama contacts its online registry)", sends)
+        # Name the site a person will recognise: a Hugging Face model does not come from Ollama's registry.
+        if path == "/api/pull" and hugging_face_model(name):
+            target, sends = f"{name} (Ollama downloads it from Hugging Face)", "Ollama downloads the model from Hugging Face."
+        else:
+            target = f"{name} (Ollama contacts its online registry)"
+        _refuse_if_locked(kind, target, sends)
+        _authorize(("ollama", path, name), kind, target, sends)
     elif path in _OLLAMA_MODEL_PATHS:
         model = _body_model(data)
         if model is _UNREADABLE:
@@ -516,6 +523,11 @@ def _check_request(url, data):
             sends = current.sends if current and current.sends else "Your message and the conversation sent with it."
             _refuse_if_locked("Ollama cloud model", f"{model} (runs on Ollama's servers)", sends)
             _authorize(("ollama cloud", model), "Ollama cloud model", f"{model} (runs on Ollama's servers)", sends)
+
+
+def hugging_face_model(name):
+    """True when Ollama would download ``name`` from Hugging Face rather than its own registry."""
+    return isinstance(name, str) and name.strip().lower().startswith(_HUGGING_FACE_PREFIXES)
 
 
 def _body_model(data):

@@ -224,9 +224,10 @@ def pull_model(host, name, on_progress, cancel_event=None):
         headers={"Content-Type": "application/json"}, method="POST",
     )
     try:
-        with network_gate.task(f"Download {name} through Ollama",
-                               sends="Ollama asks its online registry for this model and downloads it. "
-                                     "No chats or files are sent.", minutes=24 * 60), \
+        source = ("Ollama downloads this model from Hugging Face. " if network_gate.hugging_face_model(name)
+                  else "Ollama asks its online registry for this model and downloads it. ")
+        with network_gate.task(f"Download {name} through Ollama", sends=source + "No chats or files are sent.",
+                               minutes=24 * 60), \
                 urllib.request.urlopen(request, timeout=45) as response:
             while True:
                 _check_cancelled(cancel_event)

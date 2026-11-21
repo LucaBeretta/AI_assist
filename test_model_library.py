@@ -7,6 +7,7 @@ import unittest
 import urllib.error
 from unittest.mock import patch
 
+import model_library
 from model_library import (
     DownloadCancelled, fetch_model_variants, fetch_popular_models, pull_model, _PageParser,
 )
@@ -119,6 +120,22 @@ class DownloadTests(unittest.TestCase):
         self.assertEqual(json.loads(request.data), {"model": "deepseek-r1:8b", "stream": True})
         self.assertEqual(received, events)
         self.assertTrue(stream.closed)
+
+    def test_the_download_task_names_hugging_face_for_its_models(self):
+        tasks = []
+        real_task = model_library.network_gate.task
+
+        def task(purpose, sends="", minutes=10):
+            tasks.append(sends)
+            return real_task(purpose, sends, minutes)
+
+        for name in ("deepseek-r1:8b", "hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M"):
+            stream = response(json.dumps({"status": "success"}) + "\n")
+            with patch("model_library.urllib.request.urlopen", return_value=stream), \
+                    patch("model_library.network_gate.task", side_effect=task):
+                pull_model("http://127.0.0.1:11434/", name, lambda event: None)
+        self.assertIn("online registry", tasks[0])
+        self.assertIn("Hugging Face", tasks[1])
 
     def test_eof_never_counts_as_download_success(self):
         for payload in ("", '{"status":"pulling manifest"}\n', '\n\n'):
