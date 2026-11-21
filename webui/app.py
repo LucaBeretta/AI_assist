@@ -11,7 +11,7 @@ import threading
 import time
 import uuid
 
-from chat_store import ChatStore, _utc_now
+from chat_store import ChatStore
 import chat_versions
 import chat_attachments
 import coding_agent
