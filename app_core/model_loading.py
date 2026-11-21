@@ -34,7 +34,7 @@ class ModelLoadProgress:
             self._started = self._clock()
             self.tick()
             if self._autostart:
-                threading.Thread(target=self._pump, daemon=True, name="webui-model-loading").start()
+                threading.Thread(target=self._pump, daemon=True, name="model-loading").start()
 
     def tick(self):
         with self._lock:

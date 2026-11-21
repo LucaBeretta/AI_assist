@@ -14,6 +14,19 @@ from chat_store import ChatStore, ChatStoreError
 
 
 class ChatStoreTests(unittest.TestCase):
+    def test_sidebar_cache_excludes_transcripts_and_reloads_changed_files(self):
+        chat = self.store.new_record(title="Original")
+        chat["messages"] = [{"role": "user", "content": "Full transcript."}]
+        saved = self.store.save(chat)
+        rows = self.store.list_summaries()
+        self.assertEqual([row["title"] for row in rows], ["Original"])
+        self.assertNotIn("messages", rows[0])
+        with patch.object(self.store, "load", side_effect=AssertionError("unchanged chat was reloaded")):
+            self.assertEqual(self.store.list_summaries(), rows)
+        ChatStore(self.store.directory).rename(saved["id"], "Edited externally")
+        self.assertEqual(self.store.list_summaries()[0]["title"], "Edited externally")
+        self.assertEqual(self.store.load(saved["id"])["messages"], chat["messages"])
+
     def test_legacy_appearance_preferences_are_not_reported_as_a_damaged_chat(self):
         chat = self.store.create(model="demo")
         (self.directory / "appearance.json").write_text('{"theme": "Dark"}', encoding="utf-8")

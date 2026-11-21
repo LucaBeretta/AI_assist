@@ -123,6 +123,7 @@ class ChatStore:
             directory = data_directory()
         self.directory = Path(directory).expanduser().resolve()
         self.errors = []
+        self._summary_cache = {}
         try:
             # A folder created here is private to this user on macOS and Linux.
             ensure_private_directory(self.directory)
@@ -276,6 +277,61 @@ class ChatStore:
             _timestamp(summary["created_at"], "summary created_at")
         return record
 
+    @staticmethod
+    def _check_project_filter(project_id):
+        if project_id is not None and (not isinstance(project_id, str) or not _CHAT_ID.fullmatch(project_id)):
+            raise ChatStoreError("Project filter must be a canonical UUID or null.")
+
+    def _saved_records(self, read):
+        self.errors.clear()
+        try:
+            paths = sorted(path for path in self.directory.iterdir()
+                           if path.suffix == ".json" and path.name != "appearance.json")
+        except OSError as error:
+            message = f"Could not list saved chats: {error}"
+            self._note_error(message)
+            raise ChatStoreError(message) from error
+        present = {path.stem for path in paths}
+        for chat_id in self._summary_cache.keys() - present:
+            self._summary_cache.pop(chat_id, None)
+        for path in paths:
+            previous_errors = len(self.errors)
+            try:
+                yield read(path)
+            except (ChatStoreError, OSError) as error:
+                if len(self.errors) == previous_errors:
+                    self._note_error(f"Skipped {path.name}: {error}")
+
+    @staticmethod
+    def summary(chat):
+        row = {key: chat[key] for key in ("id", "title", "mode", "model", "updated_at")}
+        last = chat["messages"][-1] if chat["messages"] else {}
+        row.update(project_id=chat.get("project_id"), incognito=bool(chat.get("incognito")),
+                   interrupted_index=len(chat["messages"]) - 1 if last.get("partial") is True else None)
+        return row
+
+    @staticmethod
+    def _file_revision(path):
+        info = path.lstat()
+        return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
+
+    def _read_summary(self, path):
+        revision = self._file_revision(path)
+        cached = self._summary_cache.get(path.stem)
+        if cached is not None and cached[0] == revision:
+            return cached[1].copy()
+        row = self.summary(self.load(path.stem))
+        if self._file_revision(path) == revision:
+            self._summary_cache[path.stem] = (revision, row.copy())
+        return row
+
+    def list_summaries(self, project_id=None):
+        """List sidebar metadata and reuse summaries of unchanged chat files."""
+        self._check_project_filter(project_id)
+        rows = [row for row in self._saved_records(self._read_summary)
+                if project_id is None or row["project_id"] == project_id]
+        return sorted(rows, key=lambda row: (_timestamp(row["updated_at"], "updated_at"), row["id"]), reverse=True)
+
     def list_chats(self, query="", mode=None, project_id=None):
         """Return matching records, most recently updated first.
 
@@ -286,26 +342,10 @@ class ChatStore:
             raise ChatStoreError("The chat search query must be text.")
         if mode is not None and (not isinstance(mode, str) or mode not in _MODES):
             raise ChatStoreError("Chat mode must be 'chat' or 'dev'.")
-        if project_id is not None and (not isinstance(project_id, str) or not _CHAT_ID.fullmatch(project_id)):
-            raise ChatStoreError("Project filter must be a canonical UUID or null.")
-        self.errors.clear()
-        try:
-            paths = sorted(path for path in self.directory.iterdir()
-                           if path.suffix == ".json" and path.name != "appearance.json")
-        except OSError as error:
-            message = f"Could not list saved chats: {error}"
-            self._note_error(message)
-            raise ChatStoreError(message) from error
+        self._check_project_filter(project_id)
         query = query.casefold().strip()
         chats = []
-        for path in paths:
-            previous_errors = len(self.errors)
-            try:
-                chat = self.load(path.stem)
-            except (ChatStoreError, FileNotFoundError) as error:
-                if len(self.errors) == previous_errors:
-                    self._note_error(f"Skipped {path.name}: {error}")
-                continue
+        for chat in self._saved_records(lambda path: self.load(path.stem)):
             if mode is not None and chat["mode"] != mode:
                 continue
             if project_id is not None and chat.get("project_id") != project_id:
@@ -477,6 +517,7 @@ class ChatStore:
                 target.flush()
                 os.fsync(target.fileno())
             _replace(temporary_path, path)
+            self._summary_cache.pop(record["id"], None)
         except (OSError, TypeError, ValueError, UnicodeError, RecursionError) as error:
             raise ChatStoreError(f"Could not save chat {record['id']}: {error}") from error
         finally:
@@ -501,5 +542,6 @@ class ChatStore:
         path = self._path(chat_id)
         try:
             path.unlink(missing_ok=True)
+            self._summary_cache.pop(chat_id, None)
         except OSError as error:
             raise ChatStoreError(f"Could not delete saved chat {chat_id}: {error}") from error

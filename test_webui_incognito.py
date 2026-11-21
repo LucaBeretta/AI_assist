@@ -45,7 +45,7 @@ class IncognitoTests(unittest.TestCase):
         self.assertEqual(restarted.list_chats()["chats"], [])
         self.api._close()
         self.assertFalse(self.api.open_chat(chat)["ok"])
-        self.assertEqual(self.api._incognito, {})
+        self.assertEqual(self.api._chats._incognito, {})
 
     def test_incognito_flag_must_be_boolean(self):
         self.assertFalse(self.api.new_chat(incognito="yes")["ok"])

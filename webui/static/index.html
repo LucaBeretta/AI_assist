@@ -191,7 +191,7 @@
         <header class="header dev-header">
           <h1><span data-i18n="Developer"></span></h1>
           <label class="dev-project-field"><span class="sr-only"><span data-i18n="Project folder"></span></span>
-            <input id="dev-project" class="mono" placeholder="Project folder, e.g. C:\Users\…\anteprima-v2" spellcheck="false" data-i18n-placeholder="Project folder, e.g. C:\Users\…\anteprima-v2"></label>
+            <input id="dev-project" class="mono" placeholder="Project folder path" spellcheck="false" data-i18n-placeholder="Project folder path"></label>
           <button id="dev-browse" class="btn" type="button"><span data-i18n="Browse…"></span></button>
         </header>
         <div class="dev-body">
@@ -324,71 +324,102 @@
   </footer>
 </div>
 
-<dialog id="settings-dialog" class="dialog" aria-labelledby="settings-title">
+<dialog id="settings-dialog" class="dialog settings-dialog" aria-labelledby="settings-title">
   <div class="dialog-head">
     <h2 id="settings-title"><span data-i18n="Settings"></span></h2>
     <button id="settings-close" class="icon-btn" type="button" aria-label="Close" data-i18n-aria-label="Close">×</button>
   </div>
-  <section class="setting-group">
+  <div class="settings-layout">
+    <nav class="settings-tabs" role="tablist" aria-label="Settings sections" data-i18n-aria-label="Settings sections">
+      <button class="settings-tab" type="button" role="tab" data-pane="general" aria-selected="true"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"></path></svg><span data-i18n="General"></span></button>
+      <button class="settings-tab" type="button" role="tab" data-pane="models" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"></rect><path d="M9 9h6v6H9z"></path></svg><span data-i18n="Models"></span></button>
+      <button class="settings-tab" type="button" role="tab" data-pane="chats" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.4A8 8 0 1 1 21 12z"></path></svg><span data-i18n="Chats &amp; memory"></span></button>
+      <button class="settings-tab" type="button" role="tab" data-pane="privacy" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"></path></svg><span data-i18n="Privacy &amp; network"></span></button>
+    </nav>
+    <div class="settings-panes">
+  <section class="setting-group" data-pane="general">
     <h3><span data-i18n="Appearance"></span></h3>
-    <label class="setting-row"><span data-i18n="Language"></span><select id="setting-language">
+    <label class="setting-row"><span class="setting-title"><span data-i18n="Language"></span></span><select id="setting-language">
       <option value="system" data-i18n="System default"></option><option value="en">English</option><option value="it">Italiano</option>
     </select></label>
     <label class="setting-row"><span><span class="setting-title"><span data-i18n="Theme"></span></span><span class="setting-hint"><span data-i18n="Ctrl+Shift+L switches anywhere."></span></span></span>
       <select id="setting-theme"><option value="night" data-i18n="Night"></option><option value="day" data-i18n="Day"></option></select></label>
   </section>
-  <section class="setting-group">
+  <section class="setting-group" data-pane="general"><h3 data-i18n="Updates"></h3>
+    <div class="setting-row"><span><span class="setting-title"><span data-i18n="Check for updates"></span></span><span class="setting-hint" data-i18n="Checks upstream source files. Local changes can also appear as differences."></span></span>
+      <button id="check-updates" class="btn" type="button" data-i18n="Check now"></button></div>
+    <div class="setting-row">
+      <button id="install-update" class="btn" type="button" data-i18n="Update now" hidden></button>
+      <button id="cancel-update" class="btn" type="button" data-i18n="Cancel download" hidden></button>
+      <button id="rollback-update" class="btn" type="button" data-i18n="Restore previous version" hidden></button>
+      <button id="restart-update" class="btn" type="button" data-i18n="Restart now" hidden></button>
+    </div>
+    <progress id="update-progress" aria-label="Download" data-i18n-aria-label="Download" hidden></progress>
+    <div id="update-result" class="setting-hint" role="status"></div>
+  </section>
+  <section class="setting-group" data-pane="general"><h3 data-i18n="Desktop shortcut"></h3>
+    <div class="setting-row"><span><span class="setting-title"><span data-i18n="Create desktop shortcut"></span></span><span class="setting-hint" data-i18n="Starts AI Assist from the desktop without a console window. Use it again if you move the folder."></span></span>
+      <button id="create-shortcut" class="btn" type="button" data-i18n="Create"></button></div>
+    <p id="shortcut-result" class="setting-hint" role="status"></p>
+  </section>
+  <section class="setting-group" data-pane="general"><h3 data-i18n="Hourly check-in"></h3>
+    <label class="check-row"><input id="hourly-enabled" type="checkbox"><span data-i18n="Enable hourly quiet-time check-ins"></span></label>
+    <p class="setting-hint windows-only" data-i18n="Windows only: measures microphone sound levels locally. No audio is saved or sent."></p><p id="hourly-status" class="setting-hint" role="status"></p>
+    <div class="setting-actions"><button id="hourly-preview" class="btn" type="button" data-i18n="Preview now"></button></div>
+  </section>
+  <section class="setting-group" data-pane="models" hidden>
     <h3><span data-i18n="Models"></span></h3>
     <label class="setting-row"><span><span class="setting-title"><span data-i18n="Unload after inactivity"></span></span><span class="setting-hint"><span data-i18n="Frees GPU memory when a model has not been used for a while."></span></span></span>
       <select id="setting-idle"><option value="0" data-i18n="Never"></option><option value="5" data-i18n="5 minutes"></option><option value="15" data-i18n="15 minutes"></option><option value="30" data-i18n="30 minutes"></option><option value="60" data-i18n="1 hour"></option></select></label>
     <div class="setting-sub"><span data-i18n="Loaded now"></span></div>
     <div id="loaded-models"></div>
   </section>
-  <section class="setting-group"><h3 data-i18n="Colibri quality review"></h3>
+  <section class="setting-group" data-pane="models" hidden><h3 data-i18n="Colibri quality review"></h3>
       <form id="hybrid-form"><label class="check-row"><input id="hybrid-enabled" type="checkbox"><span data-i18n="Offer quality review by default"></span></label>
         <label class="field"><span data-i18n="Reviewer model"></span><input id="hybrid-model" class="mono" maxlength="256"></label>
         <label class="check-row"><input id="hybrid-memory" type="checkbox" checked><span data-i18n="Manage local memory handoff"></span></label>
         <p class="setting-hint" data-i18n="Ollama acts once; Colibri reviews without tools. Memory handoff unloads only the selected local worker."></p>
-        <button class="btn" type="submit" data-i18n="Save"></button><p id="hybrid-status" class="setting-hint" role="status"></p>
+        <div class="setting-actions"><button class="btn" type="submit" data-i18n="Save"></button></div><p id="hybrid-status" class="setting-hint" role="status"></p>
       </form></section>
-  <section class="setting-group">
+  <section class="setting-group" data-pane="chats" hidden>
     <h3><span data-i18n="Shared memory"></span></h3>
-    <label class="check-row"><input id="memory-enabled" type="checkbox"><span><span data-i18n="Use shared memory"></span></span></label>
-    <button id="memory-add" class="btn" type="button"><span data-i18n="Add memory…"></span></button>
+    <div class="setting-row"><label class="check-row"><input id="memory-enabled" type="checkbox"><span><span data-i18n="Use shared memory"></span></span></label>
+      <button id="memory-add" class="btn" type="button"><span data-i18n="Add memory…"></span></button></div>
     <p id="memory-state" class="setting-hint"></p>
     <div id="memory-list" class="mem-list settings-mem"></div>
   </section>
-  <section class="setting-group">
+  <section class="setting-group" data-pane="chats" hidden>
     <h3><span data-i18n="Saved prompts"></span></h3>
     <p class="setting-hint"><span data-i18n="Type / in the composer to insert a saved prompt."></span></p>
     <div id="saved-prompts-list"></div>
     <form id="saved-prompt-form">
       <label class="field"><span><span data-i18n="Name"></span></span><input id="saved-prompt-name" maxlength="100" required></label>
       <label class="field"><span><span data-i18n="Prompt"></span></span><textarea id="saved-prompt-text" rows="3" required></textarea></label>
-      <button class="btn" type="submit"><span data-i18n="Save prompt"></span></button>
+      <div class="setting-actions"><button class="btn" type="submit"><span data-i18n="Save prompt"></span></button></div>
     </form>
   </section>
-  <section class="setting-group"><h3 data-i18n="Hourly check-in"></h3>
-    <label class="check-row"><input id="hourly-enabled" type="checkbox"><span data-i18n="Enable hourly quiet-time check-ins"></span></label>
-    <p class="setting-hint windows-only" data-i18n="Windows only: measures microphone sound levels locally. No audio is saved or sent."></p><p id="hourly-status" class="setting-hint" role="status"></p>
-    <button id="hourly-preview" class="btn" type="button" data-i18n="Preview now"></button>
+  <section class="setting-group" data-pane="chats" hidden>
+    <h3><span data-i18n="Data"></span></h3>
+    <div class="setting-row"><span><span class="setting-title"><span data-i18n="Back up all chats"></span></span><span class="setting-hint"><span data-i18n="Saves every chat as a .zip in a folder you choose."></span></span></span>
+      <button id="export-chats" class="btn" type="button"><span data-i18n="Export…"></span></button></div>
+    <p id="export-result" class="setting-hint mono"></p>
   </section>
-  <section class="setting-group" aria-labelledby="privacy-title">
+  <section class="setting-group" data-pane="privacy" aria-labelledby="privacy-title" hidden>
     <h3 id="privacy-title" data-i18n="Privacy & internet"></h3>
-    <p id="privacy-gate" class="setting-hint" role="status"></p>
-    <button id="privacy-refresh" class="btn" type="button" data-i18n="Refresh"></button>
+    <div class="setting-row"><p id="privacy-gate" class="setting-hint" role="status"></p>
+      <button id="privacy-refresh" class="btn" type="button" data-i18n="Refresh"></button></div>
     <div class="windows-only">
-    <h4 data-i18n="AI engine firewall lock"></h4><p class="setting-hint" data-i18n="Changes affect Windows Firewall and require administrator approval. Local engines run outside Python's gate."></p>
-    <p id="firewall-status" class="setting-hint" role="status"></p>
-    <div class="model-actions"><button id="firewall-on" class="btn" type="button" data-i18n="Turn lock on"></button><button id="firewall-off" class="btn" type="button" data-i18n="Turn lock off"></button><button id="firewall-relock" class="btn" type="button" data-i18n="Lock again"></button></div>
-    <label class="setting-row"><span data-i18n="Lift temporarily"></span><select id="firewall-minutes"><option value="5">5 min</option><option value="15">15 min</option><option value="60">60 min</option></select><button id="firewall-lift" class="btn" type="button" data-i18n="Lift"></button></label>
+      <h4 class="setting-subhead" data-i18n="AI engine firewall lock"></h4><p class="setting-hint" data-i18n="Changes affect Windows Firewall and require administrator approval. Local engines run outside Python's gate."></p>
+      <p id="firewall-status" class="setting-hint" role="status"></p>
+      <div class="model-actions"><button id="firewall-on" class="btn" type="button" data-i18n="Turn lock on"></button><button id="firewall-off" class="btn" type="button" data-i18n="Turn lock off"></button><button id="firewall-relock" class="btn" type="button" data-i18n="Lock again"></button></div>
+      <label class="setting-row"><span class="setting-title" data-i18n="Lift temporarily"></span><span class="setting-inline"><select id="firewall-minutes"><option value="5">5 min</option><option value="15">15 min</option><option value="60">60 min</option></select><button id="firewall-lift" class="btn" type="button" data-i18n="Lift"></button></span></label>
     </div>
-    <details><summary data-i18n="Connection log"></summary><ol id="connection-log" class="connection-log"></ol></details>
+    <details class="setting-details"><summary data-i18n="Connection log"></summary><ol id="connection-log" class="connection-log"></ol></details>
   </section>
-  <section class="setting-group" aria-labelledby="lan-pairing-title">
+  <section class="setting-group" data-pane="privacy" aria-labelledby="lan-pairing-title" hidden>
     <h3 id="lan-pairing-title" data-i18n="LAN pairing"></h3>
     <p class="setting-hint" data-i18n="Manual only. Off on every launch. Pairing shares no chats, files, commands or inference."></p>
-    <label class="setting-row"><span data-i18n="This computer's LAN IPv4 address"></span><input id="sharing-address" type="text" placeholder="192.168.1.10" autocomplete="off"></label>
+    <label class="setting-row"><span class="setting-title" data-i18n="This computer's LAN IPv4 address"></span><input id="sharing-address" class="setting-input mono" type="text" placeholder="192.168.1.10" autocomplete="off"></label>
     <label class="check-row"><input id="sharing-enabled" type="checkbox"><span data-i18n="Enable LAN pairing"></span></label>
     <label class="check-row"><input id="sharing-usage" type="checkbox"><span><span data-i18n="Also share this computer's CPU, RAM and GPU usage with paired devices"></span><span class="setting-hint" data-i18n="Only devices you paired with a PIN can read it, while pairing is on. Off every time AI Assist starts."></span></span></label>
     <div id="sharing-details" hidden>
@@ -396,26 +427,19 @@
       <dl><dt data-i18n="Address"></dt><dd id="sharing-endpoint" class="mono"></dd><dt data-i18n="Certificate code"></dt><dd id="sharing-code" class="mono"></dd><dt>PIN</dt><dd id="sharing-pin" class="mono"></dd></dl>
       <button id="sharing-new-pin" class="btn" type="button" data-i18n="New pairing PIN"></button>
     </div>
-    <details><summary data-i18n="Pair another device"></summary>
+    <details class="setting-details"><summary data-i18n="Pair another device"></summary>
       <form id="pair-form">
-        <label class="setting-row"><span data-i18n="Target LAN IPv4 address"></span><input id="pair-address" type="text" required autocomplete="off"></label>
-        <label class="setting-row"><span data-i18n="Port"></span><input id="pair-port" type="number" min="1" max="65535" required></label>
-        <label class="setting-row"><span data-i18n="Certificate code"></span><input id="pair-code" type="text" pattern="[0-9A-Fa-f]{16}" required autocomplete="off"></label>
-        <label class="setting-row"><span>PIN</span><input id="pair-pin" type="password" inputmode="numeric" pattern="[0-9]{6}" required autocomplete="off"></label>
-        <button id="pair-submit" class="btn" type="submit" data-i18n="Pair device"></button>
+        <label class="setting-row"><span class="setting-title" data-i18n="Target LAN IPv4 address"></span><input class="setting-input mono" id="pair-address" type="text" required autocomplete="off"></label>
+        <label class="setting-row"><span class="setting-title" data-i18n="Port"></span><input class="setting-input mono" id="pair-port" type="number" min="1" max="65535" required></label>
+        <label class="setting-row"><span class="setting-title" data-i18n="Certificate code"></span><input class="setting-input mono" id="pair-code" type="text" pattern="[0-9A-Fa-f]{16}" required autocomplete="off"></label>
+        <label class="setting-row"><span class="setting-title">PIN</span><input class="setting-input mono" id="pair-pin" type="password" inputmode="numeric" pattern="[0-9]{6}" required autocomplete="off"></label>
+        <div class="setting-actions"><button id="pair-submit" class="btn" type="submit" data-i18n="Pair device"></button></div>
       </form>
     </details>
     <ul id="sharing-peers" class="connection-log"></ul><p id="sharing-status" class="setting-hint" role="status"></p>
   </section>
-  <section class="setting-group">
-    <h3><span data-i18n="Data"></span></h3>
-    <div class="setting-row"><span><span class="setting-title"><span data-i18n="Back up all chats"></span></span><span class="setting-hint"><span data-i18n="Saves every chat as a .zip in a folder you choose."></span></span></span>
-      <button id="export-chats" class="btn" type="button"><span data-i18n="Export…"></span></button></div>
-    <p id="export-result" class="setting-hint mono"></p>
-  </section>
-  <section class="setting-group"><h3 data-i18n="Updates"></h3>
-      <p class="setting-hint" data-i18n="Checks upstream source files. Local changes can also appear as differences."></p>
-      <button id="check-updates" class="btn" type="button" data-i18n="Check for updates"></button><div id="update-result" class="setting-hint" role="status"></div></section>
+    </div>
+  </div>
 </dialog>
 
 <dialog id="text-dialog" class="dialog" aria-labelledby="text-dialog-title">
@@ -501,7 +525,7 @@
   <div class="dialog-head"><h2 id="hourly-title" data-i18n="Hourly check-in"></h2><button id="hourly-close" class="icon-btn" type="button" aria-label="Close" data-i18n-aria-label="Close">×</button></div>
   <section class="setting-group"><h3 data-i18n="Work"></h3><p id="hourly-work"></p></section>
   <section class="setting-group"><h3 data-i18n="Device"></h3><p id="hourly-device" class="pre-wrap"></p></section>
-  <section class="setting-group"><h3 data-i18n="App updates"></h3><p id="hourly-updates"></p><button id="hourly-check-updates" class="btn" type="button" data-i18n="Check for updates"></button></section>
+  <section class="setting-group"><h3 data-i18n="App updates"></h3><p id="hourly-updates"></p><button id="hourly-check-updates" class="btn" type="button" data-i18n="Check for updates"></button><button id="hourly-install" class="btn" type="button" data-i18n="Update now" hidden></button></section>
   <section class="setting-group"><h3 id="hourly-reflection-title" data-i18n="Next step"></h3><p id="hourly-reflection"></p></section>
   <p id="hourly-message" class="setting-hint" role="status"></p><div class="dialog-actions"><span data-i18n="Was this useful?"></span><button id="hourly-not-useful" class="btn" type="button" data-i18n="Not quite"></button><button id="hourly-useful" class="btn" type="button" data-i18n="Yes"></button></div>
 </dialog>
