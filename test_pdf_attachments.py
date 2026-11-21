@@ -2,9 +2,11 @@
 
 import io
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 import zipfile
@@ -123,13 +125,51 @@ class OptionalPdfTests(unittest.TestCase):
         chat = self.api.new_chat()["chat"]["id"]
         original_run = subprocess.run
         def without_site_packages(args, **options):
-            return original_run([args[0], "-S", *args[1:]], **options)
+            # Hide every site folder, including the user's own one the app may ask for.
+            return original_run([args[0], "-S", *(arg for arg in args[1:] if arg != "--user-site")], **options)
         with patch("pdf_text.subprocess.run", side_effect=without_site_packages):
             result = self.api.attach(chat, "document.pdf", encoded(b"%PDF-1.4\n%%EOF"))
         self.assertFalse(result["ok"])
         self.assertIn("PDF support needs pypdf", result["error"])
         self.assertFalse((self.store.directory / chat).exists())
         self.assertNotIn("attachments", self.store.load(chat))
+
+    def test_worker_is_asked_for_the_user_site_folder_only_when_the_app_uses_it(self):
+        commands = []
+
+        def fake_run(args, **options):
+            commands.append(args)
+            return subprocess.CompletedProcess(args, 0, stdout=b'{"ok": true, "text": "text"}')
+
+        user_site = str(Path(tempfile.gettempdir()) / "user-site")
+        for enabled, on_path, asked in ((True, True, True), (True, False, False), (False, True, False)):
+            with self.subTest(enabled=enabled, on_path=on_path), \
+                    patch("pdf_text.site.ENABLE_USER_SITE", enabled), \
+                    patch("pdf_text.site.getusersitepackages", return_value=user_site), \
+                    patch("pdf_text.sys.path", [user_site] if on_path else []), \
+                    patch("pdf_text.subprocess.run", side_effect=fake_run):
+                self.assertEqual(pdf_text.extract_pdf(b"%PDF-1.4", 64000), "text")
+                self.assertEqual(commands[-1][1], "-I")
+                self.assertEqual("--user-site" in commands[-1], asked)
+
+    def test_worker_imports_from_the_user_site_folder_when_asked(self):
+        # pip installs into the user's own folder when Python's folder is not writable or with --user.
+        with tempfile.TemporaryDirectory() as base:
+            environment = dict(os.environ, PYTHONUSERBASE=base)
+            folder = subprocess.run([sys.executable, "-I", "-c", "import site; print(site.getusersitepackages())"],
+                capture_output=True, text=True, env=environment, check=True).stdout.strip()
+            Path(folder, "pypdf").mkdir(parents=True)
+            Path(folder, "pypdf", "__init__.py").write_text('raise ValueError("user-site pypdf loaded")\n')
+
+            def worker(*extra):
+                # -S hides Python's own site-packages, so only the user site folder can supply pypdf.
+                result = subprocess.run([sys.executable, "-I", "-S", str(Path(pdf_text.__file__)), "64000", *extra],
+                    input=b"%PDF-1.4\n%%EOF", capture_output=True, timeout=15, env=environment,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                return json.loads(result.stdout)["error"]
+
+            self.assertIn("PDF support needs pypdf", worker())
+            self.assertEqual(worker("--user-site"), "user-site pypdf loaded")
 
 
 if __name__ == "__main__":
