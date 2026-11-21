@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 
 from peer_pairing import (
-    DISCOVERY_PORT, MAGIC, PROTOCOL, PairingError, PairingHost, PairingWindow,
+    MAGIC, PROTOCOL, PairingError, PairingHost, PairingWindow,
     TrustStore, _json_packet, discover, pair_with_host, parse_advertisement,
     permitted_ipv4, verification_code,
 )

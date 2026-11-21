@@ -1,14 +1,11 @@
 """Project persistence, inherited environments, filtering and complete backups."""
 
-from copy import deepcopy
 import json
-from pathlib import Path
 import unittest
 from unittest.mock import patch
 import zipfile
 
 import test_webui_app as fixtures
-from project_store import ProjectStore, ProjectStoreError
 from webui.app import Api
 
 
@@ -30,7 +27,7 @@ class ProjectTests(unittest.TestCase):
         self.assertEqual((chat["model"], chat["context_length"]), ("fake:7b", 32768))
         private = self.api.new_chat(incognito=True, project_id=project["id"])["chat"]
         self.assertEqual(private["environment"]["memory_ids"], [])
-        unrelated = self.api.new_chat()["chat"]
+        self.api.new_chat()  # an unrelated chat outside the project
         self.assertEqual({item["id"] for item in self.api.list_chats(project["id"])["chats"]}, {chat["id"], private["id"]})
         self.assertEqual(len(self.store.list_chats(project_id=project["id"])), 1)
         self.assertEqual(len(self.api.list_chats()["chats"]), 3)

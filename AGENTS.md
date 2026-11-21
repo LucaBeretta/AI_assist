@@ -12,6 +12,7 @@ The frontend is vanilla JavaScript, offline and without a build step. Install `r
 - On Windows, run the full suite with `python run_windows_tests.py --timeout 420`: it uses a separate invisible desktop. Do not open test windows on the user's desktop.
 - `python -m unittest test_app_core -v` — target a known headless module.
 - `python -m compileall -q .` — compile-check Python files.
+- `ruff check .` — check for unused or undefined names and syntax errors (rules in `ruff.toml`; CI runs it on every push).
 - `python -m unittest test_webui_static` — frontend DOM/API tests through Node, without a window.
 - `node --test vscode-extension/extension.test.js` — VS Code extension tests.
 

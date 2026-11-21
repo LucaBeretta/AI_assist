@@ -5,7 +5,6 @@ import inspect
 from pathlib import Path
 import tempfile
 import threading
-import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch

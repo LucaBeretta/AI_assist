@@ -1,13 +1,10 @@
 """Check source distributions against GitHub without requiring Git."""
 
 import hashlib
-import http.client
 import json
 from pathlib import Path, PurePosixPath
 import urllib.error
 import urllib.request
-
-import network_gate
 
 
 SHIPPED_SUBFOLDER_FILE = ("child_gate", "sitecustomize.py")

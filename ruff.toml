@@ -1,0 +1,7 @@
+# Automatic checks for likely mistakes: undefined or unused names and syntax errors.
+# Style is left to the surrounding code; widen "select" deliberately, one rule set at a time.
+target-version = "py313"
+extend-exclude = ["runtime"]
+
+[lint]
+select = ["F", "E9"]

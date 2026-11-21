@@ -1,6 +1,5 @@
 """Headless layout and visual-render regression checks for the small-screen UI."""
 
-from collections import deque
 import unittest
 
 from app_core.compute_values import (
