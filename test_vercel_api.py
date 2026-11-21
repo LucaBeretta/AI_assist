@@ -18,7 +18,8 @@ class VercelAPITests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
-        self.root = Path(temporary.name)
+        # The real path: macOS temporary folders sit behind the /var link and Windows can report short (8.3) names.
+        self.root = Path(temporary.name).resolve()
         self.write("index.html", "hello")
         self.cancel = threading.Event()
         self.logs = []

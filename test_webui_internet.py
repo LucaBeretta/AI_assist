@@ -70,7 +70,9 @@ class ApprovalTests(unittest.TestCase):
         self.assertFalse(self.manager.approve(network_gate.Request("x", "x", "x", "x", "x", "x")))
 
     def test_installed_gate_leaves_loopback_alone_and_blocks_pull_before_transport(self):
+        # On a hang, print every thread's stack instead of only timing out.
         script = r'''
+import faulthandler; faulthandler.dump_traceback_later(50, exit=True)
 import network_gate as gate
 gate.install()
 gate._notice = lambda *args, **kwargs: None
@@ -108,7 +110,8 @@ with tempfile.TemporaryDirectory() as folder:
     assert gate.recent()[-1]["decision"] == "blocked"
     manager.close(); server.shutdown(); server.server_close()
 '''
-        result = subprocess.run([sys.executable, "-c", script], cwd=Path(__file__).parent, capture_output=True, text=True, timeout=15)
+        result = subprocess.run([sys.executable, "-c", script], cwd=Path(__file__).parent, capture_output=True, text=True, timeout=60)
+        # Generous: on macOS the test server's start-up name lookup alone can take seconds.
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 

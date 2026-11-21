@@ -16,9 +16,11 @@ class HunkTests(unittest.TestCase):
     def setUp(self):
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
-        self.root = Path(folder.name) / "project"
+        # The real path: macOS temporary folders sit behind the /var link and Windows can report short (8.3) names.
+        base = Path(folder.name).resolve()
+        self.root = base / "project"
         self.root.mkdir()
-        self.store = CheckpointStore(Path(folder.name) / "checkpoints")
+        self.store = CheckpointStore(base / "checkpoints")
         self.original = "".join(f"line {n}\r\n" for n in range(25))
         self.proposed = self.original.replace("line 1\r\n", "first\r\n").replace("line 22\r\n", "last\r\n")
 

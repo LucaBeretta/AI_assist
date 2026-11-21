@@ -18,9 +18,11 @@ class CheckpointTests(unittest.TestCase):
     def setUp(self):
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
-        self.root = Path(folder.name) / "project"
+        # The real path: macOS temporary folders sit behind the /var link and Windows can report short (8.3) names.
+        base = Path(folder.name).resolve()
+        self.root = base / "project"
         self.root.mkdir()
-        self.store = CheckpointStore(Path(folder.name) / "backups")
+        self.store = CheckpointStore(base / "backups")
 
     def test_default_store_is_shared_app_data_and_never_inside_a_project(self):
         from chat_store import ChatStore
