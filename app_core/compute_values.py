@@ -22,13 +22,24 @@ def normalize_peer_rows(records):
             continue
         address = item.get("address")
         port = item.get("port")
-        # Enrollment is not evidence the peer is online, authentic *now*,
-        # or allowed to offer telemetry. Do not contact this address.
+        # Enrollment alone is not evidence the peer is online or sharing. Usage
+        # appears only after a pinned-TLS, token-authenticated request succeeded
+        # (webui.sharing._peer_status); it is re-validated here before display.
+        state = item.get("state") if item.get("state") in ("live", "not sharing", "offline", "rejected") else "paired"
+        usage = None
+        if state == "live":
+            try:
+                from peer_pairing import sanitize_usage
+                usage = sanitize_usage(item.get("usage"))
+            except Exception:
+                state, usage = "rejected", None
         rows.append({
             "id": peer_id[:32],
             "endpoint": f"{address}:{port}" if isinstance(address, str) and
                         type(port) is int and 1 <= port <= 65535 else "address unavailable",
-            "state": "paired · live telemetry unavailable",
+            "state": {"paired": "paired · live telemetry unavailable", "live": "live", "not sharing": "not sharing usage",
+                      "offline": "offline", "rejected": "rejected"}[state],
+            "usage": usage,
         })
     return rows[:32]
 

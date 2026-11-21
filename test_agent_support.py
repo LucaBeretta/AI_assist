@@ -8,7 +8,8 @@ from unittest.mock import patch
 def isolate_agent_data(case):
     directory = tempfile.TemporaryDirectory()
     case.addCleanup(directory.cleanup)
-    override = patch.dict("os.environ", {"AI_ASSIST_DATA_DIR": directory.name})
+    root = Path(directory.name).resolve()
+    override = patch.dict("os.environ", {"AI_ASSIST_DATA_DIR": str(root)})
     override.start()
     case.addCleanup(override.stop)
-    return Path(directory.name)
+    return root

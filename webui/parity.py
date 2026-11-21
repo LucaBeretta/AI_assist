@@ -55,7 +55,7 @@ class ParityApi:
     @json_method
     def prepare_feedback(self, chat_id, index, text, criteria=""):
         with self._lock:
-            record = self._load_chat(chat_id)
+            record = self._chats.load(chat_id)
             if type(index) is not int or not 0 <= index < len(record["messages"]) or record["messages"][index]["role"] != "assistant":
                 raise ValueError("Choose an assistant reply for feedback.")
             return {"ok": True, "text": feedback_prompt(record["messages"][index]["content"], text, criteria,
@@ -72,7 +72,7 @@ class ParityApi:
     def _require_colibri_idle(self):
         if self._closed or self._jobs.busy("colibri") or self._developer.uses_colibri():
             raise ValueError("Stop the active Colibri operation or quality review first.")
-        if any(item["record"].get("backend", item["record"]["environment"]["backend"]) == "Colibri" for item in self._streams.values()):
+        if any(item["record"].get("backend", item["record"]["environment"]["backend"]) == "Colibri" for item in self._chats.active_streams()):
             raise ValueError("Stop Colibri chat streams before changing the server or model.")
 
     @json_method

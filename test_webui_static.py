@@ -22,6 +22,20 @@ class Element {
   addEventListener(type, callback) { this.listeners[type] = callback; }
 }
 const elements = new Map();
+const timers = new Map();
+let nextTimer = 0;
+function setTimer(callback, delay) {
+  const id = ++nextTimer;
+  timers.set(id, {callback, delay});
+  return id;
+}
+function runDraftTimers() {
+  for (const [id, timer] of [...timers]) {
+    if (timer.delay !== 700) continue;
+    timers.delete(id);
+    timer.callback();
+  }
+}
 const document = {
   getElementById(id) { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); },
   createElement(tag) { return new Element(tag); },
@@ -40,7 +54,10 @@ window.pywebview = {api: {
   stop: async id => {calls.push(['stop',id]); return {ok:true};}
 }};
 vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'markdown.js'), 'utf8'), {document, window});
-vm.runInNewContext(fs.readFileSync(process.argv[1], 'utf8'), {document, window, Map, Error, String, Number, Boolean, Array});
+vm.runInNewContext(fs.readFileSync(process.argv[1], 'utf8'), {
+  document, window, Map, Error, String, Number, Boolean, Array,
+  setTimeout: setTimer, clearTimeout: id => timers.delete(id),
+});
 (async () => {
   await window.listeners.pywebviewready();
   elements.get('model').value = 'fake:7b';
@@ -92,9 +109,10 @@ class StaticTests(unittest.TestCase):
         await window.sharingui.openSettings();
         assert(!calls.some(item=>item[0]==='sharing'));
         assert.equal(elements.get('sharing-enabled').checked,false);
+        elements.get('sharing-usage').checked=false;
         elements.get('sharing-enabled').checked=true;document.getElementById('sharing-address').value='192.168.1.10';
         await elements.get('sharing-enabled').listeners.change();
-        assert.deepEqual(calls.at(-1),['sharing',true,'192.168.1.10']);
+        assert.deepEqual(calls.at(-1),['sharing',true,'192.168.1.10',false]);
         ''')
 
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
@@ -122,6 +140,36 @@ class StaticTests(unittest.TestCase):
         assert.equal(elements.get('compute-cpu-meter').hidden,true);
         await window.computeui.onVisible(false);
         assert.deepEqual(calls.at(-1),['compute',false]);
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_compute_window_reports_its_own_source_polls_and_toggles_fullscreen(self):
+        self.run_scenario(r'''
+        const dir=require('node:path').dirname(process.argv[1]);
+        document.documentElement={dataset:{computeSource:'window'},setAttribute(){}};
+        const timers=[];
+        const context={document,window,Map,Set,Error,String,Number,Boolean,Array,Date,setInterval:(fn,ms)=>{timers.push([fn,ms]);return 1;}};
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(dir,'compute.js'),'utf8'),context);
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(dir,'compute-window.js'),'utf8'),context);
+        const api=window.pywebview.api;
+        api.set_compute_active=async (...args)=>{calls.push(['compute',...args]);return {ok:true,data:null};};
+        api.compute_window_preferences=async()=>({ok:true,language:'en'});
+        const data={snapshot:{cpu:{percent:40},ram:{},gpus:[]},values:{device:'Mac',system:'macOS',cpu:'M1 Max',cpu_usage:'40%',ram:'64 GB',gpus:[],loaded:['qwen3.5:9b'],installed:['qwen3.5:9b'],models_available:true},peers:[],error:''};
+        api.compute_state=async()=>({ok:true,active:true,data});
+        api.toggle_compute_fullscreen=async()=>{calls.push(['fullscreen']);return {ok:true,fullscreen:!calls.filter(c=>c[0]==='fullscreen').slice(1).length};};
+        await window.computewindow.start();
+        assert.deepEqual(calls.at(-1),['compute',true,'window']);
+        assert.equal(timers.length,1);
+        await timers[0][0]();
+        assert.equal(elements.get('compute-cpu').textContent,'40%');
+        assert.equal(elements.get('compute-cpu-meter').value,40);
+        assert.equal(elements.get('cube-cpu').textContent,'40%');
+        assert.equal(elements.get('cube-gpu').textContent,'–');
+        assert.equal(elements.get('cube-model').textContent,'qwen3.5:9b');
+        await elements.get('compute-fullscreen').listeners.click();
+        assert.equal(elements.get('compute-fullscreen').textContent,'Exit full screen');
+        await window.computewindow.toggleFullscreen();
+        assert.equal(elements.get('compute-fullscreen').textContent,'Full screen');
         ''')
 
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
@@ -173,6 +221,8 @@ class StaticTests(unittest.TestCase):
                 if tag == "form":
                     self.form = False
         Page().feed((root / "index.html").read_text(encoding="utf-8"))
+        ids.clear()
+        Page().feed((root / "compute-window.html").read_text(encoding="utf-8"))
         self.assertEqual(missing, [])
         self.assertEqual(nested, [])
 
@@ -539,6 +589,129 @@ class StaticTests(unittest.TestCase):
         assert.equal(elements.get('stop').disabled,true);
         assert.equal(elements.get('send').disabled,false);
         assert.equal(elements.get('messages').children.length,2);
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_status_updates_and_tokens_keep_existing_message_nodes(self):
+        self.run_scenario(r'''
+        saved.messages = [{role:'assistant',content:'Previous reply'}];
+        window.pywebview.api.list_chats = async () => ({ok:true,chats:[{id:saved.id,title:saved.title}]});
+        await window.listeners.pywebviewready();
+        const transcript = elements.get('messages');
+        const savedNode = transcript.children[0];
+        const sidebar = elements.get('chats');
+        const initialRow = sidebar.children[0];
+        window.app.onEvent([{type:'status',engine:'Ollama',chat_id:'chat-a'}]);
+        assert.equal(transcript.children[0], savedNode);
+        assert.equal(sidebar.children[0], initialRow);
+        window.app.onEvent([{type:'token',chat_id:'chat-a',stream_id:'s',text:'first'}]);
+        const live = transcript.children[1];
+        const activeRow = sidebar.children[0];
+        window.app.onEvent([{type:'token',chat_id:'chat-a',stream_id:'s',text:' second'}]);
+        assert.equal(transcript.children[0], savedNode);
+        assert.equal(transcript.children[1], live);
+        assert.match(live.textContent, /first second/);
+        assert.equal(sidebar.children[0], activeRow);
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_sending_waits_for_older_draft_saves_and_keeps_new_input(self):
+        self.run_scenario(r'''
+        const api = window.pywebview.api;
+        const settle = () => new Promise(resolve => setImmediate(resolve));
+        let releaseSave;
+        const blockedSave = new Promise(resolve => {releaseSave = resolve;});
+        let sent = false;
+        api.save_draft = async (id, text) => {
+          if (text === 'First') await blockedSave;
+          saved.draft = text;
+          return {ok:true};
+        };
+        api.send = async (id, text) => {
+          sent = true;
+          saved.draft = '';
+          saved.messages.push({role:'user',content:text});
+          return {ok:true,stream_id:'s'};
+        };
+        await window.listeners.pywebviewready();
+        window.app.setPrompt('First');
+        runDraftTimers();
+        await settle();
+        const sending = elements.get('composer').listeners.submit({preventDefault(){}});
+        await settle();
+        assert.equal(sent, false);
+        window.app.setPrompt('Next draft');
+        releaseSave();
+        await sending;
+        assert.equal(saved.draft, '');
+        assert.equal(elements.get('prompt').value, 'Next draft');
+        runDraftTimers();
+        await settle();
+        assert.equal(saved.draft, 'Next draft');
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_draft_timers_are_per_chat_and_send_clears_its_timer(self):
+        self.run_scenario(r'''
+        const other = {id:'chat-b',title:'Chat B',model:'fake:7b',messages:[]};
+        const records = new Map([['chat-a',saved],['chat-b',other]]);
+        const api = window.pywebview.api;
+        api.list_chats = async () => ({ok:true,chats:[saved,other]});
+        api.open_chat = async id => ({ok:true,chat:structuredClone(records.get(id))});
+        const writes = [];
+        api.save_draft = async (...args) => { writes.push(args); return {ok:true}; };
+        api.send = async (id, text) => {
+          records.get(id).messages.push({role:'user',content:text});
+          return {ok:true,stream_id:'s'};
+        };
+        await window.listeners.pywebviewready();
+        window.app.setPrompt('Keep A');
+        await elements.get('chats').children[1].children[0].listeners.click();
+        window.app.setPrompt('Send B');
+        await elements.get('composer').listeners.submit({preventDefault(){}});
+        runDraftTimers();
+        await new Promise(resolve => setImmediate(resolve));
+        assert.deepEqual(writes, [['chat-a', 'Keep A']]);
+        assert.equal(elements.get('prompt').value, '');
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_developer_receives_early_results_and_recovers_missing_events(self):
+        self.run_scenario(r'''
+        document.querySelector = () => null;
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'developer.js'),'utf8'), {document,window});
+        const api = window.pywebview.api;
+        api.new_chat = async () => ({ok:true,chat:{id:'chat-a'}});
+        api.set_chat_model = async () => ({ok:true});
+        api.list_checkpoints = async () => ({ok:true,checkpoints:[]});
+        api.list_project_files = async () => ({ok:true,files:[]});
+        api.run_agent = async () => {
+          window.app.onEvent([{type:'agent_done',task_id:'fast',chat_id:'chat-a',text:'Finished'}]);
+          return {ok:true,task_id:'fast'};
+        };
+        await window.listeners.pywebviewready();
+        elements.get('model').value = 'fake:7b';
+        elements.get('dev-project').value = '/project';
+        const submit = async () => {
+          elements.get('dev-task').value = 'Review project';
+          await elements.get('dev-form').listeners.submit({preventDefault(){}});
+        };
+        await submit();
+        assert.equal(elements.get('dev-status').textContent, 'Task finished');
+        assert.equal(elements.get('dev-run').disabled, false);
+        const plan = {type:'plan_approval',task_id:'slow',chat_id:'chat-a',approval_id:'p',text:'Review files.'};
+        api.run_agent = async () => ({ok:true,task_id:'slow'});
+        api.developer_task_state = async () => ({ok:true,approvals:[plan],result:null});
+        await submit();
+        await new Promise(resolve => setImmediate(resolve));
+        assert.equal(elements.get('dev-status').textContent, 'Waiting for your plan approval');
+        window.app.onEvent([plan]);
+        assert.equal(elements.get('dev-thread').children.filter(node => node.className === 'dev-card plan-card').length, 1);
+        api.developer_task_state = async () => ({ok:true,approvals:[],result:{type:'agent_stopped',task_id:'slow',chat_id:'chat-a'}});
+        window.app.onEvent([{type:'status',engine:'Ollama',chat_id:'chat-a'}]);
+        await new Promise(resolve => setImmediate(resolve));
+        assert.equal(elements.get('dev-status').textContent, 'Task stopped');
+        assert.equal(elements.get('dev-stop').disabled, true);
         ''')
 
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")

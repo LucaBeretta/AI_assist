@@ -104,7 +104,7 @@ class ApiTests(unittest.TestCase):
         self.store = ChatStore(Path(folder.name))
         self.events = Events()
         self.calls = []
-        def request(messages, model, context_length, on_chunk, on_metrics):
+        def request(messages, model, context_length, on_chunk, on_metrics, cancel_event=None):
             self.calls.append((messages, model, context_length, threading.current_thread().name))
             on_chunk("hello")
             on_chunk(" world")
@@ -146,7 +146,7 @@ class ApiTests(unittest.TestCase):
         release = threading.Event()
         closed = threading.Event()
         self.addCleanup(release.set)
-        def request(messages, model, context_length, on_chunk, on_metrics):
+        def request(messages, model, context_length, on_chunk, on_metrics, cancel_event=None):
             try:
                 on_chunk("partial")
                 release.wait(3)
@@ -181,7 +181,7 @@ class ApiTests(unittest.TestCase):
     def test_two_chats_do_not_share_messages_or_cancellation(self):
         release = threading.Event()
         self.addCleanup(release.set)
-        def request(messages, model, context_length, on_chunk, on_metrics):
+        def request(messages, model, context_length, on_chunk, on_metrics, cancel_event=None):
             text = messages[-1]["content"]
             on_chunk(text)
             release.wait(3)

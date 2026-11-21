@@ -149,6 +149,34 @@ class WindowTests(unittest.TestCase):
             desktop.open_preview("file:///later.html")
 
 
+    def test_compute_window_is_single_remembers_normal_size_and_closes_with_main(self):
+        hooks = SimpleNamespace(moved=Hook(), resized=Hook(), closing=Hook(), closed=Hook())
+        compute = SimpleNamespace(events=hooks, x=1600, y=40, width=960.0, height=540.0,
+                                  destroy=Mock(), restore=Mock(), show=Mock(), toggle_fullscreen=Mock())
+        create = Mock(return_value=compute)
+        desktop = Desktop(create_window=create)
+        saved, closed = [], Mock()
+        self.assertTrue(desktop.open_compute("file:///compute-window.html", "api", {"width": 800, "height": 480}, saved.append, closed))
+        self.assertEqual(create.call_args.kwargs["min_size"], (480, 320))
+        self.assertEqual(create.call_args.kwargs["width"], 800)
+        self.assertFalse(desktop.open_compute("file:///compute-window.html", "api", {}, saved.append, closed))
+        compute.show.assert_called_once_with()
+        hooks.moved.callback()
+        self.assertEqual(saved, [dict(x=1600, y=40, width=960, height=540)])
+        self.assertTrue(desktop.toggle_compute_fullscreen())
+        hooks.resized.callback()
+        self.assertEqual(len(saved), 1)
+        self.assertFalse(desktop.toggle_compute_fullscreen())
+        hooks.closed.callback()
+        closed.assert_called_once_with()
+        with self.assertRaises(RuntimeError):
+            desktop.toggle_compute_fullscreen()
+        desktop.open_compute("file:///compute-window.html", "api", {}, saved.append, closed)
+        desktop.close()
+        compute.destroy.assert_called_once_with()
+        with self.assertRaises(RuntimeError):
+            desktop.open_compute("file:///compute-window.html", "api", {}, saved.append, closed)
+
 class WindowApiTests(unittest.TestCase):
     def setUp(self):
         fixtures.ApiTests.setUp(self)
