@@ -980,6 +980,7 @@ window.app = (() => {
     [t("New incognito chat"), t("Ctrl+Shift+N"), () => newChat(true).catch(showError)],
     [t("Developer"), "", () => showView("dev")],
     [t("Models"), "", () => showView("models")],
+    [t("Mission Control"), "", () => openMissionControl()],
     [t("Settings"), t("Ctrl+,"), () => openSettings()],
     [t("Switch theme"), t("Ctrl+Shift+L"), () => toggleTheme()],
   ];
@@ -1035,9 +1036,8 @@ window.app = (() => {
   element("open-palette").addEventListener("click", openPalette);
 
   // ---------- views (Chats / Developer / Models) ----------
-  const views = {chat: ["chat-view", "nav-chats"], dev: ["dev-view", "nav-dev"], models: ["models-view", "nav-models"], welcome: ["welcome-view", null], capabilities: ["capabilities-view", "nav-capabilities"], compute: ["compute-view", "nav-compute"]};
+  const views = {chat: ["chat-view", "nav-chats"], dev: ["dev-view", "nav-dev"], models: ["models-view", "nav-models"], welcome: ["welcome-view", null], capabilities: ["capabilities-view", "nav-capabilities"]};
   function showView(name) {
-    window.computeui?.onVisible(name === "compute");
     for (const [key, [view, nav]] of Object.entries(views)) {
       element(view).hidden = key !== name;
       if (nav) element(nav).setAttribute("aria-current", key === name ? "page" : "false");
@@ -1050,7 +1050,12 @@ window.app = (() => {
   element("nav-dev").addEventListener("click", () => showView("dev"));
   element("nav-models").addEventListener("click", () => showView("models"));
   element("nav-capabilities").addEventListener("click", () => showView("capabilities"));
-  element("nav-compute").addEventListener("click", () => showView("compute"));
+  // Mission Control opens the live Compute window (for a second screen); it is not a view in this window.
+  const openMissionControl = () => call("open_compute_window").catch(showError);
+  element("open-mission-control").addEventListener("click", openMissionControl);
+  // Windows-only controls (firewall lock, microphone check-ins) are hidden on other systems.
+  const platformRoot = document.documentElement;
+  if (platformRoot?.dataset) platformRoot.dataset.platform = /Windows/i.test(window.navigator?.userAgent || "") ? "windows" : /Mac/i.test(window.navigator?.userAgent || "") ? "mac" : "other";
   element("open-models").addEventListener("click", () => showView("models"));
 
   async function selectModel(name, backend = "Ollama") {

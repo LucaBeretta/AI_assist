@@ -305,9 +305,55 @@ def discover(timeout=1.5):
     return list(results.values())
 
 
+USAGE_MIN_INTERVAL = 1.0
+MAX_USAGE_BYTES = 8192
+
+
+def _finite(value, low=0.0, high=None):
+    if type(value) not in (int, float) or value != value or value in (float("inf"), float("-inf")):
+        return None
+    if value < low or (high is not None and value > high):
+        return None
+    return value
+
+
+def sanitize_usage(value):
+    """The only usage fields that cross the network, re-validated on both sides.
+
+    CPU, RAM and GPU load, the device and model names: no chats, files, prompts,
+    paths or settings. Unknown readings stay None rather than becoming zero."""
+    if not isinstance(value, dict):
+        raise PairingError("Invalid usage report.")
+    cpu, ram = value.get("cpu") or {}, value.get("ram") or {}
+    if not isinstance(cpu, dict) or not isinstance(ram, dict):
+        raise PairingError("Invalid usage report.")
+    total = _finite(ram.get("total_bytes"), 1)
+    available = _finite(ram.get("available_bytes"))
+    if total is None or available is None or available > total:
+        total = available = None
+    gpus = []
+    for gpu in (value.get("gpus") or [])[:2]:
+        if not isinstance(gpu, dict):
+            continue
+        gpu_total = _finite(gpu.get("total_bytes"), 1)
+        used = _finite(gpu.get("used_bytes"))
+        if gpu_total is None or used is None or used > gpu_total:
+            gpu_total = used = None
+        gpus.append({"name": str(gpu.get("name") or "GPU")[:96], "percent": _finite(gpu.get("percent"), 0, 100),
+                     "used_bytes": used, "total_bytes": gpu_total})
+    loaded = [str(item)[:96] for item in (value.get("loaded") or [])[:8] if isinstance(item, str)]
+    return {"name": str(value.get("name") or "")[:64], "system": str(value.get("system") or "")[:32],
+            "time": _finite(value.get("time")),
+            "cpu": {"name": str(cpu.get("name") or "")[:96], "percent": _finite(cpu.get("percent"), 0, 100)},
+            "ram": {"total_bytes": total, "available_bytes": available}, "gpus": gpus, "loaded": loaded}
+
+
 class PairingHost:
-    """HTTPS pairing endpoint ONLY. No inference or command endpoints exist."""
-    def __init__(self, bind_ip, data_directory, *, name="AI Assist"):
+    """HTTPS pairing endpoint, plus an opt-in usage report for paired clients.
+
+    No inference, chat, file or command endpoints exist. ``usage`` is a callable
+    returning this computer's load; when it is None, /usage does not exist."""
+    def __init__(self, bind_ip, data_directory, *, name="AI Assist", usage=None, port=0):
         if not permitted_ipv4(bind_ip, loopback=True):
             raise PairingError("Bind to one explicit private LAN IPv4 address.")
         self.bind_ip = bind_ip
@@ -316,6 +362,9 @@ class PairingHost:
         self.cert, self.key, self.fingerprint = create_identity(data_directory)
         self.node_id = hashlib.sha256(self.fingerprint.encode()).hexdigest()[:24]
         self.name = name[:64]
+        self.usage = usage
+        self._usage_lock = threading.Lock()
+        self._usage_seen = {}
         host = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -325,6 +374,38 @@ class PairingHost:
 
             def log_message(self, *_args):
                 pass  # Never log secret request bodies.
+
+            def do_GET(self):
+                # Live usage for paired clients only: TLS, a paired ID and its secret token.
+                if self.path != "/usage" or host.usage is None:
+                    self.send_error(404)
+                    return
+                if self.headers.get("Origin") or not permitted_ipv4(self.client_address[0], loopback=True):
+                    self.send_error(403)
+                    return
+                client = self.headers.get("X-AI-Assist-Client", "")
+                auth = self.headers.get("Authorization", "")
+                token = auth[7:] if auth.startswith("Bearer ") else ""
+                if not host.store.authenticate_client(client, token):
+                    self.send_error(403)
+                    return
+                now = time.monotonic()
+                with host._usage_lock:
+                    if now - host._usage_seen.get(client, -USAGE_MIN_INTERVAL) < USAGE_MIN_INTERVAL:
+                        self.send_error(429)
+                        return
+                    host._usage_seen[client] = now
+                try:
+                    payload = _json_packet(sanitize_usage(host.usage()))
+                except Exception:
+                    self.send_error(503)
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
 
             def do_POST(self):
                 if (self.path != "/pair" or self.headers.get("Origin") or
@@ -362,8 +443,14 @@ class PairingHost:
                 self.end_headers()
                 self.wfile.write(payload)
 
-        self.httpd = ThreadingHTTPServer((bind_ip, 0), Handler)
+        # Keep the previous port when it is free, so paired clients find this host again.
+        try:
+            self.httpd = ThreadingHTTPServer((bind_ip, port if type(port) is int and 1024 <= port <= 65535 else 0), Handler)
+        except OSError:
+            self.httpd = ThreadingHTTPServer((bind_ip, 0), Handler)
         self.httpd.daemon_threads = True
+        # A client that hangs up after a failed certificate check is expected: do not print it.
+        self.httpd.handle_error = lambda request, client_address: None
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ctx.minimum_version = ssl.TLSVersion.TLSv1_2
         ctx.load_cert_chain(str(self.cert), str(self.key))
@@ -432,6 +519,53 @@ def pair_with_host(address, port, target_verification_code, pin, client_id, stor
         raise PairingError(f"Pairing connection failed: {exc}") from exc
     finally:
         conn.close()
+
+
+def fetch_usage(record, client_id, timeout=2.0):
+    """Ask one paired host for its usage. The TLS certificate must match the one
+    pinned at pairing time before the token is sent."""
+    if not isinstance(record, dict):
+        raise PairingError("Invalid paired peer record.")
+    address, port, token, pinned = (record.get(key) for key in ("address", "port", "token", "fingerprint"))
+    if not permitted_ipv4(address, loopback=True) or type(port) is not int or not 1 <= port <= 65535:
+        raise PairingError("Refusing a non-LAN address or invalid port.")
+    if not _safe_id(client_id) or not isinstance(token, str) or not isinstance(pinned, str) or len(pinned) != 64:
+        raise PairingError("Invalid paired peer record.")
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE  # Pinned explicitly below, before any credential is sent.
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    conn = http.client.HTTPSConnection(address, port, timeout=timeout, context=context)
+    try:
+        conn.connect()
+        fingerprint = hashlib.sha256(conn.sock.getpeercert(binary_form=True)).hexdigest()
+        if not hmac.compare_digest(fingerprint, pinned):
+            raise PairingError("This device's certificate changed. Pair it again.")
+        conn.request("GET", "/usage", headers={"X-AI-Assist-Client": client_id,
+                                               "Authorization": "Bearer " + token, "Accept": "application/json"})
+        response = conn.getresponse()
+        if response.status == 404:
+            raise UsageUnavailable("Usage sharing is off on this device.")
+        if response.status != 200:
+            raise PairingError(f"Usage request rejected (HTTP {response.status}).")
+        data = response.read(MAX_USAGE_BYTES + 1)
+        if len(data) > MAX_USAGE_BYTES:
+            raise PairingError("Usage report too large.")
+        return sanitize_usage(json.loads(data))
+    except (OSError, ssl.SSLError, http.client.HTTPException, ValueError) as exc:
+        if isinstance(exc, PairingError):
+            raise
+        raise PeerOffline(f"Could not reach this device: {exc}") from exc
+    finally:
+        conn.close()
+
+
+class UsageUnavailable(PairingError):
+    pass
+
+
+class PeerOffline(PairingError):
+    pass
 
 
 def main(argv=None):

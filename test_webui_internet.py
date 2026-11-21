@@ -70,9 +70,9 @@ class ApprovalTests(unittest.TestCase):
         self.assertFalse(self.manager.approve(network_gate.Request("x", "x", "x", "x", "x", "x")))
 
     def test_installed_gate_leaves_loopback_alone_and_blocks_pull_before_transport(self):
-        # On a hang, print every thread's stack instead of only timing out.
         script = r'''
-import faulthandler; faulthandler.dump_traceback_later(50, exit=True)
+import faulthandler
+faulthandler.dump_traceback_later(50, exit=True)  # if it stalls on a slow machine, show where
 import network_gate as gate
 gate.install()
 gate._notice = lambda *args, **kwargs: None
@@ -95,23 +95,27 @@ with tempfile.TemporaryDirectory() as folder:
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     host = "http://127.0.0.1:" + str(server.server_port)
-    assert urllib.request.urlopen(host + "/local").read() == b"ok"
+    assert urllib.request.urlopen(host + "/local", timeout=20).read() == b"ok"
     assert manager.pending() is None
     def pull():
         try:
-            urllib.request.urlopen(urllib.request.Request(host + "/api/pull", data=b'{"model":"test"}'))
+            urllib.request.urlopen(urllib.request.Request(host + "/api/pull", data=b'{"model":"test"}'), timeout=20)
         except gate.InternetBlocked:
             failures.append("blocked")
-    thread = threading.Thread(target=pull); thread.start()
-    assert ready.wait(3)
+    # Daemon: if anything below fails, the error is reported instead of the thread keeping the process alive.
+    thread = threading.Thread(target=pull, daemon=True); thread.start()
+    assert ready.wait(10), "no approval request within 10 s"
     manager.respond(manager.pending()["approval_id"], "block")
-    thread.join(3)
+    thread.join(10)
     assert failures == ["blocked"] and seen == ["/local"], (failures, seen)
     assert gate.recent()[-1]["decision"] == "blocked"
     manager.close(); server.shutdown(); server.server_close()
 '''
-        result = subprocess.run([sys.executable, "-c", script], cwd=Path(__file__).parent, capture_output=True, text=True, timeout=60)
-        # Generous: on macOS the test server's start-up name lookup alone can take seconds.
+        # Hosted CI machines can be several times slower than a desktop; report output if it still stalls.
+        try:
+            result = subprocess.run([sys.executable, "-c", script], cwd=Path(__file__).parent, capture_output=True, text=True, timeout=60)
+        except subprocess.TimeoutExpired as error:
+            self.fail(f"The gate script stalled.\nstdout: {error.stdout}\nstderr: {error.stderr}")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 

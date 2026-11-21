@@ -58,17 +58,17 @@ def _cpu_times():
         if not ok:
             raise OSError("GetSystemTimes failed")
         return kernel.integer() + user.integer(), idle.integer()
+    if system == "Darwin":
+        # Mach HOST_CPU_LOAD_INFO: cumulative user, system, idle, nice ticks. Instant,
+        # unlike `top -l 1`, which takes about five seconds of CPU on recent macOS.
+        libc = ctypes.CDLL(None)
+        libc.mach_host_self.restype = ctypes.c_uint32
+        ticks = (ctypes.c_uint32 * 4)()
+        count = ctypes.c_uint32(4)
+        if libc.host_statistics(libc.mach_host_self(), 3, ticks, ctypes.byref(count)) != 0:
+            raise OSError("host_statistics failed")
+        return sum(ticks), ticks[2]
     raise OSError("Cumulative CPU counters unsupported")
-
-
-def _mac_cpu_percent():
-    try:
-        p = subprocess.run(["top", "-l", "1", "-n", "0"], capture_output=True,
-                           text=True, timeout=3, check=False)
-        match = re.search(r"CPU usage:.*?(\d+(?:\.\d+)?)%\s+idle", p.stdout)
-        return _finite_percent(100.0 - float(match.group(1))) if match else None
-    except (OSError, ValueError, subprocess.TimeoutExpired):
-        return None
 
 
 def _memory():
@@ -110,7 +110,8 @@ def _gpu_usage():
         process = subprocess.run(
             [executable, "--query-gpu=name,utilization.gpu,memory.used,memory.total",
              "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=3, check=False)
+            capture_output=True, text=True, timeout=3, check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         if process.returncode:
             return []
         result = []
@@ -130,6 +131,36 @@ def _gpu_usage():
         return result
     except (OSError, subprocess.TimeoutExpired):
         return []
+
+
+def _apple_gpu_usage(run=None):
+    """Apple silicon GPU load from the I/O registry, without administrator rights.
+
+    ``ioreg`` publishes the AGX accelerator's PerformanceStatistics: "Device
+    Utilization %" and "In use system memory" (bytes the GPU holds in unified
+    memory). Returns {"percent", "used_bytes"} or None when unavailable.
+    """
+    def default_run():
+        executable = shutil.which("ioreg") or shutil.which("ioreg", path="/usr/sbin:/sbin")
+        if not executable:
+            return ""
+        process = subprocess.run([executable, "-r", "-d", "1", "-c", "IOAccelerator"],
+                                 capture_output=True, text=True, timeout=3, check=False)
+        return process.stdout if process.returncode == 0 else ""
+    try:
+        text = (run or default_run)()
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    statistics = re.search(r'"PerformanceStatistics"\s*=\s*\{([^}]*)\}', text or "")
+    if not statistics:
+        return None
+    fields = dict(re.findall(r'"([^"]+)"=(\d+)', statistics.group(1)))
+    percent = _finite_percent(fields.get("Device Utilization %"))
+    used = fields.get("In use system memory")
+    used_bytes = int(used) if used is not None and used.isdigit() else None
+    if percent is None and used_bytes is None:
+        return None
+    return {"percent": percent, "used_bytes": used_bytes}
 
 
 def _is_loopback_ollama(url):
@@ -193,16 +224,14 @@ class TelemetrySampler:
             hardware = self._hardware
             cpu_percent = None
             try:
-                if platform.system() == "Darwin":
-                    cpu_percent = _mac_cpu_percent()
-                else:
-                    current = _cpu_times()
-                    if self._previous_cpu is not None:
-                        total = current[0] - self._previous_cpu[0]
-                        idle = current[1] - self._previous_cpu[1]
-                        if total > 0:
-                            cpu_percent = _finite_percent(100 * (1 - idle / total))
-                    self._previous_cpu = current
+                current = _cpu_times()
+                if self._previous_cpu is not None:
+                    # Mach tick counters are 32-bit and may wrap; treat a wrap as no reading.
+                    total = current[0] - self._previous_cpu[0]
+                    idle = current[1] - self._previous_cpu[1]
+                    if total > 0 and 0 <= idle <= total:
+                        cpu_percent = _finite_percent(100 * (1 - idle / total))
+                self._previous_cpu = current
             except (OSError, ValueError, AttributeError):
                 pass
 
@@ -225,6 +254,13 @@ class TelemetrySampler:
                                  "used_bytes": (total - free if type(total) is int
                                                 and type(free) is int and 0 <= free <= total else None),
                                  "unified": bool(info.get("unified"))})
+                if gpus and gpus[0].get("unified") and platform.system() == "Darwin":
+                    apple = _apple_gpu_usage()
+                    if apple:
+                        gpus[0]["percent"] = apple["percent"]
+                        total = gpus[0].get("total_bytes")
+                        if apple["used_bytes"] is not None and (total is None or apple["used_bytes"] <= total):
+                            gpus[0]["used_bytes"] = apple["used_bytes"]
             models = _installed_models(self.host)
             return {
                 "schema": 1,
