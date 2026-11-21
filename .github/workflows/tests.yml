@@ -17,6 +17,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Fast check for likely mistakes (unused or undefined names, syntax errors); rules in ruff.toml.
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Ruff
+        run: |
+          python -m pip install ruff==0.17.6
+          ruff check --output-format github .
+
   tests:
     name: ${{ matrix.os }}
     runs-on: ${{ matrix.os }}

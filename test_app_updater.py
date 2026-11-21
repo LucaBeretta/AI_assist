@@ -140,7 +140,7 @@ class UpdateTests(unittest.TestCase):
 
     def test_only_two_backups_are_retained_and_restorable(self):
         for rev in "345":
-            state = self.apply(rev * 40)
+            self.apply(rev * 40)
         backups = (self.root / ".update/backup").iterdir()
         self.assertEqual(len(list(backups)), 2)
         self.assertEqual(updater.rollback(self.root)["revision"], "4" * 40)

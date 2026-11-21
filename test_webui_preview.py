@@ -4,7 +4,6 @@ from pathlib import Path
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock
-from urllib.parse import unquote, urlsplit
 
 import test_webui_app as fixtures
 from webui.desktop import Desktop

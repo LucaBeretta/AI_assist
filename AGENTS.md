@@ -12,12 +12,13 @@ The frontend is vanilla JavaScript, offline and without a build step. Install `r
 - On Windows, run the full suite with `python run_windows_tests.py --timeout 420`: it uses a separate invisible desktop. Do not open test windows on the user's desktop.
 - `python -m unittest test_app_core -v` — target a known headless module.
 - `python -m compileall -q .` — compile-check Python files.
+- `ruff check .` — check for unused or undefined names and syntax errors (rules in `ruff.toml`; CI runs it on every push).
 - `python -m unittest test_webui_static` — frontend DOM/API tests through Node, without a window.
 - `node --test vscode-extension/extension.test.js` — VS Code extension tests.
 
 ## Coding Style & Naming Conventions
 
-No repository linter, formatter, or type-checker configuration is present. Follow surrounding code style. Python tests use `unittest` and `test_*.py` names; frontend tests use a small Node DOM/API harness and the extension uses `node:test`. Preserve the UI-free boundary of `app_core/` when changing shared services.
+`ruff.toml` checks for unused or undefined names and syntax errors only; there is no formatter or type checker. Follow surrounding code style. Python tests use `unittest` and `test_*.py` names; frontend tests use a small Node DOM/API harness and the extension uses `node:test`. Preserve the UI-free boundary of `app_core/` when changing shared services.
 
 ## Testing Guidelines
 

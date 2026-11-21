@@ -1,7 +1,6 @@
 """Attachment confinement, limits and native vision capability checks."""
 
 import base64
-from pathlib import Path
 import json
 import unittest
 from unittest.mock import patch

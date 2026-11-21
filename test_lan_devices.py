@@ -76,7 +76,7 @@ class ParsingTests(unittest.TestCase):
 
 class ScanTests(unittest.TestCase):
     def test_scan_merges_every_source_and_marks_ai_computers(self):
-        with patch.object(lan_devices, "knock_all", return_value={"192.168.1.20": [OLLAMA := lan_devices.OLLAMA_PORT]}), \
+        with patch.object(lan_devices, "knock_all", return_value={"192.168.1.20": [lan_devices.OLLAMA_PORT]}), \
                 patch.object(lan_devices, "bonjour", return_value=({"192.168.1.5": "Lucas-iPhone.local"}, {"192.168.1.5", "192.168.1.30"})), \
                 patch.object(lan_devices, "ai_assist_peers", return_value={"192.168.1.40": {"name": "Studio", "port": 1}}), \
                 patch.object(lan_devices, "ollama_version", side_effect=lambda ip: "0.40.17" if ip in ("127.0.0.1", "192.168.1.20") else None):

@@ -112,7 +112,7 @@ class DeveloperApiTests(unittest.TestCase):
         chat = self.api.new_chat()["chat"]["id"]
         self.api.set_chat_model(chat, "m")
         with patch("coding_agent._chat", return_value=final_response("1. Work.")):
-            result = self.api.run_agent(chat, "task", str(self.project), plan_first=True)
+            self.api.run_agent(chat, "task", str(self.project), plan_first=True)
             self.events.wait("plan_approval")
             self.api._close()
             self.events.wait("agent_stopped")
