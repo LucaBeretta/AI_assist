@@ -38,7 +38,7 @@ There are three layers:
 
 1. **See**: built. The Mission Control network scan in `lan_devices.py` runs only when the person clicks Scan.
 2. **Monitor**: built. Paired devices can share live CPU, RAM and GPU load over TLS after PIN pairing (`peer_pairing.py`, `webui/sharing.py`). `share_usage.py` does the same for computers without a screen.
-3. **Use**: not built. A paired computer runs AI for another one, for example the owner's Windows PC with an RTX 4090 serving the Mac. It is planned as a "Compute location" control (This device / Auto / Choose device) in `docs/compute-routing.md`. The policy in `compute_routing.py` is written but nothing calls it.
+3. **Use**: not built. A paired computer runs AI for another one, for example a Windows PC with a powerful graphics card serving a Mac. It is planned as a "Compute location" control (This device / Auto / Choose device) in `docs/compute-routing.md`. The policy in `compute_routing.py` is written but nothing calls it.
 
 Pointing AI Assist at another computer's Ollama URL already works, but that connection is unencrypted and unauthenticated. The next step is inference only for paired devices, over the existing pinned-TLS pairing channel.
 
