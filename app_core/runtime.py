@@ -3,7 +3,7 @@ import os
 
 from app_core import ollama
 from app_core.providers import OllamaProvider
-from app_core.streaming import StreamStopped, run_stoppable
+from app_core.streaming import StreamStopped, run_stoppable  # noqa: F401 -- re-exported for callers of this module
 
 
 def ollama_url():

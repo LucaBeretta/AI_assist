@@ -1,6 +1,5 @@
 """Version navigation preserves complete paths and compacted-history validity."""
 
-from copy import deepcopy
 import unittest
 
 import test_webui_app as fixtures

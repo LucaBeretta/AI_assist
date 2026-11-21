@@ -1,9 +1,7 @@
 """Small atomically replaced web preferences, separate from saved chat JSON."""
 
 import json
-import os
 from pathlib import Path
-import tempfile
 from app_core.settings import write_json
 
 

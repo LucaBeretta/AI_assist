@@ -4,7 +4,6 @@ import os
 import unittest
 from unittest.mock import patch
 
-import model_advisor
 from model_advisor import GIB, apple_gpu_budget, detect_hardware, recommend_models
 
 VM_STAT = """Mach Virtual Memory Statistics: (page size of 16384 bytes)

@@ -41,7 +41,9 @@ FAKE_COLI = textwrap.dedent('''\
         try:
             os.mkdir(lock)
             break
-        except FileExistsError:
+        # Windows reports a lock folder that another call is still removing as
+        # access denied rather than existing; both mean wait and try again.
+        except (FileExistsError, PermissionError):
             if time.monotonic() >= deadline:
                 raise RuntimeError("Timed out recording fake coli call")
             time.sleep(0.005)

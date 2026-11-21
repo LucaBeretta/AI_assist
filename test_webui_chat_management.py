@@ -1,6 +1,5 @@
 """Chat management and folder selection are testable without a window."""
 
-from pathlib import Path
 import threading
 import unittest
 import zipfile

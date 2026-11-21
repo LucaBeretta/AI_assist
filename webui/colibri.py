@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import threading
 
-from colibri_backend import ColibriClient, normalize_url
+from colibri_backend import normalize_url
 from app_core.settings import load_backend, read_json
 from app_core.providers import ColibriProvider
 import colibri_launcher as launcher

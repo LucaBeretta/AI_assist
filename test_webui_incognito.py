@@ -1,6 +1,5 @@
 """Incognito streams and compaction must never reach persistent storage."""
 
-import json
 import unittest
 from unittest.mock import patch
 import zipfile
