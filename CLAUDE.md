@@ -36,7 +36,8 @@ This repository is public: keep secrets and personal details out of this file.
   - LucaBeretta/AI_assist#13: brief Windows retries for chat saves and the new checkpoint folder rename (`app_core.paths.replace_retrying`).
   - LucaBeretta/AI_assist#14: a ruff check (`ruff.toml`, rules F and E9, ruff 0.17.6 in CI).
   - LucaBeretta/AI_assist#15: this file.
-- Older branches on GitHub were never merged and need a keep-or-archive decision from the owner: `modernization/web-workstation`, `integration/compute-dashboard-web`, `code-quality-pass`, `feature/continuous-user-feedback` and `mac-mission-control`.
+- Five old branches that were never merged are archived as tags under `archive/`: `modernization/web-workstation`, `integration/compute-dashboard-web`, `code-quality-pass`, `feature/continuous-user-feedback` (closed: no feedback prompt after replies and tasks) and `mac-mission-control` (split into #11 and `mac-mission-control-only`). Each tag's message says why. Restore one with `git push origin "archive/NAME^{commit}:refs/heads/NAME"`.
+- `docs/modernization-backlog.md` is marked historical. The other milestone documents (`architecture-audit.md`, `architecture-decision.md`) also predate the removal of Tk.
 - The repeated ollama.com approval popup on macOS was fixed on `main` by 378f1ca: one gated task now covers every catalog page.
 
 ## Product direction: the local network ("intranet")
@@ -45,7 +46,7 @@ There are three layers:
 
 1. **See**: built. The Mission Control network scan in `lan_devices.py` runs only when the person clicks Scan.
 2. **Monitor**: built. Paired devices can share live CPU, RAM and GPU load over TLS after PIN pairing (`peer_pairing.py`, `webui/sharing.py`). `share_usage.py` does the same for computers without a screen.
-3. **Use**: not built. A paired computer runs AI for another one, for example a Windows PC with a powerful graphics card serving a Mac. It is planned as a "Compute location" control (This device / Auto / Choose device) in `docs/compute-routing.md`. The policy in `compute_routing.py` is written but nothing calls it.
+3. **Use**: not built. A paired computer runs AI for another one, for example a Windows PC with a powerful graphics card serving a Mac. It is planned as a "Compute location" control (This device / Auto / Choose device) in `docs/compute-routing.md`. The policy in `compute_routing.py` is written but nothing calls it. An early Mac -> Windows prototype, built on the removed Tk interface, is in the `archive/integration/compute-dashboard-web` tag (`lan_inference.py`, `lan_client.py`, `docs/mac-windows-lan-inference.md`): a reference, not code to merge.
 
 Pointing AI Assist at another computer's Ollama URL already works, but that connection is unencrypted and unauthenticated. The next step is inference only for paired devices, over the existing pinned-TLS pairing channel.
 
