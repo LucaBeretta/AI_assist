@@ -6,6 +6,27 @@ Python programs AI Assist starts, by file path, without this package.
 
 import os
 from pathlib import Path
+import time
+
+
+# Windows refuses to replace a file while another handle has it open (another
+# thread reading the same chat, search indexing or antivirus), and to rename a
+# folder while its new files are still being scanned. Such a hold lasts
+# moments, so a save waits briefly (under a second in all) before giving up.
+_RETRY_REPLACE = os.name == "nt"
+_REPLACE_DELAYS = (0.01, 0.02, 0.05, 0.1, 0.2, 0.4)
+
+
+def replace_retrying(source, target):
+    """``os.replace``, retried briefly when Windows reports the file or folder as in use."""
+    for delay in (*_REPLACE_DELAYS, None):
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError:
+            if not _RETRY_REPLACE or delay is None:
+                raise
+            time.sleep(delay)
 
 
 def data_directory(environ=None):

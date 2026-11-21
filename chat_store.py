@@ -13,7 +13,7 @@ import zipfile
 import chat_attachments
 
 from app_core.conversation import NEW_CHAT_TITLE, title_from
-from app_core.paths import data_directory, ensure_private_directory
+from app_core.paths import data_directory, ensure_private_directory, replace_retrying
 
 
 _MAX_CHAT_BYTES = 64 * 1024 * 1024
@@ -440,7 +440,7 @@ class ChatStore:
                             if len(data) != item["size"]:
                                 raise ChatStoreError("Attachment size changed before export.")
                             archive.writestr(f"chats/{chat['id']}/attachments/{item['id']}", data)
-            os.replace(temporary, destination)
+            replace_retrying(temporary, destination)
         except (OSError, ValueError, zipfile.BadZipFile) as error:
             temporary.unlink(missing_ok=True)
             raise ChatStoreError(f"Could not write the backup: {error}") from error
@@ -496,7 +496,7 @@ class ChatStore:
                 target.write(payload)
                 target.flush()
                 os.fsync(target.fileno())
-            os.replace(temporary_path, path)
+            replace_retrying(temporary_path, path)
             self._summary_cache.pop(record["id"], None)
         except (OSError, TypeError, ValueError, UnicodeError, RecursionError) as error:
             raise ChatStoreError(f"Could not save chat {record['id']}: {error}") from error
