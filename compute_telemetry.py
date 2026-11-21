@@ -110,7 +110,8 @@ def _gpu_usage():
         process = subprocess.run(
             [executable, "--query-gpu=name,utilization.gpu,memory.used,memory.total",
              "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=3, check=False)
+            capture_output=True, text=True, timeout=3, check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         if process.returncode:
             return []
         result = []

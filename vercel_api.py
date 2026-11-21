@@ -122,6 +122,9 @@ def _rules(folder, names):
 
 def deployment_files(root, cancel):
     """Preflight before uploading; ignore dependencies, credentials and local data."""
+    # Compare real locations: a folder reached through a link (macOS /var) or a short
+    # Windows name would otherwise make every file look outside the project.
+    root = Path(root).resolve(strict=True)
     excluded = {".git", ".vercel", ".aiassist", "node_modules", ".next", ".nuxt", ".venv", "venv",
                 "__pycache__", ".pytest_cache", ".idea", ".vscode"}
     root_rules = _rules(root, (".vercelignore",))

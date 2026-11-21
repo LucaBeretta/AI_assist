@@ -8,6 +8,25 @@ import gui_runtime
 
 
 class GUIRuntimeTests(unittest.TestCase):
+    def test_pending_requirements_install_before_launch_and_retry_after_failure(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            run = Mock(return_value=Mock(returncode=0))
+            self.assertIsNone(gui_runtime.install_pending_requirements(root, run=run))
+            run.assert_not_called()
+            marker = root / ".update" / "requirements-pending"
+            marker.parent.mkdir()
+            marker.write_text("pending", encoding="utf-8")
+            run.return_value = Mock(returncode=1)
+            self.assertEqual(gui_runtime.install_pending_requirements(root, run=run, executable="py"), 1)
+            self.assertTrue(marker.is_file())
+            self.assertEqual(run.call_args.args[0], ["py", "-m", "pip", "install", "-r", str(root / "requirements.txt")])
+            run.return_value = Mock(returncode=0)
+            self.assertEqual(gui_runtime.install_pending_requirements(root, run=run, executable="py"), 0)
+            self.assertFalse(marker.exists())
+
     def test_probe_reports_python_and_web_dependency_without_creating_windows(self):
         view = Mock()
         output = io.StringIO()

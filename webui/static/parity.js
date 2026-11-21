@@ -9,16 +9,23 @@ window.parityui = (() => {
   const close = id => { const dialog = el(id); if (dialog.close) dialog.close(); else dialog.open = false; };
   const jobs = new Map(), terminal = new Set();
   let feedback = null, catalog = [], hybrid = null, qualityDirty = false, colibriState = null;
-  function outputFor(operation) { return operation === "updates" ? "update-result" : operation === "deploy" ? "deploy-output" : "colibri-output"; }
+  const updateOperations = ["updates", "install_update", "rollback_update"];
+  function offerInstall(available) {
+    el("install-update").hidden = el("hourly-install").hidden = !available;
+  }
+  function outputFor(operation) { return updateOperations.includes(operation) ? "update-result" : operation === "deploy" ? "deploy-output" : "colibri-output"; }
   function updateControls() {
     const busy = [...jobs.keys()].some(name => name.startsWith("colibri_") && name !== "colibri_catalog");
     for (const id of ["colibri-start", "colibri-stop", "colibri-install", "colibri-apply-context", "colibri-browse"]) el(id).disabled = busy;
     el("colibri-cancel").disabled = !busy;
-    el("check-updates").disabled = jobs.has("updates");
+    const updating = updateOperations.some(name => jobs.has(name));
+    for (const id of ["check-updates", "install-update", "rollback-update", "restart-update", "hourly-install", "hourly-check-updates"]) el(id).disabled = updating;
+    el("cancel-update").hidden = !jobs.has("install_update") || jobs.get("install_update").cancellable === false;
     el("deploy-submit").disabled = jobs.has("deploy"); el("deploy-stop").disabled = !jobs.has("deploy");
   }
   async function start(method, args, operation) {
     if (jobs.has(operation)) return;
+    if (operation === "updates") offerInstall(false);
     jobs.set(operation, {id: null, stopping: false}); updateControls();
     el(outputFor(operation)).textContent = t("Working…");
     if (operation === "deploy") el("deploy-result").replaceChildren();
@@ -61,15 +68,32 @@ window.parityui = (() => {
     const output = el(outputFor(event.operation));
     if (event.type === "job_progress") {
       if (event.text) output.textContent = event.operation === "deploy" ? (output.textContent + "\n" + event.text).slice(-32000) : event.text;
+      if (event.operation === "install_update") {
+        const bar = el("update-progress");
+        bar.hidden = event.cancellable === false;
+        if (bar.hidden) job.cancellable = false;
+        el("cancel-update").hidden = bar.hidden;
+        if (event.total) { bar.max = event.total; bar.value = event.completed; }
+        output.textContent = bar.hidden ? t("Installing update…") : t("Downloaded {v0} KB", {v0: Math.ceil((event.completed || 0) / 1024)});
+        return true;
+      }
       if (event.total) { el("colibri-progress").hidden = false; el("colibri-progress").max = event.total; el("colibri-progress").value = event.completed || 0; }
       return true;
     }
+    if (updateOperations.includes(event.operation)) el("update-progress").hidden = true;
     terminal.add(event.job_id); jobs.delete(event.operation); updateControls();
     if (event.operation.startsWith("colibri_")) el("colibri-progress").hidden = true;
-    if (event.type !== "job_done") output.textContent = event.error || t("Operation stopped.");
+    if (event.type !== "job_done") output.textContent = event.error ? (window.i18n?.gate?.(event.error) || t(event.error)) : t("Operation stopped.");
     else if (event.operation === "updates") {
       const result = event.result;
-      output.replaceChildren(node("p", result.differences.length ? t("This copy differs from upstream; local edits may be the reason.") : t("This copy matches upstream.")), safeLink(result.download, t("Download source archive")));
+      offerInstall(result.can_install);
+      output.textContent = [result.differences.length ? t("Changed files: {v0}", {v0: result.differences.length}) : t("This copy matches upstream."), result.reason ? t(result.reason) : ""].filter(Boolean).join(" ");
+    } else if (event.operation === "install_update" || event.operation === "rollback_update") {
+      offerInstall(false);
+      el("restart-update").hidden = false;
+      el("rollback-update").hidden = !event.result.can_rollback;
+      output.textContent = t(event.operation === "install_update" ? "Update installed." : "Previous version restored.");
+      if (event.result.command) output.append(node("p", t("Before restarting, run this command:"), "setting-hint"), node("code", event.result.command));
     } else if (event.operation === "colibri_catalog") {
       catalog = event.result.models || []; renderCatalog(); output.textContent = t("Catalog ready.");
     } else if (event.operation.startsWith("colibri_")) {
@@ -115,7 +139,12 @@ window.parityui = (() => {
     el("colibri-folder").value = colibriState.folder || "";
     el("colibri-state").textContent = t(colibriState.state || "offline") + (colibriState.context_length ? " · " + t("Context length") + ": " + colibriState.context_length : "");
   }
-  function openSettings() {
+  async function openSettings() {
+    try {
+      const state = await call("update_status");
+      el("rollback-update").hidden = !state.can_rollback;
+      el("restart-update").hidden = !state.restart_ready;
+    } catch (error) { el("update-result").textContent = error.message; }
     if (!hybrid) return;
     el("hybrid-enabled").checked = hybrid.enabled; el("hybrid-model").value = hybrid.review_model; el("hybrid-memory").checked = hybrid.manage_memory;
   }
@@ -128,6 +157,21 @@ window.parityui = (() => {
   });
   el("dev-quality").addEventListener("change", () => { qualityDirty = true; });
   el("check-updates").addEventListener("click", () => start("check_updates", [], "updates"));
+  el("install-update").addEventListener("click", () => start("install_update", [], "install_update"));
+  el("hourly-install").addEventListener("click", async () => {
+    close("hourly-dialog");
+    if (!el("settings-dialog").open) await window.app.openSettings();
+    await start("install_update", [], "install_update");
+  });
+  el("cancel-update").addEventListener("click", () => cancel("install_update"));
+  el("rollback-update").addEventListener("click", () => start("rollback_update", [], "rollback_update"));
+  el("restart-update").addEventListener("click", async () => {
+    try { await call("restart_app"); } catch (error) { el("update-result").textContent = error.message; }
+  });
+  el("create-shortcut").addEventListener("click", async () => {
+    try { await call("create_shortcut"); el("shortcut-result").textContent = t("Desktop shortcut created."); }
+    catch (error) { el("shortcut-result").textContent = error.message; }
+  });
   el("capabilities-refresh").addEventListener("click", capabilities);
   el("colibri-browse").addEventListener("click", async () => {
     try { const chosen = await call("choose_folder"); if (!chosen.cancelled) { await call("set_colibri_folder", chosen.path); el("colibri-folder").value = chosen.path; } }

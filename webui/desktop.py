@@ -42,9 +42,13 @@ class Desktop:
         self._save_dialog = save_dialog
         self.main_window = None
         self._activation = threading.Event()
+        self._quit = threading.Event()
         self._theme = None
         self._titlebar = titlebar or native_titlebar
         self._closed = False
+
+    def request_quit(self):
+        self._quit.set()
 
     def request_activation(self):
         self._activation.set()
@@ -56,6 +60,10 @@ class Desktop:
     def flush(self):
         """Native actions share the bridge's delivery owner, even without JS events."""
         if self.main_window is None:
+            return
+        if self._quit.is_set():
+            self._quit.clear()
+            self.main_window.destroy()
             return
         with self._lock:
             theme, self._theme = self._theme, None

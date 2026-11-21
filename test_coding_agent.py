@@ -46,7 +46,9 @@ class AgentTests(unittest.TestCase):
         self.data_directory = isolate_agent_data(self)
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name) / "project"
+        # The real path: macOS temporary folders sit behind the /var link and Windows can report short (8.3) names.
+        self.base = Path(self.temporary.name).resolve()
+        self.root = self.base / "project"
         self.root.mkdir()
         self.events = []
         self.approvals = []
@@ -183,7 +185,7 @@ class AgentTests(unittest.TestCase):
         self.assertEqual([path.name for path in self.root.iterdir()], ["main.py"])
 
     def test_traversals_secrets_and_binary_targets_fail_before_approval(self):
-        outside = Path(self.temporary.name) / "outside.py"
+        outside = self.base / "outside.py"
         for path in ("../outside.py", "..\\outside.py", str(outside), "C:outside.py", ".env", ".env::$DATA", ".env.", "key.pem", "credentials.json", "node_modules/a.py", "image.png"):
             with self.subTest(path=path):
                 result, _ = self.run_responses([
@@ -194,7 +196,7 @@ class AgentTests(unittest.TestCase):
         self.assertFalse(outside.exists())
 
     def test_resolved_symlink_escape_fails_without_needing_windows_link_privilege(self):
-        outside = Path(self.temporary.name) / "outside.py"
+        outside = self.base / "outside.py"
         outside.write_text("outside\n", encoding="utf-8")
         fake_link = self.root.resolve() / "linked.py"
         fake_link.write_text("placeholder\n", encoding="utf-8")

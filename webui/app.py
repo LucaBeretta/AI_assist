@@ -38,7 +38,7 @@ from webui.prompts import PromptStore
 from webui.colibri import ColibriService
 from webui.api_utils import json_method as _json_method
 from webui.jobs import Jobs
-from webui.parity import ParityApi, hybrid_settings
+from webui.parity import ParityApi, hybrid_settings, relaunch
 from webui.privacy import PrivacyApi
 from app_core.privacy import privacy_status
 from compute_telemetry import TelemetrySampler
@@ -127,6 +127,8 @@ class Api(SharingApi, PrivacyApi, ParityApi):
         self._network_scan_lock = threading.Lock()
         self._network_scan = None
         self._last_update = None
+        self._restart_requested = False
+        self._restart_ready = False
         self._hourly = HourlyStatusReport(self._store, self._hourly_context, self._hourly_event)
 
     def _hourly_context(self):
@@ -1265,6 +1267,8 @@ class Api(SharingApi, PrivacyApi, ParityApi):
             pulls = list(self._pulls.values())
             for job in pulls:
                 job["cancel"].set()
+        for finished in self._jobs.durable_jobs():
+            finished.wait()
         deadline = time.monotonic() + timeout
         for finished in streams:
             finished.wait(max(0, deadline - time.monotonic()))
@@ -1341,12 +1345,14 @@ def main():
         print(f"Could not start the web UI: {error}", file=sys.stderr)
         return 1
     finally:
-        if instance is not None:
-            instance.close()
         if api is not None:
             api._close()
         if bridge is not None:
             bridge.close()
+        if instance is not None:
+            instance.close()
+        if api is not None and getattr(api, "_restart_requested", False):
+            relaunch()
 
 
 if __name__ == "__main__":

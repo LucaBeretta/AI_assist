@@ -18,6 +18,7 @@ class CheckpointTests(unittest.TestCase):
     def setUp(self):
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
+        # The real path: macOS temporary folders sit behind the /var link and Windows can report short (8.3) names.
         base = Path(folder.name).resolve()
         self.root = base / "project"
         self.root.mkdir()

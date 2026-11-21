@@ -30,7 +30,9 @@ class ProjectToolsTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name).resolve() / "project"
+        # The real path: macOS temporary folders sit behind the /var link and Windows can report short (8.3) names.
+        self.base = Path(self.temporary.name).resolve()
+        self.root = self.base / "project"
         self.root.mkdir()
 
     def write(self, name, contents="print('hello')\n"):
@@ -104,7 +106,7 @@ class ProjectToolsTests(unittest.TestCase):
         self.assertEqual([item["path"] for item in list_project_files(self.root)], ["unicode.txt"])
 
     def test_rejects_traversal_absolute_paths_and_missing_files(self):
-        outside = Path(self.temporary.name) / "outside.py"
+        outside = self.base / "outside.py"
         outside.write_text("private\n", encoding="utf-8")
         for path in ("../outside.py", "sub/../../outside.py", "..\\outside.py",
                      str(outside), "C:\\outside.py", "C:outside.py", "\\\\server\\file.py"):
@@ -116,7 +118,7 @@ class ProjectToolsTests(unittest.TestCase):
             read_project_file(self.root, ".")
 
     def test_symlink_escaping_project_is_not_listed_or_read(self):
-        outside = Path(self.temporary.name) / "outside.py"
+        outside = self.base / "outside.py"
         outside.write_text("secret\n", encoding="utf-8")
         self.symlink(outside, "linked.py")
         self.assertEqual(list_project_files(self.root), [])
@@ -124,7 +126,7 @@ class ProjectToolsTests(unittest.TestCase):
             read_project_file(self.root, "linked.py")
 
     def test_resolved_targets_are_checked_without_requiring_symlink_privileges(self):
-        outside = Path(self.temporary.name) / "outside.py"
+        outside = self.base / "outside.py"
         outside.write_text("secret\n", encoding="utf-8")
         link = self.write("linked.py", "placeholder\n")
         secret = self.write(".env", "TOKEN=value\n")
