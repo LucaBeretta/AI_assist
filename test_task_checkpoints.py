@@ -1,6 +1,7 @@
 """Task originals, created files, bounded retention and confined restore."""
 
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -75,6 +76,27 @@ class CheckpointTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.store.capture(str(uuid.uuid4()), self.root, path, b"-----BEGIN PRIVATE KEY-----")
         self.assertFalse(self.store.capture(str(uuid.uuid4()), self.root, self.root.parent / "outside.py", b"safe"))
+
+    def test_new_checkpoint_waits_while_windows_briefly_holds_its_folder(self):
+        # Antivirus can still be scanning the files just staged, so Windows refuses the folder rename for a moment.
+        real_replace = os.replace
+        refused = []
+
+        def busy_folder_once(source, target):
+            if Path(source).name.startswith(".checkpoint-") and not refused:
+                refused.append(target)
+                raise PermissionError(13, "Access is denied")
+            real_replace(source, target)
+
+        path = self.root / "a.py"
+        path.write_text("safe")
+        identity = str(uuid.uuid4())
+        with patch("app_core.paths._RETRY_REPLACE", True), patch("app_core.paths.time.sleep") as sleep, \
+                patch("app_core.paths.os.replace", side_effect=busy_folder_once):
+            self.assertTrue(self.store.capture(identity, self.root, path, b"safe"))
+        self.assertEqual(len(refused), 1)
+        sleep.assert_called_once()
+        self.assertEqual([item["task_id"] for item in self.store.list(self.root)], [identity])
 
     def test_incomplete_checkpoint_does_not_block_other_edits(self):
         incomplete = str(uuid.uuid4())

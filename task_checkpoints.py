@@ -11,6 +11,7 @@ import tempfile
 import threading
 import uuid
 
+from app_core.paths import replace_retrying
 import developer_tools
 
 
@@ -108,7 +109,7 @@ class CheckpointStore:
                 self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
                 with tempfile.TemporaryDirectory(prefix=".checkpoint-", dir=self.directory) as staging:
                     self._save_capture(Path(staging), manifest, backup, original)
-                    os.replace(staging, folder)
+                    replace_retrying(staging, folder)
         return True
 
     @staticmethod

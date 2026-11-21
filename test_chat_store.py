@@ -400,7 +400,7 @@ class WindowsInUseReplaceTests(unittest.TestCase):
         self.chat = self.store.create(model="demo")
         self.chat["draft"] = "changed"
         self.real_replace = os.replace
-        patcher = patch("chat_store.time.sleep")
+        patcher = patch("app_core.paths.time.sleep")
         self.sleep = patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -413,7 +413,7 @@ class WindowsInUseReplaceTests(unittest.TestCase):
                 raise PermissionError(13, "Access is denied")
             self.real_replace(source, target)
 
-        with patch("chat_store._RETRY_REPLACE", True), patch("chat_store.os.replace", side_effect=busy_twice):
+        with patch("app_core.paths._RETRY_REPLACE", True), patch("chat_store.os.replace", side_effect=busy_twice):
             saved = self.store.save(self.chat)
         self.assertEqual(len(calls), 3)
         self.assertEqual(self.sleep.call_count, 2)
@@ -422,7 +422,7 @@ class WindowsInUseReplaceTests(unittest.TestCase):
 
     def test_a_file_that_stays_in_use_fails_after_a_bounded_wait_without_leftovers(self):
         always_busy = PermissionError(13, "Access is denied")
-        with patch("chat_store._RETRY_REPLACE", True), patch("chat_store.os.replace", side_effect=always_busy):
+        with patch("app_core.paths._RETRY_REPLACE", True), patch("chat_store.os.replace", side_effect=always_busy):
             with self.assertRaisesRegex(ChatStoreError, "Access is denied"):
                 self.store.save(self.chat)
         self.assertLess(sum(call.args[0] for call in self.sleep.call_args_list), 1)
@@ -430,7 +430,7 @@ class WindowsInUseReplaceTests(unittest.TestCase):
         self.assertEqual([path.name for path in self.store.directory.iterdir()], [f"{self.chat['id']}.json"])
 
     def test_other_systems_report_a_permission_problem_at_once(self):
-        with patch("chat_store._RETRY_REPLACE", False), \
+        with patch("app_core.paths._RETRY_REPLACE", False), \
                 patch("chat_store.os.replace", side_effect=PermissionError(13, "Permission denied")):
             with self.assertRaises(ChatStoreError):
                 self.store.save(self.chat)
