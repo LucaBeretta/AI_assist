@@ -50,7 +50,8 @@ APP_ROOT = Path(__file__).resolve().parent.parent
 def relaunch():
     options = ({"creationflags": subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP}
                if os.name == "nt" else {"start_new_session": True})
-    subprocess.Popen([sys.executable, str(APP_ROOT / "gui_runtime.py"), "--launch", str(APP_ROOT / "AIassist.py")],
+    subprocess.Popen([sys.executable, str(APP_ROOT / "gui_runtime.py"), "--wait-pid", str(os.getpid()),
+                      "--launch", str(APP_ROOT / "AIassist.py")],
                      cwd=APP_ROOT, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                      close_fds=True, **options)
 
@@ -67,9 +68,11 @@ def update_dependencies(root):
                            sends="Package names and versions required by AI Assist."):
         if not network_gate.allow_external("pip", "PyPI", "Download AI Assist dependencies."):
             raise RuntimeError("Dependency installation was blocked.")
-        subprocess.run([str(python), "-m", "pip", "install", "-r", "requirements.txt"],
-                       cwd=root, check=True, timeout=300, stdin=subprocess.DEVNULL,
-                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    # Installed packages are in use (and locked on Windows) while the app runs, so pip
+    # runs on the next start, before the window opens (gui_runtime.install_pending_requirements).
+    marker = root / ".update" / "requirements-pending"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("python -m pip install -r requirements.txt\n", encoding="utf-8")
 
 
 class ParityApi:

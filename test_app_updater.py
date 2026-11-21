@@ -199,9 +199,12 @@ class UpdateTests(unittest.TestCase):
             with patch("sys.executable", str(python)), patch("network_gate.allow_external", return_value=False):
                 with self.assertRaisesRegex(RuntimeError, "blocked"):
                     update_dependencies(self.root)
+            self.assertFalse((self.root / ".update/requirements-pending").exists())
             with patch("sys.executable", str(python)), patch("network_gate.allow_external", return_value=True):
                 self.assertIsNone(update_dependencies(self.root))
-                self.assertEqual(run.call_args.args[0], [str(python), "-m", "pip", "install", "-r", "requirements.txt"])
+            # pip waits for the next start: packages are locked while the app runs on Windows.
+            run.assert_not_called()
+            self.assertTrue((self.root / ".update/requirements-pending").is_file())
 
     def test_api_job_applies_verified_download_and_restores_it(self):
         self.zip()
