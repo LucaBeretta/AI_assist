@@ -377,5 +377,61 @@ class ChatStoreTests(unittest.TestCase):
             self.assertEqual(ChatStore().directory, (root / ".aiassist" / "chats").resolve())
 
 
+class WindowsInUseReplaceTests(unittest.TestCase):
+    """Windows cannot replace a file another handle holds open; saves wait briefly."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.store = ChatStore(Path(temporary.name) / "chats")
+        self.chat = self.store.create(model="demo")
+        self.chat["draft"] = "changed"
+        self.real_replace = os.replace
+        patcher = patch("chat_store.time.sleep")
+        self.sleep = patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_save_retries_while_the_file_is_briefly_in_use(self):
+        calls = []
+
+        def busy_twice(source, target):
+            calls.append(target)
+            if len(calls) <= 2:
+                raise PermissionError(13, "Access is denied")
+            self.real_replace(source, target)
+
+        with patch("chat_store._RETRY_REPLACE", True), patch("chat_store.os.replace", side_effect=busy_twice):
+            saved = self.store.save(self.chat)
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(self.sleep.call_count, 2)
+        self.assertEqual(self.store.load(saved["id"])["draft"], "changed")
+        self.assertEqual([path.name for path in self.store.directory.iterdir()], [f"{saved['id']}.json"])
+
+    def test_a_file_that_stays_in_use_fails_after_a_bounded_wait_without_leftovers(self):
+        always_busy = PermissionError(13, "Access is denied")
+        with patch("chat_store._RETRY_REPLACE", True), patch("chat_store.os.replace", side_effect=always_busy):
+            with self.assertRaisesRegex(ChatStoreError, "Access is denied"):
+                self.store.save(self.chat)
+        self.assertLess(sum(call.args[0] for call in self.sleep.call_args_list), 1)
+        self.assertEqual(self.store.load(self.chat["id"])["draft"], "")
+        self.assertEqual([path.name for path in self.store.directory.iterdir()], [f"{self.chat['id']}.json"])
+
+    def test_other_systems_report_a_permission_problem_at_once(self):
+        with patch("chat_store._RETRY_REPLACE", False), \
+                patch("chat_store.os.replace", side_effect=PermissionError(13, "Permission denied")):
+            with self.assertRaises(ChatStoreError):
+                self.store.save(self.chat)
+        self.sleep.assert_not_called()
+
+    def test_save_succeeds_while_another_handle_reads_the_chat(self):
+        # The real situation on Windows; on other systems replacing an open file always works.
+        self.sleep.side_effect = lambda seconds: holder.close()
+        holder = self.store._path(self.chat["id"]).open("rb")
+        self.addCleanup(holder.close)
+        self.store.save(self.chat)
+        holder.close()
+        self.assertEqual(self.store.load(self.chat["id"])["draft"], "changed")
+
+
 if __name__ == "__main__":
     unittest.main()
