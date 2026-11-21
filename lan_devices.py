@@ -87,7 +87,14 @@ def interfaces(system=None, run=_run):
                 address = None
     else:
         name = ""
-        for line in run(["ifconfig"]).splitlines():
+        text = run(["ifconfig"])
+        if not text.strip() and system == "Linux":
+            # Raspberry Pi OS and other recent Linux systems ship `ip` without `ifconfig`.
+            for line in run(["ip", "-4", "-o", "addr", "show"]).splitlines():
+                match = re.search(r"^\d+:\s+(\S+)\s+inet\s+([\d.]+)/(\d+)", line)
+                if match:
+                    found.append((match.group(1), match.group(2), str(ipaddress.IPv4Network(f"0.0.0.0/{match.group(3)}").netmask)))
+        for line in text.splitlines():
             if line and not line[0].isspace():
                 name = line.split(":", 1)[0]
                 continue

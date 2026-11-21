@@ -16,7 +16,7 @@ def local_usage():
     if _sampler is None:
         _sampler = compute_telemetry.TelemetrySampler("http://127.0.0.1:11434")
     data = _sampler.sample()
-    return {"name": str(data.get("device", ""))[:64], "system": data.get("system", ""), "time": data.get("time"),
+    return {"name": str(data.get("device", "")).split(".")[0][:64], "system": data.get("system", ""), "time": data.get("time"),
             "cpu": data.get("cpu") or {}, "ram": data.get("ram") or {}, "gpus": data.get("gpus") or [],
             "loaded": list((data.get("models") or {}).get("loaded") or [])}
 

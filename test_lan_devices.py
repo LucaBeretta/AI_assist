@@ -36,6 +36,13 @@ class ParsingTests(unittest.TestCase):
         self.assertEqual([(i["name"], i["address"], str(i["network"])) for i in found], [("en0", "192.168.1.7", "192.168.1.0/24")])
         self.assertEqual(lan_devices.gateway("Darwin", fake_run), "192.168.1.1")
 
+    def test_linux_without_ifconfig_uses_ip(self):
+        ip_output = ("1: lo    inet 127.0.0.1/8 scope host lo\\       valid_lft forever\n"
+                     "3: wlan0    inet 192.168.1.21/24 brd 192.168.1.255 scope global dynamic wlan0\\       valid_lft 80000sec\n")
+        run = lambda command, timeout=3: ip_output if command[0] == "ip" else ""
+        found = lan_devices.interfaces("Linux", run)
+        self.assertEqual([(i["name"], i["address"], str(i["network"])) for i in found], [("wlan0", "192.168.1.21", "192.168.1.0/24")])
+
     def test_neighbor_table_keeps_only_real_private_hosts(self):
         self.assertEqual(lan_devices.neighbors("Darwin", fake_run),
                          {"192.168.1.1": "c0:49:43:9b:e5:34", "192.168.1.5": "32:47:1a:f2:5d:50"})

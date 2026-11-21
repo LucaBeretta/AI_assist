@@ -92,6 +92,15 @@ LAN pairing is manual and **off on every launch**. Enter this computer's private
 
 **Usage sharing** is a second opt-in under LAN pairing, also off on every launch: "Also share this computer's CPU, RAM and GPU usage with paired devices". While it is on, the pairing service answers usage requests only from devices paired with a PIN that present their token over TLS, after they have checked this computer's pinned certificate. Only CPU, RAM and GPU load, the computer's name and its loaded model names are sent. Mission Control on the paired device then shows these as live meters, refreshed every five seconds while it is open.
 
+**Headless computers such as a Raspberry Pi** can share their usage without the desktop app. Copy this folder to the Pi, then over SSH:
+
+```sh
+sudo apt install python3-cryptography
+python3 share_usage.py
+```
+
+It prints an address, port, certificate code and PIN: enter them on your Mac in Settings → Privacy & network → Pair another device. Keep the command running (for example inside `tmux`); Ctrl+C stops sharing. CPU and RAM are reported; a Raspberry Pi reports no GPU load.
+
 ## Preview HTML
 
 Preview opens a project HTML file or a generated HTML code block in a separate preview window. Main chat output remains sanitized Markdown; executable preview content has no application API bridge. Relative project assets stay with the project file. Close the preview independently or close the app.
