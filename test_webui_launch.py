@@ -41,6 +41,20 @@ class WebLaunchTests(unittest.TestCase):
         api._close.assert_called_once_with()
         api._start_status.assert_called_once_with()
 
+    def test_restart_releases_instance_after_cleanup_before_launch(self):
+        api = SimpleNamespace(_ensure_engine=Mock(), _close=Mock(), _restart_requested=True)
+        view, lock = Mock(), Mock()
+        view.screens = []
+        view.create_window.return_value = SimpleNamespace(events=SimpleNamespace(loaded=Hook()))
+        order = []
+        api._close.side_effect = lambda: order.append("cleanup")
+        lock.close.side_effect = lambda: order.append("unlock")
+        with patch("webui.app.Api", return_value=api), patch("webui.app.SingleInstance", return_value=lock), \
+                patch("webui.app.relaunch", side_effect=lambda: order.append("launch")), \
+                patch("webui.app.importlib.import_module", return_value=view):
+            self.assertEqual(main(), 0)
+        self.assertEqual(order, ["cleanup", "unlock", "launch"])
+
     def test_missing_dependency_is_clear_and_nonzero(self):
         error = io.StringIO()
         with patch("webui.app.importlib.import_module", side_effect=ImportError("webview")), redirect_stderr(error):
