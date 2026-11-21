@@ -21,15 +21,22 @@ This repository is public: keep secrets and personal details out of this file.
   - `.github/workflows/macos.yml` (Luigi's): the macOS headless suite, plus an optional native WKWebView smoke test.
 
   A pull request's `pull_request` run tests the branch merged into the current `main`, so new code on `main` can fail it.
+- Each pull request's CI checks it alone. When several are open, check that they also merge together (`git merge-tree --write-tree A B`) and that the ruff check still passes, then suggest an order to the owner.
+
+## Git and GitHub on the owner's Windows PC
+
+- `gh` is not installed. `git push` works. Read pull requests and check runs through the public REST API with `curl`. The owner opens a new pull request from a link like `https://github.com/LucaBeretta/AI_assist/compare/main...BRANCH?expand=1`.
+- Keep the owner's checkout on `main` and work on pull request branches in separate worktrees.
 
 ## State on 2026-11-21
 
-- Merged: LucaBeretta/AI_assist#12, which added CI on all three systems and fixed the macOS and Windows temporary-path test failures (macOS `/var` -> `/private/var` link, Windows `RUNNER~1` short names).
-- Open, green and mergeable:
-  - LucaBeretta/AI_assist#13: Windows chat saves retry `os.replace` briefly when the file is in use (`chat_store._replace`).
-  - LucaBeretta/AI_assist#14: a ruff check (`ruff.toml`, rules F and E9, ruff 0.17.6 in CI), with its findings cleaned up.
-
-  Both also carry a fix for a test that fails intermittently on Windows (the fake `coli` lock in `test_colibri_launcher.py`).
+- Merged by the end of the day:
+  - LucaBeretta/AI_assist#11 (Luigi): chat streaming moved into `app_core/chat_service.py`; settings reorganised.
+  - LucaBeretta/AI_assist#12: CI on all three systems.
+  - LucaBeretta/AI_assist#13: brief Windows retries for chat saves and the new checkpoint folder rename (`app_core.paths.replace_retrying`).
+  - LucaBeretta/AI_assist#14: a ruff check (`ruff.toml`, rules F and E9, ruff 0.17.6 in CI).
+  - LucaBeretta/AI_assist#15: this file.
+- Older branches on GitHub were never merged and need a keep-or-archive decision from the owner: `modernization/web-workstation`, `integration/compute-dashboard-web`, `code-quality-pass`, `feature/continuous-user-feedback` and `mac-mission-control`.
 - The repeated ollama.com approval popup on macOS was fixed on `main` by 378f1ca: one gated task now covers every catalog page.
 
 ## Product direction: the local network ("intranet")
@@ -38,7 +45,7 @@ There are three layers:
 
 1. **See**: built. The Mission Control network scan in `lan_devices.py` runs only when the person clicks Scan.
 2. **Monitor**: built. Paired devices can share live CPU, RAM and GPU load over TLS after PIN pairing (`peer_pairing.py`, `webui/sharing.py`). `share_usage.py` does the same for computers without a screen.
-3. **Use**: not built. A paired computer runs AI for another one, for example the owner's Windows PC with an RTX 4090 serving the Mac. It is planned as a "Compute location" control (This device / Auto / Choose device) in `docs/compute-routing.md`. The policy in `compute_routing.py` is written but nothing calls it.
+3. **Use**: not built. A paired computer runs AI for another one, for example a Windows PC with a powerful graphics card serving a Mac. It is planned as a "Compute location" control (This device / Auto / Choose device) in `docs/compute-routing.md`. The policy in `compute_routing.py` is written but nothing calls it.
 
 Pointing AI Assist at another computer's Ollama URL already works, but that connection is unencrypted and unauthenticated. The next step is inference only for paired devices, over the existing pinned-TLS pairing channel.
 
@@ -52,6 +59,7 @@ The design is local-network only: no cloud relay and no router port-forwarding. 
   - run `python AIassist.py`.
 
   Never advise turning Smart App Control off: it cannot be turned back on without reinstalling Windows. The real fix is signed installers.
+- **Windows briefly refuses renames.** It can refuse to replace a file, or rename a folder, for a moment while antivirus or search indexing holds it. Use `app_core.paths.replace_retrying` for app data rather than `os.replace`. GitHub's Windows runners rarely show this; a real PC does.
 - **Mission Control** showed as a panel overlapping the chat message box when run on Linux with Qt at 1280x840, although its commit says it opens in its own window. This is not yet checked on macOS. Check before changing it, since Luigi owns this code.
 - Bigger improvements discussed, each needing a decision from the owner or agreement with Luigi:
   - signed installers (a notarized macOS `.dmg` needs an Apple developer account; Windows needs a code-signing certificate);
