@@ -10,6 +10,7 @@ import copy
 import difflib
 import http.client
 import json
+import logging
 import os
 from pathlib import Path, PureWindowsPath
 import queue
@@ -42,6 +43,7 @@ DEFAULT_MAX_STEPS = 20
 # Per-run settings for the worker thread running the agent: the chosen file
 # limit and the model's context, which decides when a file is read in parts.
 _run = threading.local()
+log = logging.getLogger(__name__)
 
 
 def _file_limit():
@@ -418,6 +420,7 @@ def _write_file(project, arguments, approve_action, cancel_event, on_event, dest
     checkpoint = getattr(_run, "checkpoint", None)
     if checkpoint is not None:
         if checkpoint.capture(_run.task_id, _run.project, target, old_bytes):
+            _run.checkpoint_saved = True
             _emit(on_event, "checkpoint", "Saved original before changing " + path, task_id=_run.task_id, path=path)
         recheck()
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -711,17 +714,24 @@ def run_agent(host, model, project_root, messages, on_event, approve_action,
         from chat_store import default_directory
         checkpoint_store = CheckpointStore(default_directory() / "checkpoints")
     _run.checkpoint = checkpoint_store
+    _run.checkpoint_saved = False
     try:
         result = _run_agent(host, model, project, messages, on_event, approve_action,
                             cancel_event, context_length, max_steps, chat_fn, plan_first, approve_plan)
         result["task_id"] = task_id
         return result
     finally:
+        if _run.checkpoint_saved:
+            try:
+                checkpoint_store.prune(project, task_id)
+            except (OSError, ValueError):
+                log.exception("Could not apply checkpoint retention for task %s", task_id)
         _run.file_limit, _run.context_length = _MAX_FILE_BYTES, None
         _run.planning = False
         _run.keep_alive = -1
         _run.on_context = None
         _run.checkpoint = None
+        _run.checkpoint_saved = False
         _run.task_id, _run.project = None, None
 
 

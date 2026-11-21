@@ -74,7 +74,7 @@ class PdfAttachmentTests(unittest.TestCase):
         self.assertTrue(result["ok"], result)
         self.assertEqual(list(self.store.directory.iterdir()), [])
         self.api._close()
-        self.assertEqual(self.api._incognito, {})
+        self.assertEqual(self.api._chats._incognito, {})
 
     def test_encrypted_blank_malformed_and_excessive_page_documents_are_clear_errors(self):
         chat = self.api.new_chat()["chat"]["id"]
