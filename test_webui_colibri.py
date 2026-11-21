@@ -28,7 +28,7 @@ class ColibriApiTests(unittest.TestCase):
         self.api._colibri = self.service
 
     def test_state_and_stream_reuse_colibri_and_persist_its_backend(self):
-        def chat(messages, model, on_chunk, on_metrics):
+        def chat(messages, model, on_chunk, on_metrics, cancel_event=None):
             self.assertEqual(messages[-1]["content"], "hello")
             on_chunk("Colibri reply")
             on_metrics(dict(prompt_eval_count=10, eval_count=5))
@@ -81,7 +81,7 @@ class ColibriApiTests(unittest.TestCase):
     def test_stop_keeps_partial_and_errors_are_real_events(self):
         release = threading.Event()
         self.addCleanup(release.set)
-        def chat(messages, model, on_chunk, on_metrics):
+        def chat(messages, model, on_chunk, on_metrics, cancel_event=None):
             on_chunk("partial")
             release.wait(3)
             on_chunk("not accepted after Stop")

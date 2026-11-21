@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import patch
 
 import test_webui_app as fixtures
-from webui.model_loading import ModelLoadProgress
+from app_core.model_loading import ModelLoadProgress
 
 
 class LoadingClockTests(unittest.TestCase):
@@ -65,7 +65,7 @@ class LoadingApiTests(unittest.TestCase):
                 event["type"] == "model_loading" and event["elapsed_seconds"] >= 1
                 for event in self.events.items), timeout=4))
         self.assertFalse(any(event["type"] == "token" for event in self.events.items))
-        progress = self.api._streams[stream]["loading"]
+        progress = self.api._chats.active_streams()[0]["loading"]
         release.set()
         self.events.wait("done", stream)
         loaded = self.events.wait("model_loaded", stream)

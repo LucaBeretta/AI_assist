@@ -29,7 +29,7 @@ class RecoveryTests(unittest.TestCase):
             on_chunk(" second")
             return "first second"
         self.engine.request_ollama = request
-        self.api._autosave_interval = 0.01
+        self.api._chats.autosave_interval = 0.01
         chat = self.api.new_chat()["chat"]["id"]
         stream = self.api.send(chat, "hi", "m", None)["stream_id"]
         self.events.wait("token", stream)

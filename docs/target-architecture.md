@@ -25,11 +25,11 @@ Optional pairing   sharing_control -> gated pairing_worker child -> peer_pairing
 | Ollama protocol | `app_core/ollama.py` | Existing transport, parsers and stream bounds (1 MiB per line, 16 MiB per stream). HTTP method overrides, empty delete responses and request `keep_alive` preserve desktop model management. |
 | Engine compatibility | `app_core/runtime.py` | Thin delegation to the core, preserving request/list/load/Stop names. No second transport engine. |
 | Providers | `app_core/providers.py` | Existing Ollama/Colibri providers; the Colibri adapter reuses its client and saved settings. |
-| Conversation services | `app_core/conversation.py`, `chat_service.py` | Preserved core services/tests. The desktop API owns richer environments, branches, incognito and recovery using the same `chat_store`. |
+| Conversation services | `app_core/conversation.py`, `app_core/chat_service.py` | The chat service owns drafts, incognito records, active streams and reply recovery. The desktop API coordinates projects, engines and the JSON bridge. |
 | Privacy | `app_core/privacy.py` | Authoritative status-bar text/role based on gate, model, endpoint and firewall. |
 | Persistence | `app_core/settings.py`, `paths.py`, `chat_store.py` | Atomic private JSON writes, private new folders, tolerant existing formats. No user-data migration. |
 | Single instance | `app_core/instance_lock.py`, `webui/instance.py` | One OS file lock per data folder; a file signal activates the existing window. No second lock or activation socket. |
-| Streaming | `app_core/streaming.py`, `webui/app.py` | Existing `run_stoppable` / `StreamStopped`; Stop closes streams and preserves partial replies. |
+| Streaming | `app_core/streaming.py`, `app_core/chat_service.py` | Stop interrupts Ollama and Colibri reads, waits for the reader to exit, and saves accepted text. |
 | Native API | `webui/app.py` and mixins | Plain JSON; failures return `{"ok": false, "error": "..."}`. No HTTP routes, bearer tokens or launch links. |
 | Worker events | `webui/bridge.py` | Thread-safe queue, one flusher, consecutive-token merging around 30 ms, JS-safe JSON; workers never retain windows. |
 | Internet approvals | `webui/internet.py`, `privacy.py`, `static/security.js` | Serialized two-stage approvals, server-enforced three-second second step; Block on Enter/Escape/close; connection log and existing firewall controls. |
