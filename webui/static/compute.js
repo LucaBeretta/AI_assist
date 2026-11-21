@@ -4,6 +4,8 @@ window.computeui = (() => {
   const el = id => document.getElementById(id);
   const t = (key, vars = {}) => window.i18n ? window.i18n.t(key, vars) : key.replace(/\{(\w+)\}/g, (_, k) => String(vars[k] ?? ""));
   let visible = false, last = null;
+  // The separate Compute window reports its own visibility, so it never pauses the main view.
+  const source = document.documentElement?.dataset?.computeSource === "window" ? "window" : "main";
   function meter(id, percent) {
     const known = typeof percent === "number" && Number.isFinite(percent) && percent >= 0 && percent <= 100;
     el(id).hidden = !known; if (known) el(id).value = percent;
@@ -31,12 +33,14 @@ window.computeui = (() => {
     list("compute-installed", values.installed, "No installed models");
     el("compute-model-note").textContent = values.models_available ? t("Local Ollama only") : t(values.model_note || "unavailable");
     list("compute-peers", data.peers.map(row => row.id + " · " + t(row.state)), "No paired devices");
+    if (typeof window.computeFaces === "function") window.computeFaces(data);
   }
   async function onVisible(value) {
     visible = value;
     if (!window.pywebview?.api?.set_compute_active) return;
     try {
-      const result = await window.pywebview.api.set_compute_active(value && document.hidden !== true);
+      const shown = value && document.hidden !== true;
+      const result = await (source === "main" ? window.pywebview.api.set_compute_active(shown) : window.pywebview.api.set_compute_active(shown, source));
       if (result.ok === false) throw new Error(window.i18n?.gate?.(result.error) || result.error);
       if (visible) render(result.data);
     } catch (error) { el("compute-note").textContent = error.message; }
@@ -44,5 +48,5 @@ window.computeui = (() => {
   function onEvent(event) { if (event.type !== "compute") return false; if (visible) render(event.data); return true; }
   document.addEventListener?.("visibilitychange", () => onVisible(visible));
   window.addEventListener("languagechange", () => { if (visible) render(last); });
-  return {onVisible, onEvent};
+  return {onVisible, onEvent, render};
 })();

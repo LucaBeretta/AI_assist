@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en" data-theme="night" data-compute-source="window">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-eval'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>AI Assist · Mission Control</title>
+  <link rel="stylesheet" href="styles.css">
+  <script defer src="strings.js"></script>
+  <script defer src="compute.js"></script>
+  <script defer src="compute-window.js"></script>
+</head>
+<body class="compute-window">
+<section id="compute-view" class="view" aria-labelledby="compute-title">
+  <header class="header"><h1 id="compute-title" data-i18n="Mission Control"></h1><p id="compute-note" class="setting-hint" role="status"></p><button id="compute-fullscreen" class="btn" type="button" title="F11" data-i18n="Full screen"></button></header>
+  <div class="compute-grid">
+    <section class="compute-panel cw-cpu"><h2>CPU</h2><p id="compute-cpu-name"></p><p id="compute-cpu" class="compute-reading"></p><progress id="compute-cpu-meter" max="100" hidden></progress></section>
+    <section class="compute-panel cw-gpu"><h2>GPU</h2><p id="compute-gpu-name"></p><p id="compute-gpu" class="compute-reading"></p><progress id="compute-gpu-meter" max="100" hidden></progress></section>
+    <section class="compute-panel cw-ram"><h2>RAM</h2><p id="compute-ram" class="compute-reading"></p><progress id="compute-ram-meter" max="100" hidden></progress></section>
+    <div class="cube-stage" aria-hidden="true">
+      <div class="cube-float">
+        <div class="cube-tilt">
+          <div class="cube">
+            <div class="cube-face cube-front"><span class="cube-label">CPU</span><span id="cube-cpu" class="cube-value">–</span></div>
+            <div class="cube-face cube-right"><span class="cube-label">RAM</span><span id="cube-ram" class="cube-value">–</span><span id="cube-ram-detail" class="cube-detail"></span></div>
+            <div class="cube-face cube-back"><span class="cube-label">GPU</span><span id="cube-gpu" class="cube-value">–</span><span id="cube-gpu-detail" class="cube-detail"></span></div>
+            <div class="cube-face cube-left"><span class="cube-label" data-i18n="Loaded now"></span><span id="cube-model" class="cube-value cube-model">–</span></div>
+            <div class="cube-face cube-top"><svg class="cube-mark" viewBox="0 0 24 24"><path d="M12 3l8 9-8 9-8-9z"></path></svg></div>
+            <div class="cube-face cube-bottom"><svg class="cube-mark" viewBox="0 0 24 24"><path d="M12 3l8 9-8 9-8-9z"></path></svg></div>
+          </div>
+        </div>
+      </div>
+      <div class="cube-shadow"></div>
+    </div>
+    <section class="compute-panel compute-models cw-models"><h2 data-i18n="Models"></h2><p id="compute-model-note" class="setting-hint"></p><div class="compute-model-lists"><div><h3 data-i18n="Loaded now"></h3><ul id="compute-loaded"></ul></div><div><h3 data-i18n="Installed"></h3><ul id="compute-installed"></ul></div></div></section>
+    <section class="compute-panel cw-net" aria-labelledby="net-title">
+      <div class="net-head"><h2 id="net-title" data-i18n="Network"></h2><span id="net-meta" class="net-meta"></span><button id="net-scan" class="btn" type="button" data-i18n="Scan"></button></div>
+      <div id="net-paired" class="net-paired"></div>
+      <p id="net-note" class="setting-hint" role="status" data-i18n="Click Scan to look for devices on your network. Nothing is sent until you do."></p>
+      <div id="net-list" class="net-list"></div>
+      <ul id="compute-peers" hidden></ul>
+    </section>
+  </div>
+</section>
+</body>
+</html>
