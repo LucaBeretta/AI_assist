@@ -264,6 +264,28 @@ class StaticTests(unittest.TestCase):
         ''')
 
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_reviewer_model_offers_served_colibri_models_and_explains_when_there_are_none(self):
+        self.run_scenario(r'''
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'parity.js'),'utf8'), {document,window,Map,Set,Error,String,Number,Boolean,Array,URL});
+        const el = id => document.getElementById(id);
+        window.pywebview.api.update_status = async () => ({ok:true, can_rollback:false, restart_ready:false});
+        await window.parityui.openSettings();
+        assert.match(el('hybrid-model-hint').textContent, /Optional/);
+        const hybrid = {enabled:false, review_model:'', manage_memory:true};
+        window.parityui.onState({hybrid, colibri:{installed:false, models:[]}});
+        assert.equal(el('hybrid-model-options').children.length, 0);
+        assert.match(el('hybrid-model-hint').textContent, /Optional/);
+        assert.match(el('hybrid-model').placeholder, /No Colibri model/);
+        window.parityui.onState({hybrid, colibri:{installed:true, folder:'C:/colibri', state:'offline', models:[]}});
+        assert.match(el('hybrid-model-hint').textContent, /Start Colibri in Models/);
+        window.parityui.onState({hybrid, colibri:{installed:true, folder:'C:/colibri', state:'ready', models:['qwen-reviewer', '<b>odd</b>']}});
+        assert.deepEqual(el('hybrid-model-options').children.map(option => option.value), ['qwen-reviewer', '<b>odd</b>']);
+        assert.equal(el('hybrid-model-options').children[1].children.length, 0);
+        assert.match(el('hybrid-model-hint').textContent, /serving now/);
+        assert.match(el('hybrid-model').placeholder, /Choose a Colibri model/);
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
     def test_parity_feedback_capabilities_and_deploy_confirmation(self):
         self.run_scenario(r'''
         vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'parity.js'),'utf8'), {document,window,Map,Set,Error,String,Number,Boolean,Array,URL});

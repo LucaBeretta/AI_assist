@@ -138,6 +138,18 @@ window.parityui = (() => {
     if (!colibriState) return;
     el("colibri-folder").value = colibriState.folder || "";
     el("colibri-state").textContent = t(colibriState.state || "offline") + (colibriState.context_length ? " · " + t("Context length") + ": " + colibriState.context_length : "");
+    renderReviewerChoices();
+  }
+  // Quality review is optional: offer the models Colibri is serving now and say what to do when there are none.
+  function renderReviewerChoices() {
+    const models = Array.isArray(colibriState?.models) ? colibriState.models : [];
+    el("hybrid-model-options").replaceChildren(...models.map(name => { const option = document.createElement("option"); option.value = name; return option; }));
+    el("hybrid-model").placeholder = models.length ? t("Choose a Colibri model") : t("No Colibri model available");
+    el("hybrid-model-hint").textContent = models.length
+      ? t("Choose one of the models Colibri is serving now.")
+      : colibriState?.installed
+        ? t("Start Colibri in Models to list its models. Until then, leave quality review off.")
+        : t("Optional. Colibri is a second AI engine that you install separately. Without it, leave quality review off and Ollama works as usual.");
   }
   async function openSettings() {
     try {
@@ -145,6 +157,8 @@ window.parityui = (() => {
       el("rollback-update").hidden = !state.can_rollback;
       el("restart-update").hidden = !state.restart_ready;
     } catch (error) { el("update-result").textContent = error.message; }
+    // The hint must also show when the engine state never arrived (for example, Ollama offline).
+    renderReviewerChoices();
     if (!hybrid) return;
     el("hybrid-enabled").checked = hybrid.enabled; el("hybrid-model").value = hybrid.review_model; el("hybrid-memory").checked = hybrid.manage_memory;
   }
