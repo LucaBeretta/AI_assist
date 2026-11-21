@@ -18,7 +18,7 @@ The frontend is vanilla JavaScript, offline and without a build step. Install `r
 
 ## Coding Style & Naming Conventions
 
-No repository linter, formatter, or type-checker configuration is present. Follow surrounding code style. Python tests use `unittest` and `test_*.py` names; frontend tests use a small Node DOM/API harness and the extension uses `node:test`. Preserve the UI-free boundary of `app_core/` when changing shared services.
+`ruff.toml` checks for unused or undefined names and syntax errors only; there is no formatter or type checker. Follow surrounding code style. Python tests use `unittest` and `test_*.py` names; frontend tests use a small Node DOM/API harness and the extension uses `node:test`. Preserve the UI-free boundary of `app_core/` when changing shared services.
 
 ## Testing Guidelines
 
