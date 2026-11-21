@@ -227,6 +227,43 @@ class StaticTests(unittest.TestCase):
         self.assertEqual(nested, [])
 
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_update_controls_follow_native_job_results(self):
+        self.run_scenario(r'''
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'parity.js'),'utf8'), {document,window,Map,Set,Error,String,Number,Boolean,Array,URL});
+        const el = id => document.getElementById(id);
+        const api = window.pywebview.api;
+        const click = id => el(id).listeners.click();
+        const done = (operation, id, result) => window.parityui.onEvent({type:'job_done',job_id:id,operation,result});
+        api.check_updates = async () => ({ok:true,job_id:'check'});
+        api.install_update = async () => ({ok:true,job_id:'install'});
+        api.rollback_update = async () => ({ok:true,job_id:'restore'});
+        api.restart_app = async () => { calls.push('restart'); return {ok:true}; };
+        api.create_shortcut = async () => ({ok:true});
+        await click('check-updates');
+        done('updates','check',{differences:['AIassist.py'],can_install:false,reason:'use git pull'});
+        assert(el('install-update').hidden);
+        assert.match(el('update-result').textContent,/git pull/);
+        await click('check-updates');
+        done('updates','check',{differences:['AIassist.py'],can_install:true,reason:''});
+        assert.equal(el('hourly-install').hidden,false);
+        assert.match(el('update-result').textContent,/1/);
+        await click('install-update');
+        assert(el('check-updates').disabled);
+        window.parityui.onEvent({type:'job_progress',job_id:'install',operation:'install_update',completed:5,total:10});
+        assert.equal(el('update-progress').value,5);
+        window.parityui.onEvent({type:'job_progress',job_id:'install',operation:'install_update',cancellable:false});
+        assert(el('cancel-update').hidden);
+        done('install_update','install',{can_rollback:true,command:'python -m pip install -r requirements.txt'});
+        assert.match(el('update-result').textContent,/pip install/);
+        assert.equal(el('rollback-update').hidden,false);
+        await click('rollback-update'); done('rollback_update','restore',{can_rollback:false});
+        assert(el('rollback-update').hidden);
+        assert.equal(el('restart-update').hidden,false);
+        await click('restart-update'); assert(calls.includes('restart'));
+        await click('create-shortcut'); assert.match(el('shortcut-result').textContent,/shortcut created/);
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
     def test_parity_feedback_capabilities_and_deploy_confirmation(self):
         self.run_scenario(r'''
         vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'parity.js'),'utf8'), {document,window,Map,Set,Error,String,Number,Boolean,Array,URL});

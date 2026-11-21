@@ -25,6 +25,7 @@ close_prompt() {
 try_python() {
     echo "Checking Python runtime: $1"
     if "$1" gui_runtime.py --probe; then
+        "$1" gui_runtime.py --ask-shortcut
         "$1" AIassist.py && exit 0
         echo
         echo "AI Assist could not start. The error is shown above."

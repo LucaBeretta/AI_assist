@@ -22,7 +22,11 @@ def is_shipped(path):
     if path.name.startswith("test_"):
         return False
     if len(parts) == 1:
-        return path.suffix in (".py", ".cmd")
+        return (path.suffix in (".py", ".cmd") or path.name in {
+            "requirements.txt", "Start AI Assist.command", "Start AI Assist.sh",
+            "install_runtime.ps1", "README.md", "LEGGIMI-colibri.md"})
+    if len(parts) == 3 and parts[:2] == ("assets", "icon"):
+        return path.suffix.lower() in {".ico", ".icns", ".png", ".svg"}
     if parts == SHIPPED_SUBFOLDER_FILE:
         return True
     if len(parts) == 2 and parts[0] in SHIPPED_PACKAGES:
@@ -47,14 +51,15 @@ def github_json(path):
         raise RuntimeError(f"GitHub returned HTTP {code}. Try again later.") from error
 
 
-def blob_hash(data):
+def blob_hash(data, *, binary=False):
     # Git checkouts on Windows may convert LF to CRLF.
-    data = data.replace(b"\r\n", b"\n")
+    if not binary:
+        data = data.replace(b"\r\n", b"\n")
     return hashlib.sha1(b"blob " + str(len(data)).encode("ascii") + b"\0" + data).hexdigest()
 
 
 def check_update(directory):
-    commits = github_json("/commits?per_page=1")
+    commits = github_json("/commits?sha=main&per_page=1")
     commit = commits[0]
     revision = commit["sha"]
     tree = github_json("/git/trees/" + commit["commit"]["tree"]["sha"] + "?recursive=1")
@@ -69,14 +74,8 @@ def check_update(directory):
             files[path.as_posix()] = item["sha"]
     if "AIassist.py" not in files:
         raise ValueError("The GitHub file list does not contain AI Assist.")
-    differences = []
-    for name, expected in files.items():
-        try:
-            data = (Path(directory) / name).read_bytes()
-        except FileNotFoundError:
-            differences.append(name)
-            continue
-        if blob_hash(data) != expected:
-            differences.append(name)
+    from app_updater import plan_update
+    plan = plan_update(Path(directory), files)
+    differences = plan["write"] + plan["delete"]
     return {"revision": revision, "differences": differences,
-            "download": REPOSITORY + "/archive/" + revision + ".zip"}
+            "expected_files": files, "download": REPOSITORY + "/archive/" + revision + ".zip"}

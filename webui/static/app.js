@@ -1069,7 +1069,7 @@ window.app = (() => {
 
   function setPrompt(text) { element("prompt").value = text; fitPrompt(); scheduleDraft(); element("prompt").focus?.(); }
   window.addEventListener("languagechange", () => { renderMessages(); renderChats(); renderProjectBar(); });
-  return {onEvent, showView, syncContext, selectModel, modelChoice, setPrompt,
+  return {onEvent, openSettings, showView, syncContext, selectModel, modelChoice, setPrompt,
           currentChat: () => chats.get(selected), refreshChat: async id => { await reloadChat(id); if (selected === id) renderMessages(); },
           refreshModels: () => refreshModels().catch(showError)};
 })();

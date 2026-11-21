@@ -40,7 +40,7 @@ class DetachedLaunchTests(unittest.TestCase):
         with patch.object(gui_runtime.sys, "platform", "darwin"):
             self.assertFalse(gui_runtime.launch_detached(self.script, self.python, popen))
         popen.assert_not_called()
-        with patch.object(gui_runtime, "launch_detached", return_value=False):
+        with patch.object(gui_runtime.sys, "platform", "win32"), patch.object(gui_runtime, "launch_detached", return_value=False):
             self.assertEqual(gui_runtime.main(["--launch", str(self.script)]), 3)
 
     def test_missing_streams_go_to_a_log_file(self):
