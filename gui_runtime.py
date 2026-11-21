@@ -62,9 +62,24 @@ def main(argv=None):
     parser.add_argument("--probe", action="store_true", help="check web dependencies without opening a window")
     parser.add_argument("--launch", metavar="SCRIPT", help="start SCRIPT detached with pythonw (Windows); exit 3 if unavailable")
     parser.add_argument("--web", action="store_true", help="pass --web to the detached app")
+    parser.add_argument("--create-shortcut", action="store_true")
+    parser.add_argument("--ask-shortcut", action="store_true")
     args = parser.parse_args(argv)
+    if args.ask_shortcut or args.create_shortcut:
+        from desktop_shortcut import ask_once, create_shortcut
+        try:
+            (ask_once if args.ask_shortcut else create_shortcut)()
+        except (OSError, ValueError, subprocess.SubprocessError) as error:
+            print(f"Could not create shortcut: {error}", file=sys.stderr)
+            return 1
+        return 0
     if args.launch:
-        return 0 if launch_detached(args.launch, arguments=("--web",) if args.web else ()) else 3
+        arguments = ("--web",) if args.web else ()
+        if launch_detached(args.launch, arguments=arguments):
+            return 0
+        if sys.platform != "win32":
+            os.execv(sys.executable, [sys.executable, args.launch, *arguments])
+        return 3
     if not args.probe:
         parser.error("Use --probe to check the GUI runtime.")
     try:

@@ -42,6 +42,7 @@ rem app has run, setting RESULT to ok or failed; returns 1 if unusable.
 echo Checking Python runtime: %*
 %* "%APP_DIR%gui_runtime.py" --probe
 if errorlevel 1 goto try_unusable
+%* "%APP_DIR%gui_runtime.py" --ask-shortcut
 rem Start the app detached with pythonw so closing this window does not close
 rem it (errors go to %%LOCALAPPDATA%%\AI Assist\last-run.log). Without pythonw,
 rem run it here as before.
