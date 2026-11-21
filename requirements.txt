@@ -2,3 +2,6 @@
 pywebview==6.2.1
 # Local text extraction for PDF attachments; no OCR or network services.
 pypdf==7.1.1
+# TLS identity for LAN pairing and paired usage sharing (Mission Control). Used only
+# when pairing is switched on in Settings; nothing listens or connects otherwise.
+cryptography==50.0.2

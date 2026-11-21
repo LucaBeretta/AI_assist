@@ -16,7 +16,6 @@
   <script defer src="premium.js"></script>
   <script defer src="parity.js"></script>
   <script defer src="security.js"></script>
-  <script defer src="compute.js"></script>
   <script defer src="hourly.js"></script>
   <script defer src="sharing.js"></script>
 </head>
@@ -50,7 +49,6 @@
         <button id="nav-models" class="nav-item" type="button" aria-current="false">
           <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"></rect><path d="M9 9h6v6H9z"></path></svg><span data-i18n="Models"></span>
         </button>
-        <button id="nav-compute" class="nav-item" type="button" aria-current="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"></path></svg><span data-i18n="Compute"></span></button>
         <button id="nav-capabilities" class="nav-item" type="button" aria-current="false">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6v4h4v8h-4v4H9v-4H5V8h4z"></path></svg><span data-i18n="Capabilities"></span>
         </button>
@@ -69,6 +67,9 @@
       <div class="sidebar-spacer"></div>
       <button id="refresh" class="btn ghost" type="button" title="Reload the model list" data-i18n-title="Reload the model list">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"></path></svg><span data-i18n="Refresh models"></span>
+      </button>
+      <button id="open-mission-control" class="btn ghost" type="button" title="Live CPU, memory and models in their own window, for a second screen" data-i18n-title="Live CPU, memory and models in their own window, for a second screen">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"></path><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"></path></svg><span data-i18n="Mission Control"></span>
       </button>
       <button id="open-settings" class="btn ghost" type="button" title="Settings · Ctrl+," data-i18n-title="Settings · Ctrl+,">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"></path></svg><span data-i18n="Settings"></span>
@@ -306,16 +307,6 @@
           </div>
         </div>
       </div>
-      <section id="compute-view" class="view" aria-labelledby="compute-title" hidden>
-        <header class="header"><h1 id="compute-title" data-i18n="Compute"></h1><p id="compute-note" class="setting-hint" role="status"></p></header>
-        <div class="compute-grid">
-          <section class="compute-panel"><h2>CPU</h2><p id="compute-cpu-name"></p><p id="compute-cpu" class="compute-reading"></p><progress id="compute-cpu-meter" max="100" hidden></progress></section>
-          <section class="compute-panel"><h2>GPU</h2><p id="compute-gpu-name"></p><p id="compute-gpu" class="compute-reading"></p><progress id="compute-gpu-meter" max="100" hidden></progress></section>
-          <section class="compute-panel"><h2>RAM</h2><p id="compute-ram" class="compute-reading"></p><progress id="compute-ram-meter" max="100" hidden></progress></section>
-          <section class="compute-panel compute-models"><h2 data-i18n="Models"></h2><p id="compute-model-note" class="setting-hint"></p><div class="compute-model-lists"><div><h3 data-i18n="Loaded now"></h3><ul id="compute-loaded"></ul></div><div><h3 data-i18n="Installed"></h3><ul id="compute-installed"></ul></div></div></section>
-          <section class="compute-panel"><h2 data-i18n="Paired devices"></h2><p class="setting-hint" data-i18n="Pairing records do not prove a device is online. No remote telemetry is requested."></p><ul id="compute-peers"></ul></section>
-        </div>
-      </section>
       <section id="capabilities-view" class="view" aria-labelledby="capabilities-title" hidden>
         <header class="header"><h1 id="capabilities-title" data-i18n="Capabilities"></h1><button id="capabilities-refresh" class="btn" type="button" data-i18n="Refresh"></button></header>
         <div class="models-scroll"><div class="models-page"><p class="setting-hint" data-i18n="Capabilities reported by the selected model. Unreported features remain unknown."></p><div id="capabilities-result" class="model-list" role="status"></div></div></div>
@@ -379,17 +370,19 @@
   </section>
   <section class="setting-group"><h3 data-i18n="Hourly check-in"></h3>
     <label class="check-row"><input id="hourly-enabled" type="checkbox"><span data-i18n="Enable hourly quiet-time check-ins"></span></label>
-    <p class="setting-hint" data-i18n="Windows only: measures microphone sound levels locally. No audio is saved or sent."></p><p id="hourly-status" class="setting-hint" role="status"></p>
+    <p class="setting-hint windows-only" data-i18n="Windows only: measures microphone sound levels locally. No audio is saved or sent."></p><p id="hourly-status" class="setting-hint" role="status"></p>
     <button id="hourly-preview" class="btn" type="button" data-i18n="Preview now"></button>
   </section>
   <section class="setting-group" aria-labelledby="privacy-title">
     <h3 id="privacy-title" data-i18n="Privacy & internet"></h3>
     <p id="privacy-gate" class="setting-hint" role="status"></p>
     <button id="privacy-refresh" class="btn" type="button" data-i18n="Refresh"></button>
+    <div class="windows-only">
     <h4 data-i18n="AI engine firewall lock"></h4><p class="setting-hint" data-i18n="Changes affect Windows Firewall and require administrator approval. Local engines run outside Python's gate."></p>
     <p id="firewall-status" class="setting-hint" role="status"></p>
     <div class="model-actions"><button id="firewall-on" class="btn" type="button" data-i18n="Turn lock on"></button><button id="firewall-off" class="btn" type="button" data-i18n="Turn lock off"></button><button id="firewall-relock" class="btn" type="button" data-i18n="Lock again"></button></div>
     <label class="setting-row"><span data-i18n="Lift temporarily"></span><select id="firewall-minutes"><option value="5">5 min</option><option value="15">15 min</option><option value="60">60 min</option></select><button id="firewall-lift" class="btn" type="button" data-i18n="Lift"></button></label>
+    </div>
     <details><summary data-i18n="Connection log"></summary><ol id="connection-log" class="connection-log"></ol></details>
   </section>
   <section class="setting-group" aria-labelledby="lan-pairing-title">
@@ -397,6 +390,7 @@
     <p class="setting-hint" data-i18n="Manual only. Off on every launch. Pairing shares no chats, files, commands or inference."></p>
     <label class="setting-row"><span data-i18n="This computer's LAN IPv4 address"></span><input id="sharing-address" type="text" placeholder="192.168.1.10" autocomplete="off"></label>
     <label class="check-row"><input id="sharing-enabled" type="checkbox"><span data-i18n="Enable LAN pairing"></span></label>
+    <label class="check-row"><input id="sharing-usage" type="checkbox"><span><span data-i18n="Also share this computer's CPU, RAM and GPU usage with paired devices"></span><span class="setting-hint" data-i18n="Only devices you paired with a PIN can read it, while pairing is on. Off every time AI Assist starts."></span></span></label>
     <div id="sharing-details" hidden>
       <p class="setting-hint" data-i18n="Compare this certificate code on the other device before entering the PIN. PIN expires after 120 seconds; three attempts."></p>
       <dl><dt data-i18n="Address"></dt><dd id="sharing-endpoint" class="mono"></dd><dt data-i18n="Certificate code"></dt><dd id="sharing-code" class="mono"></dd><dt>PIN</dt><dd id="sharing-pin" class="mono"></dd></dl>
