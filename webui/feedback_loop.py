@@ -8,7 +8,7 @@ from app_core.settings import write_json
 from webui.api_utils import json_method
 from chat_store import _utc_now
 
-_MAX_ENTRIES = 500
+_MAX_ENTRIES = 250
 _MAX_FILE_BYTES = 512 * 1024
 _TASK_ID = re.compile(r"[A-Za-z0-9_-]{1,120}")
 
@@ -78,6 +78,8 @@ class FeedbackApi:
             if kind == "chat" and (not 0 <= reply_index < len(record["messages"])
                     or record["messages"][reply_index]["role"] != "assistant"):
                 raise ValueError("Choose a saved assistant reply.")
+            journal = FeedbackLog(self._store.directory)
+            journal.read()  # Fail before updating shared memory if the journal is corrupted.
             if remember:
                 self._memories.put("User preference from feedback: " + improvement)
                 self._bridge.emit("memories_changed")
@@ -86,5 +88,5 @@ class FeedbackApi:
                      "task_id": task_id if kind == "developer" else None,
                      "rating": rating, "improvement": improvement, "remembered": remember,
                      "created_at": _utc_now()}
-            FeedbackLog(self._store.directory).append(entry)
+            journal.append(entry)
         return {"ok": True, "id": entry["id"], "remembered": remember}
