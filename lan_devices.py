@@ -54,7 +54,8 @@ def _run(command, timeout=3):
     if program is None:
         return ""
     try:
-        result = subprocess.run([program, *command[1:]], capture_output=True, text=True, timeout=timeout, check=False)
+        result = subprocess.run([program, *command[1:]], capture_output=True, text=True, timeout=timeout, check=False,
+                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         return result.stdout
     except (OSError, subprocess.TimeoutExpired):
         return ""
