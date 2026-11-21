@@ -2,6 +2,7 @@
 
 from copy import deepcopy
 import importlib
+import json
 import logging
 import re
 import shutil
@@ -26,7 +27,7 @@ import developer_tools
 from task_checkpoints import CheckpointStore
 from project_store import ProjectStore, inherited_environment
 from webui import settings
-from webui.desktop import Desktop
+from webui.desktop import Desktop, window_rectangle
 from webui.preview import HtmlPreview
 from webui.memories import Memories, revision as memory_revision
 from webui.instance import SingleInstance
@@ -43,6 +44,7 @@ from webui.privacy import PrivacyApi
 from app_core.privacy import privacy_status
 from compute_telemetry import TelemetrySampler
 from webui.compute import ComputePoller
+import lan_devices
 from app_core.hourly_status import HourlyStatusReport
 from webui.sharing import SharingApi
 import network_gate
@@ -121,7 +123,12 @@ class Api(SharingApi, PrivacyApi, ParityApi):
         self._hybrid = hybrid_settings(self._store.directory)
         self._init_privacy()
         self._init_sharing()
-        self._compute = ComputePoller(TelemetrySampler(self._engine.ollama_url()), self._bridge.emit, peers=self._paired_records)
+        self._compute = ComputePoller(TelemetrySampler(self._engine.ollama_url()), self._bridge.emit, peers=self._peer_status)
+        self._compute_sources = set()
+        # Local network scans run only when a person clicks Scan in Mission Control.
+        self._scan_network = lan_devices.scan
+        self._network_scan_lock = threading.Lock()
+        self._network_scan = None
         self._last_update = None
         self._hourly = HourlyStatusReport(self._store, self._hourly_context, self._hourly_event)
 
@@ -164,13 +171,80 @@ class Api(SharingApi, PrivacyApi, ParityApi):
     def rate_hourly_checkin(self, value):
         return self._hourly.rate(value)
 
+    def _compute_source(self, active, source):
+        if type(active) is not bool:
+            raise ValueError("Compute visibility must be true or false.")
+        if source not in ("main", "window"):
+            raise ValueError("Compute visibility needs a known source.")
+        with self._lock:
+            (self._compute_sources.add if active else self._compute_sources.discard)(source)
+            # The main view and the separate window share one poller: it runs while either shows it.
+            return self._compute.set_active(bool(self._compute_sources))
+
     @_json_method
-    def set_compute_active(self, active):
-        return self._compute.set_active(active)
+    def set_compute_active(self, active, source="main"):
+        return self._compute_source(active, source)
 
     @_json_method
     def compute_state(self):
         return self._compute.state()
+
+    @_json_method
+    def scan_network(self):
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("The web UI is closing.")
+        if not self._network_scan_lock.acquire(blocking=False):
+            raise ValueError("A scan is already running.")
+        try:
+            result = self._scan_network()
+        finally:
+            self._network_scan_lock.release()
+        json.dumps(result, allow_nan=False)
+        with self._lock:
+            self._network_scan = deepcopy(result)
+        return {"ok": True, "scan": result}
+
+    @_json_method
+    def network_state(self):
+        with self._lock:
+            return {"ok": True, "scan": deepcopy(self._network_scan), "busy": self._network_scan_lock.locked()}
+
+    @_json_method
+    def compute_window_preferences(self):
+        with self._lock:
+            return {"ok": True, "language": self._settings.get("language", "system")}
+
+    def _remember_compute_window(self, value):
+        value = rectangle(value)
+        with self._lock:
+            if self._closed:
+                return
+            self._settings = settings.save(self._store.directory, {**self._settings, "compute_window": value})
+
+    def _compute_window_closed(self):
+        try:
+            self._compute_source(False, "window")
+        except ValueError:
+            pass  # The poller is already closed during shutdown.
+
+    @_json_method
+    def open_compute_window(self):
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("The web UI is closing.")
+            saved = self._settings.get("compute_window")
+        page = Path(__file__).resolve().parent / "static" / "compute-window.html"
+        screens = self._desktop.screens()
+        # Small external screens: 800 x 480 by default, back on the screen it was left on when still connected.
+        geometry = (visible_rectangle(saved, screens) if saved else {}) or {"width": 800, "height": 480}
+        opened = self._desktop.open_compute(page.as_uri(), self, geometry,
+                                            self._remember_compute_window, self._compute_window_closed)
+        return {"ok": True, "opened": opened}
+
+    @_json_method
+    def toggle_compute_fullscreen(self):
+        return {"ok": True, "fullscreen": self._desktop.toggle_compute_fullscreen()}
 
     @_json_method
     def set_web_preferences(self, values):
@@ -1490,7 +1564,7 @@ def main():
             api._start_status()
         def remember(*args):
             try:
-                api.set_window_state({key: getattr(window, key) for key in ("x", "y", "width", "height")})
+                api.set_window_state(window_rectangle(window))
             except Exception:
                 log.exception("Could not remember the window rectangle")
         window.events.loaded += loaded

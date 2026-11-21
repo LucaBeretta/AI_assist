@@ -11,6 +11,7 @@ window.sharingui = (() => {
   }
   function render(state) {
     el("sharing-enabled").checked = Boolean(state.enabled);
+    if (state.enabled) el("sharing-usage").checked = Boolean(state.usage);
     el("sharing-details").hidden = !state.enabled;
     el("sharing-new-pin").disabled = !state.enabled;
     host = state.host;
@@ -31,12 +32,13 @@ window.sharingui = (() => {
   }
   async function run(name, ...args) {
     el("sharing-enabled").disabled = true;
+    el("sharing-usage").disabled = true;
     el("sharing-new-pin").disabled = true;
     el("pair-submit").disabled = true;
     try { await call(name, ...args); el("sharing-status").textContent = t("Working…"); }
     catch (error) { el("sharing-status").textContent = error.message; await openSettings(); unlock(); }
   }
-  function unlock() { el("sharing-enabled").disabled = false; el("pair-submit").disabled = false; }
+  function unlock() { el("sharing-enabled").disabled = false; el("sharing-usage").disabled = false; el("pair-submit").disabled = false; }
   function onEvent(event) {
     if (event.operation !== "sharing" || !event.type.startsWith("job_")) return false;
     if (event.type !== "job_progress") {
@@ -45,7 +47,9 @@ window.sharingui = (() => {
     }
     return true;
   }
-  el("sharing-enabled").addEventListener("change", () => run("set_sharing", el("sharing-enabled").checked, el("sharing-address").value.trim()));
+  el("sharing-enabled").addEventListener("change", () => run("set_sharing", el("sharing-enabled").checked, el("sharing-address").value.trim(), el("sharing-usage").checked));
+  // Changing the usage choice while pairing is on restarts the service with the new choice.
+  el("sharing-usage").addEventListener("change", () => { if (el("sharing-enabled").checked) run("set_sharing", true, el("sharing-address").value.trim(), el("sharing-usage").checked); });
   el("sharing-new-pin").addEventListener("click", () => run("new_pairing_pin"));
   el("pair-form").addEventListener("submit", event => {
     event.preventDefault();

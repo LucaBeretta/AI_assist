@@ -55,3 +55,41 @@ class ComputeTests(unittest.TestCase):
             self.assertFalse(case.api.set_compute_active(1)["ok"])
         finally:
             case.doCleanups()
+
+    def test_separate_window_keeps_polling_while_main_view_is_hidden(self):
+        case = fixtures.ApiTests()
+        case.setUp()
+        try:
+            api = case.api
+            api._compute.autostart = False
+            self.assertTrue(api.set_compute_active(True, "window")["active"])
+            self.assertTrue(api.set_compute_active(False)["active"])
+            self.assertFalse(api.set_compute_active(True, "elsewhere")["ok"])
+            self.assertFalse(api.set_compute_active("yes", "window")["ok"])
+            api._compute_window_closed()
+            self.assertFalse(api.compute_state()["active"])
+        finally:
+            case.doCleanups()
+
+    def test_compute_window_opens_on_its_remembered_screen(self):
+        from types import SimpleNamespace
+        case = fixtures.ApiTests()
+        case.setUp()
+        try:
+            api, opened = case.api, []
+            screens = [SimpleNamespace(x=0, y=0, width=1512, height=982), SimpleNamespace(x=1512, y=0, width=1366, height=1024)]
+            api._desktop.screens = lambda: screens
+            api._desktop.open_compute = lambda uri, js_api, geometry, remember, closed: opened.append((uri, js_api, geometry, remember)) or True
+            self.assertTrue(api.open_compute_window()["opened"])
+            uri, js_api, geometry, remember = opened[-1]
+            self.assertTrue(uri.endswith("compute-window.html"))
+            self.assertIs(js_api, api)
+            self.assertEqual(geometry, {"width": 800, "height": 480})
+            remember(dict(x=1600, y=40, width=960, height=540))
+            api.open_compute_window()
+            self.assertEqual(opened[-1][2], dict(x=1600, y=40, width=960, height=540))
+            screens.pop()
+            api.open_compute_window()
+            self.assertEqual(opened[-1][2]["x"], 1512 - 960)
+        finally:
+            case.doCleanups()

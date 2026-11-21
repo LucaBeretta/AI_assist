@@ -22,6 +22,20 @@ class Element {
   addEventListener(type, callback) { this.listeners[type] = callback; }
 }
 const elements = new Map();
+const timers = new Map();
+let nextTimer = 0;
+function setTimer(callback, delay) {
+  const id = ++nextTimer;
+  timers.set(id, {callback, delay});
+  return id;
+}
+function runDraftTimers() {
+  for (const [id, timer] of [...timers]) {
+    if (timer.delay !== 700) continue;
+    timers.delete(id);
+    timer.callback();
+  }
+}
 const document = {
   getElementById(id) { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); },
   createElement(tag) { return new Element(tag); },
@@ -40,7 +54,10 @@ window.pywebview = {api: {
   stop: async id => {calls.push(['stop',id]); return {ok:true};}
 }};
 vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'markdown.js'), 'utf8'), {document, window});
-vm.runInNewContext(fs.readFileSync(process.argv[1], 'utf8'), {document, window, Map, Error, String, Number, Boolean, Array});
+vm.runInNewContext(fs.readFileSync(process.argv[1], 'utf8'), {
+  document, window, Map, Error, String, Number, Boolean, Array,
+  setTimeout: setTimer, clearTimeout: id => timers.delete(id),
+});
 (async () => {
   await window.listeners.pywebviewready();
   elements.get('model').value = 'fake:7b';
@@ -92,9 +109,10 @@ class StaticTests(unittest.TestCase):
         await window.sharingui.openSettings();
         assert(!calls.some(item=>item[0]==='sharing'));
         assert.equal(elements.get('sharing-enabled').checked,false);
+        elements.get('sharing-usage').checked=false;
         elements.get('sharing-enabled').checked=true;document.getElementById('sharing-address').value='192.168.1.10';
         await elements.get('sharing-enabled').listeners.change();
-        assert.deepEqual(calls.at(-1),['sharing',true,'192.168.1.10']);
+        assert.deepEqual(calls.at(-1),['sharing',true,'192.168.1.10',false]);
         ''')
 
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
@@ -122,6 +140,36 @@ class StaticTests(unittest.TestCase):
         assert.equal(elements.get('compute-cpu-meter').hidden,true);
         await window.computeui.onVisible(false);
         assert.deepEqual(calls.at(-1),['compute',false]);
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_compute_window_reports_its_own_source_polls_and_toggles_fullscreen(self):
+        self.run_scenario(r'''
+        const dir=require('node:path').dirname(process.argv[1]);
+        document.documentElement={dataset:{computeSource:'window'},setAttribute(){}};
+        const timers=[];
+        const context={document,window,Map,Set,Error,String,Number,Boolean,Array,Date,setInterval:(fn,ms)=>{timers.push([fn,ms]);return 1;}};
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(dir,'compute.js'),'utf8'),context);
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(dir,'compute-window.js'),'utf8'),context);
+        const api=window.pywebview.api;
+        api.set_compute_active=async (...args)=>{calls.push(['compute',...args]);return {ok:true,data:null};};
+        api.compute_window_preferences=async()=>({ok:true,language:'en'});
+        const data={snapshot:{cpu:{percent:40},ram:{},gpus:[]},values:{device:'Mac',system:'macOS',cpu:'M1 Max',cpu_usage:'40%',ram:'64 GB',gpus:[],loaded:['qwen3.5:9b'],installed:['qwen3.5:9b'],models_available:true},peers:[],error:''};
+        api.compute_state=async()=>({ok:true,active:true,data});
+        api.toggle_compute_fullscreen=async()=>{calls.push(['fullscreen']);return {ok:true,fullscreen:!calls.filter(c=>c[0]==='fullscreen').slice(1).length};};
+        await window.computewindow.start();
+        assert.deepEqual(calls.at(-1),['compute',true,'window']);
+        assert.equal(timers.length,1);
+        await timers[0][0]();
+        assert.equal(elements.get('compute-cpu').textContent,'40%');
+        assert.equal(elements.get('compute-cpu-meter').value,40);
+        assert.equal(elements.get('cube-cpu').textContent,'40%');
+        assert.equal(elements.get('cube-gpu').textContent,'–');
+        assert.equal(elements.get('cube-model').textContent,'qwen3.5:9b');
+        await elements.get('compute-fullscreen').listeners.click();
+        assert.equal(elements.get('compute-fullscreen').textContent,'Exit full screen');
+        await window.computewindow.toggleFullscreen();
+        assert.equal(elements.get('compute-fullscreen').textContent,'Full screen');
         ''')
 
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
@@ -173,6 +221,8 @@ class StaticTests(unittest.TestCase):
                 if tag == "form":
                     self.form = False
         Page().feed((root / "index.html").read_text(encoding="utf-8"))
+        ids.clear()
+        Page().feed((root / "compute-window.html").read_text(encoding="utf-8"))
         self.assertEqual(missing, [])
         self.assertEqual(nested, [])
 
