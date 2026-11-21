@@ -592,6 +592,129 @@ class StaticTests(unittest.TestCase):
         ''')
 
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_status_updates_and_tokens_keep_existing_message_nodes(self):
+        self.run_scenario(r'''
+        saved.messages = [{role:'assistant',content:'Previous reply'}];
+        window.pywebview.api.list_chats = async () => ({ok:true,chats:[{id:saved.id,title:saved.title}]});
+        await window.listeners.pywebviewready();
+        const transcript = elements.get('messages');
+        const savedNode = transcript.children[0];
+        const sidebar = elements.get('chats');
+        const initialRow = sidebar.children[0];
+        window.app.onEvent([{type:'status',engine:'Ollama',chat_id:'chat-a'}]);
+        assert.equal(transcript.children[0], savedNode);
+        assert.equal(sidebar.children[0], initialRow);
+        window.app.onEvent([{type:'token',chat_id:'chat-a',stream_id:'s',text:'first'}]);
+        const live = transcript.children[1];
+        const activeRow = sidebar.children[0];
+        window.app.onEvent([{type:'token',chat_id:'chat-a',stream_id:'s',text:' second'}]);
+        assert.equal(transcript.children[0], savedNode);
+        assert.equal(transcript.children[1], live);
+        assert.match(live.textContent, /first second/);
+        assert.equal(sidebar.children[0], activeRow);
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_sending_waits_for_older_draft_saves_and_keeps_new_input(self):
+        self.run_scenario(r'''
+        const api = window.pywebview.api;
+        const settle = () => new Promise(resolve => setImmediate(resolve));
+        let releaseSave;
+        const blockedSave = new Promise(resolve => {releaseSave = resolve;});
+        let sent = false;
+        api.save_draft = async (id, text) => {
+          if (text === 'First') await blockedSave;
+          saved.draft = text;
+          return {ok:true};
+        };
+        api.send = async (id, text) => {
+          sent = true;
+          saved.draft = '';
+          saved.messages.push({role:'user',content:text});
+          return {ok:true,stream_id:'s'};
+        };
+        await window.listeners.pywebviewready();
+        window.app.setPrompt('First');
+        runDraftTimers();
+        await settle();
+        const sending = elements.get('composer').listeners.submit({preventDefault(){}});
+        await settle();
+        assert.equal(sent, false);
+        window.app.setPrompt('Next draft');
+        releaseSave();
+        await sending;
+        assert.equal(saved.draft, '');
+        assert.equal(elements.get('prompt').value, 'Next draft');
+        runDraftTimers();
+        await settle();
+        assert.equal(saved.draft, 'Next draft');
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_draft_timers_are_per_chat_and_send_clears_its_timer(self):
+        self.run_scenario(r'''
+        const other = {id:'chat-b',title:'Chat B',model:'fake:7b',messages:[]};
+        const records = new Map([['chat-a',saved],['chat-b',other]]);
+        const api = window.pywebview.api;
+        api.list_chats = async () => ({ok:true,chats:[saved,other]});
+        api.open_chat = async id => ({ok:true,chat:structuredClone(records.get(id))});
+        const writes = [];
+        api.save_draft = async (...args) => { writes.push(args); return {ok:true}; };
+        api.send = async (id, text) => {
+          records.get(id).messages.push({role:'user',content:text});
+          return {ok:true,stream_id:'s'};
+        };
+        await window.listeners.pywebviewready();
+        window.app.setPrompt('Keep A');
+        await elements.get('chats').children[1].children[0].listeners.click();
+        window.app.setPrompt('Send B');
+        await elements.get('composer').listeners.submit({preventDefault(){}});
+        runDraftTimers();
+        await new Promise(resolve => setImmediate(resolve));
+        assert.deepEqual(writes, [['chat-a', 'Keep A']]);
+        assert.equal(elements.get('prompt').value, '');
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_developer_receives_early_results_and_recovers_missing_events(self):
+        self.run_scenario(r'''
+        document.querySelector = () => null;
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'developer.js'),'utf8'), {document,window});
+        const api = window.pywebview.api;
+        api.new_chat = async () => ({ok:true,chat:{id:'chat-a'}});
+        api.set_chat_model = async () => ({ok:true});
+        api.list_checkpoints = async () => ({ok:true,checkpoints:[]});
+        api.list_project_files = async () => ({ok:true,files:[]});
+        api.run_agent = async () => {
+          window.app.onEvent([{type:'agent_done',task_id:'fast',chat_id:'chat-a',text:'Finished'}]);
+          return {ok:true,task_id:'fast'};
+        };
+        await window.listeners.pywebviewready();
+        elements.get('model').value = 'fake:7b';
+        elements.get('dev-project').value = '/project';
+        const submit = async () => {
+          elements.get('dev-task').value = 'Review project';
+          await elements.get('dev-form').listeners.submit({preventDefault(){}});
+        };
+        await submit();
+        assert.equal(elements.get('dev-status').textContent, 'Task finished');
+        assert.equal(elements.get('dev-run').disabled, false);
+        const plan = {type:'plan_approval',task_id:'slow',chat_id:'chat-a',approval_id:'p',text:'Review files.'};
+        api.run_agent = async () => ({ok:true,task_id:'slow'});
+        api.developer_task_state = async () => ({ok:true,approvals:[plan],result:null});
+        await submit();
+        await new Promise(resolve => setImmediate(resolve));
+        assert.equal(elements.get('dev-status').textContent, 'Waiting for your plan approval');
+        window.app.onEvent([plan]);
+        assert.equal(elements.get('dev-thread').children.filter(node => node.className === 'dev-card plan-card').length, 1);
+        api.developer_task_state = async () => ({ok:true,approvals:[],result:{type:'agent_stopped',task_id:'slow',chat_id:'chat-a'}});
+        window.app.onEvent([{type:'status',engine:'Ollama',chat_id:'chat-a'}]);
+        await new Promise(resolve => setImmediate(resolve));
+        assert.equal(elements.get('dev-status').textContent, 'Task stopped');
+        assert.equal(elements.get('dev-stop').disabled, true);
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
     def test_model_selection_streamed_text_and_stop(self):
         script = Path(__file__).parent / "webui" / "static" / "app.js"
         result = subprocess.run([shutil.which("node"), "-e", HARNESS, str(script)],

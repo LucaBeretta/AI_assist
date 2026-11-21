@@ -5,7 +5,7 @@ import threading
 import uuid
 
 import coding_agent
-from webui.model_loading import ModelLoadProgress
+from app_core.model_loading import ModelLoadProgress
 
 
 class DeveloperTasks:
@@ -15,6 +15,7 @@ class DeveloperTasks:
         self.running_details = running_details
         self.lock = threading.RLock()
         self.tasks = {}
+        self.completed = {}
         self.closed = False
 
     def busy(self, chat_id):
@@ -48,6 +49,20 @@ class DeveloperTasks:
         with self.lock:
             return any(task["record"]["project_path"] == str(project) and not task["finished"].is_set() for task in self.tasks.values())
 
+    def snapshot(self, identity):
+        with self.lock:
+            task = self.tasks.get(identity)
+            if task is not None:
+                approvals = [item["payload"] for item in task["pending"].values()
+                             if not item["event"].is_set() and not task["cancel"].is_set()]
+                return {"ok": True, "approvals": deepcopy(approvals), "result": None}
+            return {"ok": True, "approvals": [], "result": deepcopy(self.completed.get(identity))}
+
+    def forget_chat(self, chat_id):
+        with self.lock:
+            self.completed = {identity: result for identity, result in self.completed.items()
+                              if result["chat_id"] != chat_id}
+
     def start(self, chat_id, record, **options):
         with self.lock:
             if self.closed or self.busy(chat_id):
@@ -71,14 +86,13 @@ class DeveloperTasks:
 
     def _wait(self, identity, task, kind, value):
         approval_id = str(uuid.uuid4())
-        pending = {"kind": kind, "event": threading.Event()}
-        if kind == "action":
-            pending["action"] = deepcopy(value["action"])
+        payload = {"type": "plan_approval" if kind == "plan" else "approval", "task_id": identity,
+                   "chat_id": task["chat_id"], "approval_id": approval_id, **deepcopy(value)}
+        pending = {"kind": kind, "event": threading.Event(), "payload": payload}
         with self.lock:
             task["pending"][approval_id] = pending
-        self.bridge.emit("plan_approval" if kind == "plan" else "approval", task_id=identity,
-                         chat_id=task["chat_id"], approval_id=approval_id, **value)
         try:
+            self.bridge.emit(**payload)
             while not pending["event"].wait(0.05):
                 if task["cancel"].is_set():
                     raise coding_agent.AgentCancelled("Developer task cancelled while awaiting approval.")
@@ -115,9 +129,10 @@ class DeveloperTasks:
                 raise ValueError("This action approval is no longer pending.")
             if hunks is not None:
                 import diff_hunks
-                if pending["action"]["kind"] != "write_file":
+                action = pending["payload"]["action"]
+                if action["kind"] != "write_file":
                     raise ValueError("Hunk selection is available only for file writes.")
-                diff_hunks.validate_selection(pending["action"]["hunks"], hunks)
+                diff_hunks.validate_selection(action["hunks"], hunks)
             pending["decision"] = {"approved": True, "hunks": hunks} if approved and hunks is not None else approved
             pending["event"].set()
         return {"ok": True}
@@ -183,15 +198,21 @@ class DeveloperTasks:
         except Exception as error:
             kind, extra = "agent_error", {"error": str(error)}
         loading.close()
+        terminal = {"type": kind, "task_id": identity, "chat_id": task["chat_id"], **extra}
         with self.lock:
+            if not self.closed:
+                self.completed[identity] = terminal
+                if len(self.completed) > 16:
+                    del self.completed[next(iter(self.completed))]
             task["finished"].set()
             task["pending"].clear()
             self.tasks.pop(identity, None)
-        self.bridge.emit(kind, task_id=identity, chat_id=task["chat_id"], **extra)
+        self.bridge.emit(**terminal)
 
     def close(self):
         with self.lock:
             self.closed = True
+            self.completed.clear()
             tasks = list(self.tasks.values())
             for task in tasks:
                 task["cancel"].set()

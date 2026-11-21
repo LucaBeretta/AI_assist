@@ -30,7 +30,7 @@ class ProjectToolsTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name) / "project"
+        self.root = Path(self.temporary.name).resolve() / "project"
         self.root.mkdir()
 
     def write(self, name, contents="print('hello')\n"):

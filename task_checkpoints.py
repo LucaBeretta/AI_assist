@@ -87,12 +87,12 @@ class CheckpointStore:
             developer_tools._decode_text(original)
         with _LOCK:
             folder = self._folder(task_id)
-            if folder.exists():
+            existing = folder.exists()
+            if existing:
                 manifest = self._load(task_id)
                 if manifest["project"] != str(project):
                     raise ValueError("A task checkpoint belongs to one project only.")
             else:
-                folder.mkdir(parents=True)
                 manifest = {"task_id": task_id, "project": str(project), "created_at":
                     datetime.now(timezone.utc).isoformat(), "files": {}}
             if relative in manifest["files"]:
@@ -101,14 +101,23 @@ class CheckpointStore:
             entry = {"backup": backup, "created": original is None, "size": len(original or b""),
                      "sha256": hashlib.sha256(original or b"").hexdigest(),
                      "mode": stat.S_IMODE(target.stat().st_mode) if original is not None else None}
-            if backup:
-                _atomic(folder / backup, original, 0o600)
             manifest["files"][relative] = entry
-            _atomic(folder / "manifest.json", json.dumps(manifest, ensure_ascii=False).encode("utf-8"), 0o600)
-            self._prune(project, task_id)
+            if existing:
+                self._save_capture(folder, manifest, backup, original)
+            else:
+                self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+                with tempfile.TemporaryDirectory(prefix=".checkpoint-", dir=self.directory) as staging:
+                    self._save_capture(Path(staging), manifest, backup, original)
+                    os.replace(staging, folder)
         return True
 
-    def list(self, project):
+    @staticmethod
+    def _save_capture(folder, manifest, backup, original):
+        if backup:
+            _atomic(folder / backup, original, 0o600)
+        _atomic(folder / "manifest.json", json.dumps(manifest, ensure_ascii=False).encode("utf-8"), 0o600)
+
+    def list(self, project, *, warnings=None):
         project = developer_tools._project_root(project)
         with _LOCK:
             if not self.directory.exists():
@@ -121,15 +130,23 @@ class CheckpointStore:
                     _identity(path.name)
                 except ValueError:
                     continue
-                manifest = self._load(path.name)
+                try:
+                    manifest = self._load(path.name)
+                except (OSError, ValueError, RecursionError):
+                    if warnings is not None:
+                        warnings.append(f"Skipped unreadable checkpoint {path.name}.")
+                    continue
                 if manifest["project"] == str(project):
                     records.append(manifest)
             return sorted(records, key=lambda item: (item["created_at"], item["task_id"]), reverse=True)
 
-    def _prune(self, project, current):
-        records = self.list(project)
-        for manifest in records[10:]:
-            if manifest["task_id"] != current:
+    def prune(self, project, current):
+        """Apply retention after the task's writes have finished."""
+        with _LOCK:
+            if not self._folder(current).is_dir():
+                return
+            records = [item for item in self.list(project) if item["task_id"] != current]
+            for manifest in records[9:]:
                 target = self._folder(manifest["task_id"])
                 # Every recursive delete resolves to one UUID child of storage.
                 if target.resolve().parent != self.directory.resolve():

@@ -34,6 +34,7 @@ def set_model_running(model, start=True, context_length=None):
     return ollama_api("/api/generate", ollama.lifecycle_payload(model, start, context_length), timeout=300)
 
 
-def request_ollama(messages, model=None, context_length=None, on_chunk=None, on_metrics=None, keep_alive=-1):
+def request_ollama(messages, model=None, context_length=None, on_chunk=None, on_metrics=None, keep_alive=-1,
+                   cancel_event=None):
     return ollama.stream_chat(ollama_url(), messages, model or os.environ.get("OLLAMA_MODEL", "qwen3:30b"),
-                              context_length, on_chunk, on_metrics, keep_alive=keep_alive)
+                              context_length, on_chunk, on_metrics, keep_alive=keep_alive, cancel_event=cancel_event)

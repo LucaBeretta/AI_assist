@@ -69,7 +69,8 @@ class OllamaProvider:
 
     def stream_chat(self, messages, model, *, context_length=None, on_chunk=None, on_metrics=None, cancel_event=None):
         self._ready()
-        return ollama.stream_chat(self.base_url, messages, model, context_length, on_chunk, on_metrics)
+        return ollama.stream_chat(self.base_url, messages, model, context_length, on_chunk, on_metrics,
+                                  cancel_event=cancel_event)
 
 
 class ColibriProvider:
@@ -109,7 +110,7 @@ class ColibriProvider:
             import colibri_launcher
             report = colibri_launcher.start_server(self.directory, cancel_event=cancel_event)
             self.url = colibri_launcher.server_url(report) or self.url
-        return self.client().chat(messages, model, on_chunk=on_chunk, on_metrics=on_metrics)
+        return self.client().chat(messages, model, on_chunk=on_chunk, on_metrics=on_metrics, cancel_event=cancel_event)
 
 
 def configured_provider(data_directory, environ=None):

@@ -18,9 +18,10 @@ class CheckpointTests(unittest.TestCase):
     def setUp(self):
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
-        self.root = Path(folder.name) / "project"
+        base = Path(folder.name).resolve()
+        self.root = base / "project"
         self.root.mkdir()
-        self.store = CheckpointStore(Path(folder.name) / "backups")
+        self.store = CheckpointStore(base / "backups")
 
     def test_default_store_is_shared_app_data_and_never_inside_a_project(self):
         from chat_store import ChatStore
@@ -64,6 +65,7 @@ class CheckpointTests(unittest.TestCase):
             identity = str(uuid.uuid4())
             identities.append(identity)
             self.store.capture(identity, self.root, path, b"safe")
+            self.store.prune(self.root, identity)
         records = self.store.list(self.root)
         self.assertEqual(len(records), 10)
         self.assertEqual({item["task_id"] for item in records}, set(identities[2:]))
@@ -72,6 +74,22 @@ class CheckpointTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.store.capture(str(uuid.uuid4()), self.root, path, b"-----BEGIN PRIVATE KEY-----")
         self.assertFalse(self.store.capture(str(uuid.uuid4()), self.root, self.root.parent / "outside.py", b"safe"))
+
+    def test_incomplete_checkpoint_does_not_block_other_edits(self):
+        incomplete = str(uuid.uuid4())
+        (self.store.directory / incomplete).mkdir(parents=True)
+        source = self.root / "notes.txt"
+        source.write_text("before")
+        replies = iter([tool_response("write_file", {"path": source.name, "content": "after"}), final_response()])
+        result = run_agent("http://localhost:11434", "m", self.root, [{"role": "user", "content": "Edit notes"}],
+                           lambda event: None, lambda action: True, chat_fn=lambda *args: next(replies),
+                           checkpoint_store=self.store)
+        self.assertEqual(source.read_text(), "after")
+        warnings = []
+        self.assertEqual([item["task_id"] for item in self.store.list(self.root, warnings=warnings)], [result["task_id"]])
+        self.assertEqual(warnings, [f"Skipped unreadable checkpoint {incomplete}."])
+        with self.assertRaises(FileNotFoundError):
+            self.store.restore(incomplete)
 
     def test_tampered_manifest_or_backup_fails_before_changing_any_file(self):
         path = self.root / "a.py"

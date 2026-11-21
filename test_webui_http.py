@@ -1,4 +1,4 @@
-"""Exercise the real Ollama reader against local sockets; no model or window."""
+"""Exercise provider readers against local sockets, with no model or window."""
 
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -11,16 +11,17 @@ from unittest.mock import patch
 
 from app_core import runtime
 from chat_store import ChatStore
+from colibri_backend import ColibriClient
 from test_webui_app import Events
 from webui.app import Api
 
 
 class StreamHTTPTests(unittest.TestCase):
     def setUp(self):
-        self.release = threading.Event()
         self.disconnected = threading.Event()
         self.started = threading.Event()
         self.silent = False
+        self.defer_headers = False
         case = self
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, *args):
@@ -28,19 +29,15 @@ class StreamHTTPTests(unittest.TestCase):
 
             def do_POST(self):
                 self.rfile.read(int(self.headers["Content-Length"]))
-                self.send_response(200)
-                self.send_header("Content-Type", "application/x-ndjson")
-                self.end_headers()
-                def send(text):
-                    self.wfile.write((json.dumps({"message": {"content": text}, "done": False}) + "\n").encode())
-                    self.wfile.flush()
                 try:
+                    if not case.defer_headers:
+                        self.send_response(200)
+                        self.send_header("Content-Type", "application/x-ndjson")
+                        self.end_headers()
                     if not case.silent:
-                        send("first ")
+                        self.wfile.write((json.dumps({"message": {"content": "first "}, "done": False}) + "\n").encode())
+                        self.wfile.flush()
                     case.started.set()
-                    case.release.wait(4)
-                    send("discarded")
-                    # The callback raises StreamStopped on this next chunk.
                     readable, _, _ = select.select([self.connection], [], [], 3)
                     if readable and self.connection.recv(1) == b"":
                         case.disconnected.set()
@@ -52,7 +49,6 @@ class StreamHTTPTests(unittest.TestCase):
         server_thread.start()
         self.addCleanup(self.server.server_close)
         self.addCleanup(self.server.shutdown)
-        self.addCleanup(self.release.set)
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
         self.store = ChatStore(Path(folder.name))
@@ -68,28 +64,37 @@ class StreamHTTPTests(unittest.TestCase):
         stream = self.api.send(chat, "test", "fake:7b", 4096)["stream_id"]
         self.events.wait("token", stream)
         self.api.stop(stream)
-        self.release.set()
+        self.assertTrue(self.disconnected.wait(2))
         stopped = self.events.wait("stopped", stream)
-        self.assertTrue(self.disconnected.wait(3))
         self.assertEqual(stopped["text"], "first ")
         self.assertEqual(self.store.load(chat)["messages"][-1]["content"], "first ")
         self.assertFalse(any(e["type"] == "done" for e in self.events.items))
 
-    def test_silent_reader_is_not_falsely_reported_as_disconnected(self):
+    def test_stop_disconnects_a_silent_reader_before_the_first_token(self):
         self.silent = True
         chat = self.api.new_chat()["chat"]["id"]
-        stream = self.api.send(chat, "test", "fake:7b", None)["stream_id"]
-        self.assertTrue(self.started.wait(3))
-        self.api.stop(stream)
-        # Existing engine cancellation is callback-driven: until another chunk
-        # arrives, the API must retain the stream and must not announce stopped.
-        with self.api._lock:
-            self.assertIn(stream, self.api._streams)
-        self.assertFalse(any(e["type"] in ("stopped", "done") for e in self.events.items))
-        self.release.set()
-        self.events.wait("stopped", stream)
-        self.assertTrue(self.disconnected.wait(3))
-        self.assertEqual(len(self.store.load(chat)["messages"]), 1)
+        for defer_headers in (True, False):
+            with self.subTest(defer_headers=defer_headers):
+                self.defer_headers = defer_headers
+                self.started.clear()
+                self.disconnected.clear()
+                stream = self.api.send(chat, "test", "fake:7b", None)["stream_id"]
+                self.assertTrue(self.started.wait(2))
+                self.api.stop(stream)
+                self.assertTrue(self.disconnected.wait(2))
+                self.events.wait("stopped", stream)
+        self.assertEqual([item["role"] for item in self.store.load(chat)["messages"]], ["user", "user"])
+
+    def test_stop_disconnects_a_silent_colibri_stream(self):
+        self.silent = True
+        client = ColibriClient(f"http://127.0.0.1:{self.server.server_port}/v1")
+        chat = self.api.new_chat()["chat"]["id"]
+        with patch.object(self.api._colibri, "prepare", return_value=client):
+            stream = self.api.send(chat, "test", "fake:7b", None, "Colibri")["stream_id"]
+            self.assertTrue(self.started.wait(2))
+            self.api.stop(stream)
+            self.assertTrue(self.disconnected.wait(2))
+            self.events.wait("stopped", stream)
 
 
 if __name__ == "__main__":

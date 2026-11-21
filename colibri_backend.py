@@ -1,5 +1,6 @@
 """Standard-library client for Colibri's OpenAI-compatible HTTP server."""
 
+from contextlib import ExitStack, contextmanager
 from copy import deepcopy
 import http.client
 import json
@@ -10,6 +11,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+
+from app_core.streaming import open_stream
 
 
 def normalize_url(value):
@@ -38,20 +41,23 @@ class ColibriClient:
         return urllib.request.Request(self.url + path, headers=headers,
             data=json.dumps(payload).encode("utf-8") if payload is not None else None)
 
-    def open(self, request, timeout):
-        try:
-            return urllib.request.urlopen(request, timeout=timeout)
-        except urllib.error.HTTPError as error:
-            # Server errors may echo request data. Do not display raw bodies or keys.
-            code = error.code
-            error.close()
-            detail = {401: "Check the Colibri API key.", 403: "Check the API key and server access settings.",
-                      400: "Check model support, context size, and tool-calling support.",
-                      404: "Check the server URL and selected model.",
-                      429: "The server is busy; retry later."}.get(code, "Check the Colibri server log.")
-            raise RuntimeError(f"Colibri returned HTTP {code}. {detail}") from error
-        except (OSError, urllib.error.URLError, http.client.HTTPException) as error:
-            raise RuntimeError("Could not reach Colibri. Start coli serve and check the server URL.") from error
+    @contextmanager
+    def open(self, request, timeout, cancel_event=None):
+        with ExitStack() as connection:
+            try:
+                response = connection.enter_context(open_stream(request, timeout, cancel_event))
+            except urllib.error.HTTPError as error:
+                # Server errors may echo request data. Do not display raw bodies or keys.
+                code = error.code
+                error.close()
+                detail = {401: "Check the Colibri API key.", 403: "Check the API key and server access settings.",
+                          400: "Check model support, context size, and tool-calling support.",
+                          404: "Check the server URL and selected model.",
+                          429: "The server is busy; retry later."}.get(code, "Check the Colibri server log.")
+                raise RuntimeError(f"Colibri returned HTTP {code}. {detail}") from error
+            except (OSError, urllib.error.URLError, http.client.HTTPException) as error:
+                raise RuntimeError("Could not reach Colibri. Start coli serve and check the server URL.") from error
+            yield response
 
     def json(self, path, payload=None, timeout=15):
         try:
@@ -185,7 +191,7 @@ class ColibriClient:
             disconnect()
             worker.join(timeout=1)
 
-    def chat(self, messages, model, on_chunk=None, on_metrics=None):
+    def chat(self, messages, model, on_chunk=None, on_metrics=None, cancel_event=None):
         payload = dict(model=model, messages=messages, stream=True,
                        stream_options={"include_usage": True})
         parts, usage = [], {}
@@ -193,7 +199,7 @@ class ColibriClient:
         done = False
         received = 0
         try:
-            with self.open(self.request("/chat/completions", payload), 1800) as response:
+            with self.open(self.request("/chat/completions", payload), 1800, cancel_event) as response:
                 event = []
                 while True:
                     line = response.readline(1024 * 1024 + 1)

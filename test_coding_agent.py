@@ -196,7 +196,7 @@ class AgentTests(unittest.TestCase):
     def test_resolved_symlink_escape_fails_without_needing_windows_link_privilege(self):
         outside = Path(self.temporary.name) / "outside.py"
         outside.write_text("outside\n", encoding="utf-8")
-        fake_link = self.root / "linked.py"
+        fake_link = self.root.resolve() / "linked.py"
         fake_link.write_text("placeholder\n", encoding="utf-8")
         original_resolve = Path.resolve
 

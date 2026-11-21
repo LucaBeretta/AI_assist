@@ -5,7 +5,6 @@ import importlib
 import json
 import logging
 import re
-import shutil
 from pathlib import Path
 import sys
 import threading
@@ -22,7 +21,7 @@ import model_advisor
 import model_library
 from webui.bridge import Bridge
 from webui.developer import DeveloperTasks
-from webui.model_loading import ModelLoadProgress
+from app_core.chat_service import ChatService
 import developer_tools
 from task_checkpoints import CheckpointStore
 from project_store import ProjectStore, inherited_environment
@@ -95,12 +94,10 @@ class Api(SharingApi, PrivacyApi, ParityApi):
         self._store = store if store is not None else ChatStore()
         self._engine = engine if engine is not None else importlib.import_module("app_core.runtime")
         self._lock = threading.RLock()
-        self._streams = {}
-        self._unsaved = {}
         self._closed = False
-        self._autosave_interval = 2
-        self._incognito = {}
-        self._incognito_ids = set()
+        self._chats = ChatService(self._store, self._engine, self._lock, self._bridge.emit,
+                                  prepare_colibri=lambda *args: self._colibri.prepare(*args),
+                                  require_vision=self._require_vision, context_usage=self._usage)
         self._hardware = hardware
         # The online catalog is read once per session: every read is an internet request the gate asks about.
         self._catalog_lock = threading.Lock()
@@ -134,10 +131,10 @@ class Api(SharingApi, PrivacyApi, ParityApi):
 
     def _hourly_context(self):
         with self._lock:
-            record = self._load_chat(self._status_chat) if self._status_chat else None
+            record = self._chats.load(self._status_chat) if self._status_chat else None
             backend = record["backend"] if record else "Ollama"
             host = self._engine.ollama_url()
-            with self._developer.lock: busy = bool(self._streams or self._developer.tasks)
+            with self._developer.lock: busy = bool(self._chats.active_streams() or self._developer.tasks)
             return {"backend": backend, "host": host if is_local(host) else "http://localhost:11434",
                     "model": record["model"] if record else "", "local": is_local(host), "busy": busy,
                     "connection": backend, "updates": self._hourly_update_line()}
@@ -285,10 +282,10 @@ class Api(SharingApi, PrivacyApi, ParityApi):
             raise ValueError("Chat instructions must be text of at most 1,000,000 characters.")
         with self._lock:
             self._require_idle(chat_id)
-            record = self._load_chat(chat_id)
+            record = self._chats.load(chat_id)
             record["environment"]["instructions"] = text
             record["_agent_history_stale"] = True
-            return {"ok": True, "chat": self._save_chat(record)}
+            return {"ok": True, "chat": self._chats.save(record)}
 
     def _start_status(self):
         self._status.start()
@@ -297,11 +294,11 @@ class Api(SharingApi, PrivacyApi, ParityApi):
     def status_snapshot(self, chat_id=None):
         with self._lock:
             identity = chat_id if chat_id is not None else self._status_chat
-            record = self._load_chat(identity) if identity else None
+            record = self._chats.load(identity) if identity else None
             model = record["model"] if record else ""
             backend = record.get("backend", record["environment"]["backend"]) if record else self._colibri.default_backend
             metrics = deepcopy(record.get("last_response", {}).get("metrics", {})) if record else {}
-            stream = next((item for item in self._streams.values() if item["chat_id"] == identity), None)
+            stream = next((item for item in self._chats.active_streams() if item["chat_id"] == identity), None)
             if stream is not None:
                 with stream["data_lock"]:
                     metrics = deepcopy(stream["metrics"])
@@ -387,14 +384,14 @@ class Api(SharingApi, PrivacyApi, ParityApi):
             raise ValueError("Choose a list of unique shared memory IDs (empty means all).")
         with self._lock:
             self._require_idle(chat_id)
-            record = self._load_chat(chat_id)
+            record = self._chats.load(chat_id)
             if record.get("incognito") and ids:
                 raise ValueError("Incognito chats do not use shared memory.")
             if ids and not set(ids) <= {item["id"] for item in self._memories.list()["memories"]}:
                 raise ValueError("Choose existing shared memory IDs.")
             record["environment"]["memory_ids"] = list(ids)
             record["_agent_history_stale"] = True
-            return {"ok": True, "chat": self._save_chat(record)}
+            return {"ok": True, "chat": self._chats.save(record)}
 
     @_json_method
     def list_memories(self):
@@ -498,7 +495,7 @@ class Api(SharingApi, PrivacyApi, ParityApi):
         self._model_name(name)
         with self._lock:
             if (self._closed or name in self._unloading or self._developer.uses_model(name)
-                    or any(item["record"]["model"] == name for item in self._streams.values())
+                    or any(item["record"]["model"] == name for item in self._chats.active_streams())
                     or any(item["model"] == name for item in self._pulls.values())):
                 raise ValueError("This model is in use; stop its tasks, streams or download first.")
             self._unloading.add(name)
@@ -546,24 +543,6 @@ class Api(SharingApi, PrivacyApi, ParityApi):
                 raise RuntimeError("The web UI is closing.")
             return {"ok": True, "uri": self._preview.code(html)}
 
-    def _load_chat(self, chat_id):
-        if chat_id in self._incognito_ids:
-            if chat_id not in self._incognito:
-                raise ValueError("This incognito chat has been closed.")
-            return deepcopy(self._incognito[chat_id])
-        return self._store.load(chat_id)
-
-    def _save_chat(self, record):
-        chat_versions.sync(record)
-        if record["id"] in self._incognito_ids:
-            if self._closed:
-                raise ValueError("This incognito chat has been closed.")
-            record = self._store._validate(record)
-            record["updated_at"] = _utc_now()
-            self._incognito[record["id"]] = deepcopy(record)
-            return record
-        return self._store.save(record)
-
     def _request_messages(self, record, memories=None):
         pins = record["environment"]["pinned_paths"]
         context = ""
@@ -600,19 +579,19 @@ class Api(SharingApi, PrivacyApi, ParityApi):
         root = developer_tools._project_root(folder)
         with self._lock:
             self._require_idle(chat_id)
-            record = self._load_chat(chat_id)
+            record = self._chats.load(chat_id)
             if record["project_path"] != str(root):
                 record["environment"]["pinned_paths"] = []
                 record["project_files"] = []
             record["project_path"] = str(root)
             record["_agent_history_stale"] = True
-            return {"ok": True, "chat": self._save_chat(record)}
+            return {"ok": True, "chat": self._chats.save(record)}
 
     @_json_method
     def pin_file(self, chat_id, path):
         with self._lock:
             self._require_idle(chat_id)
-            record = self._load_chat(chat_id)
+            record = self._chats.load(chat_id)
             if not record["project_path"]:
                 raise ValueError("Choose a project folder before pinning files.")
             _, path = developer_tools._project_file(developer_tools._project_root(record["project_path"]), path)
@@ -621,33 +600,28 @@ class Api(SharingApi, PrivacyApi, ParityApi):
                 record["environment"]["pinned_paths"].append(path)
             record["project_files"] = list(record["environment"]["pinned_paths"])
             record["_agent_history_stale"] = True
-            record = self._save_chat(record)
+            record = self._chats.save(record)
             return {"ok": True, "chat": record, "pinned_files": self._pinned_files(record)}
 
     @_json_method
     def unpin_file(self, chat_id, path):
         with self._lock:
             self._require_idle(chat_id)
-            record = self._load_chat(chat_id)
+            record = self._chats.load(chat_id)
             pins = record["environment"]["pinned_paths"]
             if not isinstance(path, str) or path not in pins:
                 raise ValueError("Choose a pinned file to remove.")
             pins.remove(path)
             record["project_files"] = list(pins)
             record["_agent_history_stale"] = True
-            record = self._save_chat(record)
+            record = self._chats.save(record)
             return {"ok": True, "chat": record, "pinned_files": self._pinned_files(record)}
 
     @_json_method
     def state(self):
         with self._lock:
-            active = {item["chat_id"] for item in self._streams.values()}
-            interrupted = [{"chat_id": chat["id"], "title": chat["title"],
-                            "message_index": len(chat["messages"]) - 1}
-                           for chat in self._store.list_chats()
-                           if chat["id"] not in active and chat["messages"]
-                           and chat["messages"][-1].get("partial") is True]
-            record = self._load_chat(self._status_chat) if self._status_chat else None
+            interrupted = self._chats.interrupted()
+            record = self._chats.load(self._status_chat) if self._status_chat else None
             backend = record.get("backend", record["environment"]["backend"]) if record else self._colibri.default_backend
         colibri = self._colibri.availability()
         ollama_error = None
@@ -691,7 +665,7 @@ class Api(SharingApi, PrivacyApi, ParityApi):
         with self._lock:
             if self._closed:
                 raise RuntimeError("The web UI is closing.")
-            if any(item["record"]["model"] == name for item in self._streams.values()) or self._developer.uses_model(name):
+            if any(item["record"]["model"] == name for item in self._chats.active_streams()) or self._developer.uses_model(name):
                 raise ValueError("This model has an active stream; stop it before unloading.")
             if name in self._unloading:
                 raise ValueError("This model is already being unloaded.")
@@ -718,20 +692,20 @@ class Api(SharingApi, PrivacyApi, ParityApi):
             raise ValueError("Choose an installed model.")
         with self._lock:
             self._require_idle(chat_id)
-            record = self._load_chat(chat_id)
+            record = self._chats.load(chat_id)
         target_backend = backend if backend is not None else record.get("backend", record["environment"]["backend"])
         if target_backend not in {"Ollama", "Colibri"}:
             raise ValueError("Choose Ollama or Colibri.")
         self._require_vision(model, self._request_messages(record), target_backend)
         with self._lock:
             self._require_idle(chat_id)
-            if self._load_chat(chat_id) != record:
+            if self._chats.load(chat_id) != record:
                 raise ValueError("This chat changed while model capabilities were checked; try again.")
             if record["model"] != model or record.get("backend", record["environment"]["backend"]) != target_backend:
                 record["_agent_history_stale"] = True
             record["model"] = record["environment"]["model"] = model
             record["backend"] = record["environment"]["backend"] = target_backend
-            return {"ok": True, "chat": self._save_chat(record)}
+            return {"ok": True, "chat": self._chats.save(record)}
 
     def _require_vision(self, model, messages, backend="Ollama"):
         if backend == "Colibri" and any(message.get("images") for message in messages):
@@ -745,12 +719,12 @@ class Api(SharingApi, PrivacyApi, ParityApi):
         item, data = chat_attachments.decode(name, data_base64, chat_attachments.file_limit(self._store.directory))
         with self._lock:
             self._require_idle(chat_id)
-            record = self._load_chat(chat_id)
+            record = self._chats.load(chat_id)
         if item["kind"] == "image":
             self._require_vision(record["model"], [{"images": [item["data_base64"]]}], record.get("backend", record["environment"]["backend"]))
         with self._lock:
             self._require_idle(chat_id)
-            if self._load_chat(chat_id) != record:
+            if self._chats.load(chat_id) != record:
                 raise ValueError("This chat changed while the attachment was checked; try again.")
             pending = record.setdefault("attachments", [])
             if len(pending) >= 20:
@@ -760,7 +734,7 @@ class Api(SharingApi, PrivacyApi, ParityApi):
                 if not record.get("incognito"):
                     target = chat_attachments.write(self._store.directory, chat_id, item, data)
                 pending.append(item)
-                self._save_chat(record)
+                self._chats.save(record)
             except Exception:
                 if target is not None:
                     target.unlink(missing_ok=True)
@@ -770,15 +744,7 @@ class Api(SharingApi, PrivacyApi, ParityApi):
 
     @_json_method
     def save_draft(self, chat_id, text):
-        if not isinstance(text, str) or len(text) > 1000000:
-            raise ValueError("Draft must be text of at most 1,000,000 characters.")
-        with self._lock:
-            if self._closed:
-                raise RuntimeError("The web UI is closing.")
-            record = self._load_chat(chat_id)
-            record["draft"] = text
-            self._save_chat(record)
-        return {"ok": True}
+        return self._chats.save_draft(chat_id, text)
 
     @_json_method
     def resolve_interrupted(self, chat_id, keep=True):
@@ -786,14 +752,14 @@ class Api(SharingApi, PrivacyApi, ParityApi):
             raise ValueError("Keep must be true or false.")
         with self._lock:
             self._require_idle(chat_id)
-            record = self._load_chat(chat_id)
+            record = self._chats.load(chat_id)
             if not record["messages"] or not record["messages"][-1].get("partial"):
                 raise ValueError("This chat has no interrupted reply.")
             if keep:
                 record["messages"][-1].pop("partial")
             else:
                 record["messages"].pop()
-            return {"ok": True, "chat": self._save_chat(record)}
+            return {"ok": True, "chat": self._chats.save(record)}
 
     def _require_idle(self, chat_id):
         if self._closed:
@@ -802,7 +768,7 @@ class Api(SharingApi, PrivacyApi, ParityApi):
             raise ValueError("This chat already has an active stream.")
 
     def _busy(self, chat_id):
-        return any(item["chat_id"] == chat_id for item in self._streams.values()) or self._developer.busy(chat_id)
+        return self._chats.busy(chat_id) or self._developer.busy(chat_id)
 
     @_json_method
     def run_agent(self, chat_id, text, project=None, plan_first=False, max_steps=20, context=4096, quality_review=None):
@@ -825,7 +791,7 @@ class Api(SharingApi, PrivacyApi, ParityApi):
                     raise ValueError("Choose a Colibri reviewer in Settings first.")
                 self._require_colibri_idle()
                 if self._hybrid["manage_memory"] and (self._developer.uses_model(record["model"])
-                        or any(item["record"]["model"] == record["model"] for item in self._streams.values())):
+                        or any(item["record"]["model"] == record["model"] for item in self._chats.active_streams())):
                     raise ValueError("Stop this model's other streams before enabling memory handoff.")
                 hybrid = {**self._hybrid, "url": self._colibri.url, "key": self._colibri._key,
                           "directory": self._colibri.folder(), "follow_report": not self._colibri._explicit_url}
@@ -853,7 +819,7 @@ class Api(SharingApi, PrivacyApi, ParityApi):
             record["project_path"] = str(root)
             record["mode"] = "dev"
             record["context_length"] = record["environment"]["context_length"] = context
-            record = self._save_chat(record)
+            record = self._chats.save(record)
             self._status_chat = chat_id
             return self._developer.start(chat_id, record, host=self._engine.ollama_url(), model=record["model"],
                 project_root=str(root), messages=history, plan_first=plan_first, max_steps=max_steps,
@@ -864,7 +830,8 @@ class Api(SharingApi, PrivacyApi, ParityApi):
 
     @_json_method
     def list_checkpoints(self, project):
-        return {"ok": True, "checkpoints": self._checkpoints.list(project)}
+        warnings = []
+        return {"ok": True, "checkpoints": self._checkpoints.list(project, warnings=warnings), "warnings": warnings}
 
     @_json_method
     def restore_checkpoint(self, task_id):
@@ -883,7 +850,7 @@ class Api(SharingApi, PrivacyApi, ParityApi):
         with self._lock:
             if self._closed:
                 raise RuntimeError("The web UI closed before the Developer result could be saved.")
-            current = self._load_chat(before["id"])
+            current = self._chats.load(before["id"])
             for key in ("messages", "summary", "environment", "project_path", "agent_history"):
                 if current.get(key) != before.get(key):
                     raise RuntimeError("This chat changed while the Developer task was running.")
@@ -891,7 +858,11 @@ class Api(SharingApi, PrivacyApi, ParityApi):
             current["last_response"] = {"kind": "dev", "status": "stopped" if result.get("stopped") else "done", "metrics": result.get("metrics", {})}
             current.pop("_agent_history_stale", None)
             current["messages"].append({"role": "assistant", "content": result["assistant_text"]})
-            self._save_chat(current)
+            self._chats.save(current)
+
+    @_json_method
+    def developer_task_state(self, task_id):
+        return self._developer.snapshot(task_id)
 
     @_json_method
     def approve_plan(self, task_id, decision, text=None):
@@ -909,9 +880,7 @@ class Api(SharingApi, PrivacyApi, ParityApi):
     @_json_method
     def list_chats(self, project_id=None):
         with self._lock:
-            chats = self._store.list_chats(project_id=project_id) + deepcopy([
-                record for record in self._incognito.values() if project_id is None or record.get("project_id") == project_id])
-            return {"ok": True, "chats": sorted(chats, key=lambda item: item["updated_at"], reverse=True)}
+            return {"ok": True, "chats": self._chats.summaries(project_id)}
 
     @_json_method
     def rename_chat(self, id, title):
@@ -920,9 +889,9 @@ class Api(SharingApi, PrivacyApi, ParityApi):
         with self._lock:
             if self._closed:
                 raise RuntimeError("The web UI is closing.")
-            record = self._load_chat(id)
+            record = self._chats.load(id)
             record.update(title=title.strip(), _manual_title=True)
-            record = self._save_chat(record)
+            record = self._chats.save(record)
         self._bridge.emit("chat_changed", chat_id=id)
         return {"ok": True, "chat": record}
 
@@ -930,23 +899,8 @@ class Api(SharingApi, PrivacyApi, ParityApi):
     def delete_chat(self, id):
         with self._lock:
             self._require_idle(id)
-            record = self._load_chat(id)
-            directory = self._store.directory / id
-            if not record.get("incognito") and directory.exists():
-                chat_attachments.folder(self._store.directory, id)
-                if not directory.is_dir() or directory.resolve().parent != self._store.directory:
-                    raise ValueError("Invalid chat attachment folder.")
-            warnings = []
-            if record.get("incognito"):
-                self._incognito.pop(id, None)
-            else:
-                self._store.delete(id)
-                if directory.exists():
-                    try:
-                        shutil.rmtree(directory)
-                    except OSError as error:
-                        warnings.append(f"Chat deleted, but attachment cleanup failed: {error}")
-            self._unsaved = {key: value for key, value in self._unsaved.items() if value["chat_id"] != id}
+            warnings = self._chats.delete(id)
+            self._developer.forget_chat(id)
             if self._status_chat == id:
                 self._status_chat = None
         self._bridge.emit("chat_deleted", chat_id=id)
@@ -957,7 +911,7 @@ class Api(SharingApi, PrivacyApi, ParityApi):
         if not isinstance(query, str) or len(query) > 5000:
             raise ValueError("Search must be text up to 5,000 characters.")
         with self._lock:
-            records = self._store.list_chats() + list(self._incognito.values())
+            records = self._chats.records()
             matches = []
             needle = query.casefold().strip()
             for record in sorted(records, key=lambda item: item["updated_at"], reverse=True):
@@ -1006,14 +960,14 @@ class Api(SharingApi, PrivacyApi, ParityApi):
     @_json_method
     def open_chat(self, id):
         with self._lock:
-            record = self._load_chat(id)
+            record = self._chats.load(id)
             self._status_chat = id
             return {"ok": True, "chat": record, "versions": chat_versions.versions(record), "pinned_files": self._pinned_files(record),
-                    "unsaved_replies": deepcopy([item for item in self._unsaved.values() if item["chat_id"] == id])}
+                    "unsaved_replies": self._chats.unsaved_replies(id)}
 
     def _version_record(self, chat_id):
         self._require_idle(chat_id)
-        record = self._load_chat(chat_id)
+        record = self._chats.load(chat_id)
         if record["model"] in self._unloading:
             raise ValueError("This model is being unloaded; try again when it finishes.")
         if record["messages"] and record["messages"][-1].get("partial"):
@@ -1029,7 +983,7 @@ class Api(SharingApi, PrivacyApi, ParityApi):
             if not record["model"]:
                 raise ValueError("Choose a model before regenerating.")
             chat_versions.fork(record, len(record["messages"]) - 2, [])
-            record = self._save_chat(record)
+            record = self._chats.save(record)
             memories = self._memories.used(record)
             return self._launch(record, kind="chat", messages=self._request_messages(record, memories),
                                 context=record["context_length"], memories_used=memories)
@@ -1047,7 +1001,7 @@ class Api(SharingApi, PrivacyApi, ParityApi):
             edited = deepcopy(record["messages"][index])
             edited["content"] = text
             chat_versions.fork(record, index - 1, [edited])
-            record = self._save_chat(record)
+            record = self._chats.save(record)
             memories = self._memories.used(record)
             return self._launch(record, kind="chat", messages=self._request_messages(record, memories),
                                 context=record["context_length"], memories_used=memories)
@@ -1059,7 +1013,7 @@ class Api(SharingApi, PrivacyApi, ParityApi):
             if type(index) is not int or not -1 <= index < len(record["messages"]):
                 raise ValueError("Choose a valid branch anchor (-1 is before the first message).")
             chat_versions.switch(record, index, n)
-            record = self._save_chat(record)
+            record = self._chats.save(record)
             return {"ok": True, "chat": record, "messages": record["messages"], "versions": chat_versions.versions(record)}
 
     @_json_method
@@ -1089,8 +1043,7 @@ class Api(SharingApi, PrivacyApi, ParityApi):
             if incognito:
                 record["incognito"] = True
                 record["environment"]["memory_ids"] = []
-                self._incognito_ids.add(record["id"])
-            record = self._save_chat(record)
+            record = self._chats.create(record)
             self._status_chat = record["id"]
             return {"ok": True, "chat": record}
 
@@ -1099,7 +1052,7 @@ class Api(SharingApi, PrivacyApi, ParityApi):
         with self._lock:
             if self._closed:
                 raise RuntimeError("The web UI is closing.")
-            source = self._load_chat(chat_id)
+            source = self._chats.load(chat_id)
             record = self._store.new_record(model=source["model"])
             record["environment"] = deepcopy(source["environment"])
             record["backend"] = source.get("backend", record["environment"]["backend"])
@@ -1111,8 +1064,7 @@ class Api(SharingApi, PrivacyApi, ParityApi):
             if source.get("incognito"):
                 record["incognito"] = True
                 record["environment"]["memory_ids"] = []
-                self._incognito_ids.add(record["id"])
-            record = self._save_chat(record)
+            record = self._chats.create(record)
             self._status_chat = record["id"]
             return {"ok": True, "chat": record}
 
@@ -1165,7 +1117,7 @@ class Api(SharingApi, PrivacyApi, ParityApi):
         active = self._developer.context_usage(record["id"])
         developer = record.get("mode") == "dev" and record.get("last_response", {}).get("kind", "dev") == "dev"
         with self._lock:
-            chat_stream = next((item for item in self._streams.values()
+            chat_stream = next((item for item in self._chats.active_streams()
                                 if item["chat_id"] == record["id"] and item["kind"] == "chat"), None)
         if active is not None:
             used, total = active["used"], active["total"]
@@ -1189,7 +1141,7 @@ class Api(SharingApi, PrivacyApi, ParityApi):
     @_json_method
     def context_usage(self, chat_id):
         with self._lock:
-            record = self._load_chat(chat_id)
+            record = self._chats.load(chat_id)
         return self._usage(record)
 
     @_json_method
@@ -1199,13 +1151,13 @@ class Api(SharingApi, PrivacyApi, ParityApi):
                 raise RuntimeError("The web UI is closing.")
             if self._busy(chat_id):
                 raise ValueError("This chat already has an active stream.")
-            record = self._load_chat(chat_id)
+            record = self._chats.load(chat_id)
         # Model metadata can require network I/O. Keep Stop and other chats free.
         total = self._usage(record)["total"]
         with self._lock:
             if self._closed or self._busy(chat_id):
                 raise ValueError("This chat is busy or the web UI is closing.")
-            if self._load_chat(chat_id) != record:
+            if self._chats.load(chat_id) != record:
                 raise ValueError("This chat changed while its context was being checked; try again.")
             if record.get("backend", record["environment"]["backend"]) != "Ollama":
                 raise ValueError("This web UI currently supports compaction through Ollama only.")
@@ -1247,7 +1199,7 @@ class Api(SharingApi, PrivacyApi, ParityApi):
                 raise RuntimeError("The web UI is closing.")
             if model in self._unloading:
                 raise ValueError("This model is being unloaded; try again when it finishes.")
-            record = self._load_chat(chat_id)
+            record = self._chats.load(chat_id)
             backend = backend if backend is not None else record.get("backend", record["environment"]["backend"])
             if backend not in {"Ollama", "Colibri"}:
                 raise ValueError("Choose Ollama or Colibri.")
@@ -1273,208 +1225,23 @@ class Api(SharingApi, PrivacyApi, ParityApi):
         self._require_vision(model, messages, backend)
         with self._lock:
             self._require_idle(chat_id)
-            if model in self._unloading or self._load_chat(chat_id) != original:
+            if model in self._unloading or self._chats.load(chat_id) != original:
                 raise ValueError("This chat or model changed while attachments were checked; try again.")
-            record = self._save_chat(record)
+            record = self._chats.save(record)
             return self._launch(record, kind="chat", messages=messages, context=context,
                                 vision_checked=True, memories_used=memories)
 
     def _launch(self, record, **operation):
         self._status_chat = record["id"]
-        stream_id = str(uuid.uuid4())
-        stream = {"chat_id": record["id"], "cancel": threading.Event(), "finished": threading.Event(),
-                  "parts": [], "metrics": {}, "data_lock": threading.Lock(), "record": record,
-                  "partial_message": None}
-        stream.update(operation)
-        stream["keep_alive"] = self._settings["idle_unload_minutes"]
-        self._streams[stream_id] = stream
-        thread = threading.Thread(target=self._run_stream, args=(stream_id, stream, record),
-                                  name="webui-chat-" + stream_id[:8], daemon=True)
-        try:
-            thread.start()
-            if stream["kind"] == "chat":
-                threading.Thread(target=self._autosave, args=(stream_id, stream), daemon=True,
-                                 name="webui-recovery-" + stream_id[:8]).start()
-        except Exception:
-            del self._streams[stream_id]
-            raise
-        return {"ok": True, "stream_id": stream_id}
-
-    def _stream_record(self, stream):
-        current = self._load_chat(stream["chat_id"])
-        expected = stream["record"]
-        messages = current["messages"]
-        if stream["partial_message"] is not None:
-            if not messages or messages[-1] != stream["partial_message"]:
-                raise RuntimeError("This chat changed while the reply was running; the reply was not saved.")
-            current["messages"] = messages[:-1]
-        fields = ("messages", "summary", "environment", "model", "backend", "context_length")
-        if any(current.get(key) != expected.get(key) for key in fields):
-            raise RuntimeError("This chat changed while the reply was running; the reply was not saved.")
-        return current
-
-    def _persist_partial(self, stream_id, stream):
-        with self._lock:
-            if stream_id not in self._streams or stream["kind"] != "chat":
-                return
-            with stream["data_lock"]:
-                text = "".join(stream["parts"])
-            if not text:
-                return
-            message = {"role": "assistant", "content": text, "partial": True}
-            if message == stream["partial_message"]:
-                return
-            current = self._stream_record(stream)
-            current["messages"].append(message)
-            self._save_chat(current)
-            stream["partial_message"] = message
-
-    def _autosave(self, stream_id, stream):
-        while not stream["finished"].wait(self._autosave_interval):
-            try:
-                self._persist_partial(stream_id, stream)
-            except Exception:
-                log.exception("Could not save interrupted reply for %s", stream["chat_id"])
+        return self._chats.launch(record, self._settings["idle_unload_minutes"], **operation)
 
     @_json_method
     def stop(self, stream_id):
         self._internet.block_pending()
-        with self._lock:
-            stream = self._streams.get(stream_id)
-            if stream is None:
-                result = self._developer.stop(stream_id)
-                if result["active"]:
-                    return result
-                return {"ok": True, "stream_id": stream_id, "active": False}
-            # Serialize Stop against chunk acceptance and the completion decision.
-            with stream["data_lock"]:
-                stream["cancel"].set()
-                if "loading" in stream:
-                    stream["loading"].close()
+        if self._chats.stop(stream_id):
             return {"ok": True, "stream_id": stream_id, "active": True}
-
-    def _run_stream(self, stream_id, stream, record):
-        engine = self._engine
-        ended = threading.Event()
-        started = threading.Event()
-        compact = stream["kind"] == "compact"
-        if compact:
-            self._bridge.emit("compact_started", stream_id=stream_id, chat_id=stream["chat_id"], operation="compact")
-
-        def chunk(text):
-            with stream["data_lock"]:
-                if stream["cancel"].is_set():
-                    raise engine.StreamStopped()
-                if compact and sum(map(len, stream["parts"])) + len(text) > stream["summary_chars"]:
-                    raise RuntimeError("The model summary exceeded the requested size; no compaction was saved.")
-                stream["parts"].append(text)
-                combined = "".join(stream["parts"])
-                if "<think>" in combined and "thinking_started" not in stream:
-                    stream["thinking_started"] = time.monotonic()
-                if "</think>" in combined and "thinking_started" in stream and "thinking_seconds" not in stream:
-                    stream["thinking_seconds"] = max(0, time.monotonic() - stream["thinking_started"])
-                if text and "loading" in stream:
-                    stream["loading"].first_output()
-                if not compact:
-                    self._bridge.emit("token", stream_id=stream_id, chat_id=stream["chat_id"], text=text)
-
-        def metrics(value):
-            with stream["data_lock"]:
-                stream["metrics"] = deepcopy(value)
-
-        def request():
-            started.set()
-            try:
-                if stream["cancel"].is_set():
-                    raise engine.StreamStopped()
-                if not stream.get("vision_checked"):
-                    self._require_vision(record["model"], stream["messages"], record.get("backend", record["environment"]["backend"]))
-                if record.get("backend", record["environment"]["backend"]) == "Colibri":
-                    client = self._colibri.prepare(stream["cancel"],
-                        lambda text: self._bridge.emit("status", text=text, chat_id=record["id"]))
-                    if stream["cancel"].is_set():
-                        raise engine.StreamStopped()
-                    with network_gate.task("Send a message through Colibri", "Your message, conversation, shared notes and attached or pinned context."):
-                        return client.chat(deepcopy(stream["messages"]), model=record["model"], on_chunk=chunk, on_metrics=metrics)
-                loading = ModelLoadProgress(self._bridge.emit, record["model"], stream["cancel"],
-                                           stream_id=stream_id, chat_id=stream["chat_id"])
-                with stream["data_lock"]:
-                    stream["loading"] = loading
-                loading.start(engine.running_details)
-                if stream["cancel"].is_set():
-                    raise engine.StreamStopped()
-                options = {"keep_alive": f"{stream['keep_alive']}m"} if stream["keep_alive"] else {}
-                return engine.request_ollama(deepcopy(stream["messages"]), model=record["model"],
-                                             context_length=stream["context"],
-                                             on_chunk=chunk, on_metrics=metrics, **options)
-            except engine.StreamStopped:
-                raise
-            except Exception as failure:
-                # Keep unexpected engine failures inside run_stoppable's error contract.
-                raise RuntimeError(str(failure)) from failure
-            finally:
-                if "loading" in stream:
-                    stream["loading"].close()
-                ended.set()
-
-        kind, error, answer = "error", None, None
-        try:
-            answer, error, stopped = engine.run_stoppable(request, stream["parts"], stream["cancel"])
-            # run_stoppable can return before its reader exits. Do not announce
-            # disconnection or release this chat while the HTTP reader is alive.
-            if started.is_set() or not ended.is_set():
-                ended.wait()
-            with self._lock:
-                with stream["data_lock"]:
-                    stopped = stopped or stream["cancel"].is_set()
-                    partial = "".join(stream["parts"])
-                    kind = "stopped" if stopped else ("error" if error else "done")
-                    content = partial if kind != "done" else answer
-                current = self._stream_record(stream)
-                if compact:
-                    if kind == "done":
-                        if not isinstance(answer, str) or not answer.strip() or len(answer) > stream["summary_chars"]:
-                            raise ValueError("The model returned an empty or oversized summary; no compaction was saved.")
-                        current["summary"] = {"text": answer.strip(), "upto": stream["upto"], "created_at": _utc_now()}
-                        usage = self._usage(current, stream["context"])
-                        self._save_chat(current)
-                        kind = "compact_done"
-                    else:
-                        usage = None
-                    self._streams.pop(stream_id, None)
-                    self._bridge.emit(kind, stream_id=stream_id, chat_id=stream["chat_id"], operation="compact",
-                                      usage=usage, error=error if kind == "error" else None)
-                    return
-                if content:
-                    message = {"role": "assistant", "content": content}
-                    if "thinking_started" in stream:
-                        message["thinking_seconds"] = stream.get("thinking_seconds", max(0, time.monotonic() - stream["thinking_started"]))
-                    current["messages"].append(message)
-                current["last_response"] = {"status": kind, "kind": "chat", "metrics": stream["metrics"]}
-                current["last_response"]["memories_used"] = deepcopy(stream.get("memories_used", []))
-                if error and kind == "error":
-                    current["last_response"]["error"] = error
-                self._save_chat(current)
-                self._streams.pop(stream_id, None)
-                self._bridge.emit(kind, stream_id=stream_id, chat_id=stream["chat_id"],
-                                  text=content or "", metrics=stream["metrics"], memories_used=stream.get("memories_used", []),
-                                  error=error if kind == "error" else None)
-        except Exception as failure:
-            with stream["data_lock"]:
-                partial = "".join(stream["parts"])
-            if kind == "done" and isinstance(answer, str):
-                partial = answer
-            with self._lock:
-                recovered = {"stream_id": stream_id, "chat_id": stream["chat_id"], "text": partial,
-                             "metrics": deepcopy(stream["metrics"]), "error": str(failure), "saved": False}
-                if not compact and not (self._closed and record.get("incognito")):
-                    self._unsaved[stream_id] = recovered
-                recovered["operation"] = stream["kind"]
-                self._bridge.emit("error", **recovered)
-        finally:
-            with self._lock:
-                self._streams.pop(stream_id, None)
-            stream["finished"].set()
+        result = self._developer.stop(stream_id)
+        return result if result["active"] else {"ok": True, "stream_id": stream_id, "active": False}
 
     def _ensure_engine(self):
         try:
@@ -1492,25 +1259,15 @@ class Api(SharingApi, PrivacyApi, ParityApi):
         self._status.close()
         with self._lock:
             self._closed = True
-            streams = list(self._streams.values())
+            streams = self._chats.close()
             tasks = self._developer.close()
             jobs = self._jobs.close()
             pulls = list(self._pulls.values())
             for job in pulls:
                 job["cancel"].set()
-            for stream in streams:
-                with stream["data_lock"]:
-                    stream["cancel"].set()
-                    if "loading" in stream:
-                        stream["loading"].close()
-            for stream_id, stream in list(self._streams.items()):
-                try:
-                    self._persist_partial(stream_id, stream)
-                except Exception:
-                    log.exception("Could not save reply while closing")
         deadline = time.monotonic() + timeout
-        for stream in streams:
-            stream["finished"].wait(max(0, deadline - time.monotonic()))
+        for finished in streams:
+            finished.wait(max(0, deadline - time.monotonic()))
         for finished in tasks:
             finished.wait(max(0, deadline - time.monotonic()))
         for finished in jobs:
@@ -1518,10 +1275,8 @@ class Api(SharingApi, PrivacyApi, ParityApi):
         for job in pulls:
             job["finished"].wait(max(0, deadline - time.monotonic()))
         with self._lock:
-            self._incognito.clear()
+            self._chats.clear_private()
             self._preview.close()
-            self._unsaved = {key: value for key, value in self._unsaved.items()
-                             if value["chat_id"] not in self._incognito_ids}
 
 
 def main():

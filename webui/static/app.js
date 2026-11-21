@@ -8,6 +8,10 @@ window.app = (() => {
   const later = (callback, ms) => (typeof setTimeout === "function" ? setTimeout(callback, ms) : null);
   const streams = new Map();
   const chats = new Map();
+  const drafts = new Map();
+  const streamNodes = new Map();
+  const chatLoads = new Map();
+  let openedChat = null;
   let selected = null;
   let connected = false;
   let engineReady = false;
@@ -17,8 +21,7 @@ window.app = (() => {
   let editingIndex = null;
   let selectedProject = null;
   let lastState = null;
-  let draftTimer = null;
-  const loadVersions = new Map();
+  let sidebarVersion = 0;
 
   function status(text) { element("status").textContent = text; }
 
@@ -30,6 +33,10 @@ window.app = (() => {
 
   function activeStream(chatId) {
     return [...streams.values()].find(stream => stream.chat_id === chatId && stream.active);
+  }
+
+  function currentChat() {
+    return openedChat?.id === selected ? openedChat : null;
   }
 
   function controls() {
@@ -54,7 +61,7 @@ window.app = (() => {
 
   // ---------- conversation ----------
   function renderMessages() {
-    const record = chats.get(selected);
+    const record = currentChat();
     element("chat-title").textContent = record ? chatTitle(record) : t("Conversation");
     element("incognito-badge").hidden = !record?.incognito;
     const nodes = [];
@@ -89,28 +96,54 @@ window.app = (() => {
     for (const stream of streams.values()) {
       if (stream.chat_id === selected && stream.operation !== "compact" && (stream.active || stream.saved === false)) replies.set(stream.id, stream);
     }
-    for (const stream of replies.values()) {
-      const text = document.createElement("div");
-      text.className = "msg msg-stream" + (stream.active ? " is-active" : "");
-      if (stream.saved === false) {
-        const warning = document.createElement("p");
-        warning.className = "notice";
-        warning.textContent = t("Not saved — copy this response before closing.");
-        text.append(warning);
-      }
-      text.append(window.premiumui?.renderReply(stream.text, undefined, stream.id) || window.renderMarkdown(stream.text));
-      nodes.push(text);
+    streamNodes.clear();
+    for (const [id, stream] of replies) {
+      const node = document.createElement("div");
+      fillStreamReply(node, stream);
+      streamNodes.set(id, node);
+      nodes.push(node);
     }
     const container = element("messages");
     const follow = nearBottom();
     container.replaceChildren(...nodes);
-    // markdown.js renders code toolbars disabled; Copy works here, Save/Preview wait for their Api methods.
-    for (const node of container.querySelectorAll?.('.code-actions [data-action]') || []) node.disabled = false;
+    enableCodeActions(container);
     renderInterrupted(record);
     renderAttachments(record);
     if (follow) scrollToEnd();
     updateJump();
     controls();
+  }
+
+  function enableCodeActions(container) {
+    for (const node of container.querySelectorAll?.(".code-actions [data-action]") || []) node.disabled = false;
+  }
+
+  function fillStreamReply(node, stream) {
+    node.className = "msg msg-stream" + (stream.active ? " is-active" : "");
+    const children = [];
+    if (stream.saved === false) {
+      const warning = document.createElement("p");
+      warning.className = "notice";
+      warning.textContent = t("Not saved — copy this response before closing.");
+      children.push(warning);
+    }
+    children.push(window.premiumui?.renderReply(stream.text, undefined, stream.id || stream.stream_id) || window.renderMarkdown(stream.text));
+    node.replaceChildren(...children);
+  }
+
+  function updateLiveReply(stream) {
+    if (openingChat || stream.chat_id !== selected || stream.operation === "compact") return;
+    const follow = nearBottom();
+    let node = streamNodes.get(stream.id);
+    if (!node) {
+      node = document.createElement("div");
+      streamNodes.set(stream.id, node);
+      element("messages").append(node);
+    }
+    fillStreamReply(node, stream);
+    enableCodeActions(node);
+    if (follow) scrollToEnd();
+    updateJump();
   }
 
   function messageActions(record, message, index) {
@@ -201,8 +234,9 @@ window.app = (() => {
 
   // ---------- versions, edit, regenerate ----------
   function startEditing(index) {
-    const record = chats.get(selected);
+    const record = currentChat();
     if (!record || activeStream(selected)) return;
+    if (editingIndex === null) rememberDraft(selected, element("prompt").value);
     editingIndex = index;
     element("prompt").value = record.messages[index].content;
     element("edit-hint").hidden = false;
@@ -214,7 +248,7 @@ window.app = (() => {
     if (editingIndex === null) return;
     editingIndex = null;
     element("edit-hint").hidden = true;
-    element("prompt").value = chats.get(selected)?.localDraft ?? "";
+    element("prompt").value = draftText(selected);
     renderMessages();
   }
 
@@ -228,9 +262,12 @@ window.app = (() => {
     try {
       const result = await call("regenerate", chatId);
       track(chatId, result);
-      await reloadChat(chatId);
-      status(t("Regenerating…"));
-      renderMessages(); renderChats();
+      if (selected === chatId) await reloadChat(chatId);
+      if (selected === chatId && !openingChat) {
+        if (streams.get(result.stream_id).active) status(t("Regenerating…"));
+        renderMessages();
+      }
+      renderChats();
     } catch (error) { showError(error); }
   }
 
@@ -238,8 +275,10 @@ window.app = (() => {
     const chatId = selected;
     try {
       const result = await call("switch_version", chatId, anchor, n);
-      chats.set(chatId, {...chats.get(chatId), ...result.chat, versions: result.versions});
-      renderMessages();
+      if (selected === chatId) {
+        openedChat = {...currentChat(), ...result.chat, versions: result.versions};
+        renderMessages();
+      }
       refreshUsage(chatId);
     } catch (error) { showError(error); }
   }
@@ -259,12 +298,46 @@ window.app = (() => {
     } catch (error) { showError(error); }
   }
 
+  function draftText(chatId) {
+    return drafts.get(chatId)?.text ?? currentChat()?.draft ?? "";
+  }
+
+  function rememberDraft(chatId, text) {
+    let draft = drafts.get(chatId);
+    if (!draft) {
+      draft = {text: undefined, version: 0, timer: null, pending: null, paused: false, dirty: false};
+      drafts.set(chatId, draft);
+    }
+    if (draft.text !== text) {
+      draft.text = text;
+      draft.version++;
+      draft.dirty = true;
+    }
+    return draft;
+  }
+
+  function cancelDraftTimer(draft) {
+    if (draft.timer !== null) clearTimeout(draft.timer);
+    draft.timer = null;
+  }
+
+  function queueDraftSave(chatId, draft) {
+    if (!draft.dirty || draft.paused || typeof clearTimeout !== "function") return;
+    cancelDraftTimer(draft);
+    const {version, text} = draft;
+    draft.timer = later(() => {
+      draft.timer = null;
+      draft.pending = Promise.resolve(draft.pending).then(async () => {
+        if (drafts.get(chatId) !== draft || draft.paused || draft.version !== version) return;
+        await call("save_draft", chatId, text);
+        if (draft.version === version) draft.dirty = false;
+      }).catch(() => {});
+    }, 700);
+  }
+
   function scheduleDraft() {
-    const chatId = selected;
-    if (!chatId || editingIndex !== null || typeof clearTimeout !== "function") return;
-    clearTimeout(draftTimer);
-    const text = element("prompt").value;
-    draftTimer = later(() => { call("save_draft", chatId, text).catch(() => {}); }, 700);
+    if (!selected || editingIndex !== null) return;
+    queueDraftSave(selected, rememberDraft(selected, element("prompt").value));
   }
 
   // ---------- attachments ----------
@@ -426,13 +499,23 @@ window.app = (() => {
     try {
       await refreshProjects();
       await refreshChats();
+      if (selectedProject !== id) return;
       if (chats.size) await openChat(chats.keys().next().value);
-      else { selected = null; renderMessages(); }
+      else {
+        if (!openingChat && currentChat() && editingIndex === null) rememberDraft(selected, element("prompt").value);
+        selectionVersion++;
+        selected = openedChat = null;
+        openingChat = false;
+        editingIndex = null;
+        element("edit-hint").hidden = true;
+        element("prompt").value = "";
+        renderMessages();
+      }
     } catch (error) { showError(error); }
   }
 
   async function openChat(id) {
-    if (!openingChat && selected && chats.has(selected) && editingIndex === null) chats.get(selected).localDraft = element("prompt").value;
+    if (!openingChat && currentChat() && editingIndex === null) rememberDraft(selected, element("prompt").value);
     editingIndex = null;
     element("edit-hint").hidden = true;
     const version = ++selectionVersion;
@@ -442,8 +525,9 @@ window.app = (() => {
     try {
       await reloadChat(id);
       if (version !== selectionVersion) return;
-      const record = chats.get(id);
-      element("prompt").value = record.localDraft ?? record.draft ?? "";
+      const record = currentChat();
+      if (!record) return;
+      element("prompt").value = draftText(id);
       if (record.model) element("model").value = modelValue(record.model, record.backend || record.environment?.backend);
       element("context").value = record.context_length ?? "";
     } catch (error) {
@@ -456,11 +540,19 @@ window.app = (() => {
   }
 
   async function reloadChat(id) {
-    const version = (loadVersions.get(id) || 0) + 1;
-    loadVersions.set(id, version);
-    const result = await call("open_chat", id);
-    if (loadVersions.get(id) !== version) return;
-    chats.set(id, {...result.chat, versions: result.versions || {}, unsaved_replies: result.unsaved_replies || [], localDraft: chats.get(id)?.localDraft});
+    const request = call("open_chat", id);
+    chatLoads.set(id, request);
+    try {
+      const result = await request;
+      if (chatLoads.get(id) !== request) {
+        await chatLoads.get(id);
+        return;
+      }
+      if (selected === id) openedChat = {...result.chat, versions: result.versions || {}, unsaved_replies: result.unsaved_replies || []};
+      if (chats.has(id)) chats.set(id, sidebarChat(result.chat));
+    } finally {
+      if (chatLoads.get(id) === request) chatLoads.delete(id);
+    }
   }
 
   async function refreshUsage(id) {
@@ -496,18 +588,25 @@ window.app = (() => {
   }
 
   async function refreshChats() {
-    const result = selectedProject ? await call("list_chats", selectedProject) : await call("list_chats");
-    const previous = new Map(chats);
+    const project = selectedProject;
+    const version = ++sidebarVersion;
+    const result = project ? await call("list_chats", project) : await call("list_chats");
+    if (version !== sidebarVersion || selectedProject !== project) return;
     chats.clear();
-    for (const chat of result.chats) chats.set(chat.id, {...previous.get(chat.id), ...chat, localDraft: previous.get(chat.id)?.localDraft});
+    for (const chat of result.chats) chats.set(chat.id, sidebarChat(chat));
     renderChats();
+  }
+
+  function sidebarChat({id, title, updated_at, incognito}) {
+    return {id, title, updated_at, incognito};
   }
 
   // Newest chats go to the top of the sidebar.
   function addChatFirst(record) {
+    sidebarVersion++;
     const rest = [...chats].filter(([id]) => id !== record.id);
     chats.clear();
-    chats.set(record.id, record);
+    chats.set(record.id, sidebarChat(record));
     for (const [id, value] of rest) chats.set(id, value);
   }
 
@@ -573,22 +672,44 @@ window.app = (() => {
     const choice = modelChoice(), model = choice.name;
     const rawContext = element("context").value;
     const editing = editingIndex;
+    const draft = editing === null ? rememberDraft(chatId, text) : null;
+    const submittedVersion = draft?.version;
     submitting = true;
+    if (draft) {
+      draft.paused = true;
+      cancelDraftTimer(draft);
+    }
     controls();
     try {
+      if (draft?.pending) await draft.pending;
       const result = editing !== null
         ? await call("edit_and_resend", chatId, editing, text)
         : await call("send", chatId, text, model, rawContext ? Number(rawContext) : null, choice.backend);
       track(chatId, result);
-      if (editing !== null) { editingIndex = null; element("edit-hint").hidden = true; }
-      chats.get(chatId).localDraft = "";
-      await reloadChat(chatId);
-      if (selected === chatId) element("prompt").value = "";
+      if (draft && draft.version === submittedVersion) {
+        draft.text = "";
+        draft.dirty = false;
+        if (selected === chatId && !openingChat && editingIndex === null) element("prompt").value = "";
+      }
+      if (selected === chatId && editing !== null && editingIndex === editing) {
+        editingIndex = null;
+        element("edit-hint").hidden = true;
+        element("prompt").value = draftText(chatId);
+      }
+      if (selected === chatId) await reloadChat(chatId);
+      else await refreshChats();
       if (selected === chatId && streams.get(result.stream_id).active) status(t("Generating…"));
-      renderMessages();
+      if (selected === chatId && !openingChat) renderMessages();
       renderChats();
     } catch (error) { showError(error); }
-    finally { submitting = false; controls(); }
+    finally {
+      if (draft && drafts.get(chatId) === draft) {
+        draft.paused = false;
+        queueDraftSave(chatId, draft);
+      }
+      submitting = false;
+      controls();
+    }
   }
 
   function rate(metrics) {
@@ -623,17 +744,21 @@ window.app = (() => {
         element("banner").hidden = true;
         return true;
       case "attached":
-        if (event.chat_id === selected) reloadChat(event.chat_id).then(renderMessages).catch(showError);
+        if (event.chat_id === selected) window.app.refreshChat(event.chat_id).catch(showError);
         return true;
       case "project_changed":
       case "project_deleted":
         refreshProjects().catch(showError);
         return true;
       case "chat_changed":
-        refreshChats().then(() => { if (event.chat_id === selected) return reloadChat(selected).then(renderMessages); }).catch(showError);
+        refreshChats().then(() => window.app.refreshChat(event.chat_id)).catch(showError);
         return true;
       case "chat_deleted":
+        sidebarVersion++;
         chats.delete(event.chat_id);
+        chatLoads.delete(event.chat_id);
+        if (drafts.has(event.chat_id)) cancelDraftTimer(drafts.get(event.chat_id));
+        drafts.delete(event.chat_id);
         renderChats();
         if (event.chat_id === selected) {
           selected = null;
@@ -651,11 +776,14 @@ window.app = (() => {
   }
 
   function onEvent(batch) {
+    const liveReplies = new Set();
+    let sidebarChanged = false;
     for (const event of Array.isArray(batch) ? batch : [batch]) {
       if (event.type === "ready") { refreshModels().catch(showError); continue; }
       // Agent progress belongs to the Developer panel, not to the engine label in the status bar.
       if (event.type === "status" && event.task_id && !event.engine) { window.devui?.onEvent(event); continue; }
       if (event.type === "status") {
+        if (event.engine) void window.devui?.syncTask?.();
         if (event.engine && (!event.chat_id || event.chat_id === selected)) window.workspaceui?.renderStatus(event);
         else if (event.text) status(event.text);
         continue;
@@ -679,25 +807,47 @@ window.app = (() => {
       if (window.modelsui?.onEvent(event)) continue;  // downloads and model list changes
       if (event.task_id) { window.devui?.onEvent(event); continue; }  // Developer task events
       if (!event.stream_id) { if (event.type === "error") showError(new Error(window.i18n?.gate?.(event.error) || event.error)); continue; }
-      const stream = streams.get(event.stream_id) || {id: event.stream_id, chat_id: event.chat_id, text: "", active: true, operation:event.operation || "chat"};
-      streams.set(event.stream_id, stream);
-      if (event.type === "token" && stream.active) stream.text += event.text;
+      let stream = streams.get(event.stream_id);
+      if (!stream) {
+        stream = {id: event.stream_id, chat_id: event.chat_id, text: "", active: true, operation: event.operation || "chat"};
+        streams.set(event.stream_id, stream);
+        sidebarChanged = true;
+      }
+      if (event.type === "token" && stream.active) {
+        stream.text += event.text;
+        liveReplies.add(stream);
+      }
       if (["done", "stopped", "error", "compact_done"].includes(event.type)) {
         if (!stream.active) continue;
         stream.active = false;
         stream.saved = event.saved;
-        if (event.text !== undefined) stream.text = event.text;
+        sidebarChanged = true;
+        if (stream.saved === false) {
+          if (event.text !== undefined) stream.text = event.text;
+          liveReplies.add(stream);
+        } else {
+          stream.text = "";
+          liveReplies.delete(stream);
+        }
         if (selected === event.chat_id) status(event.type === "error" ? event.error : `${t(event.type)}${event.metrics?.eval_count ? ` · ${event.metrics.eval_count} tokens${rate(event.metrics)}` : ""}`);
-        // Reload the event's chat, not whichever chat happens to be visible.
-        reloadChat(event.chat_id).then(() => {
-          renderMessages();
-          renderChats();
-          refreshUsage(event.chat_id);
-        }).catch(error => { if (selected === event.chat_id) showError(error); });
+        if (selected === event.chat_id) {
+          window.app.refreshChat(event.chat_id).then(() => {
+            if (selected === event.chat_id) {
+              renderChats();
+              refreshUsage(event.chat_id);
+            }
+          }).catch(error => { if (selected === event.chat_id) showError(error); });
+        } else {
+          refreshChats().catch(showError);
+        }
       }
     }
-    renderMessages();
-    renderChats();
+    for (const stream of liveReplies) updateLiveReply(stream);
+    if (sidebarChanged) {
+      renderChats();
+      renderInterrupted(currentChat());
+      controls();
+    }
   }
 
   // ---------- theme ----------
@@ -717,7 +867,37 @@ window.app = (() => {
   function openDialog(id) { const dialog = element(id); if (dialog.showModal) dialog.showModal(); else dialog.open = true; }
   function closeDialog(id) { const dialog = element(id); if (dialog.close) dialog.close(); else dialog.open = false; }
 
+  // Settings categories: each tab shows the sections tagged with its data-pane; the choice lasts the session.
+  let settingsPane = "general";
+  function showSettingsPane(name) {
+    const tabs = [...(document.querySelectorAll?.(".settings-tab") || [])];
+    if (!tabs.some(tab => tab.dataset.pane === name)) return;
+    settingsPane = name;
+    for (const tab of tabs) {
+      const active = tab.dataset.pane === name;
+      tab.setAttribute("aria-selected", String(active));
+      tab.tabIndex = active ? 0 : -1;
+    }
+    for (const section of document.querySelectorAll?.(".settings-panes > .setting-group") || []) section.hidden = section.dataset.pane !== name;
+    const panes = document.querySelector?.(".settings-panes");
+    if (panes) panes.scrollTop = 0;
+  }
+  for (const tab of document.querySelectorAll?.(".settings-tab") || []) {
+    tab.addEventListener("click", () => showSettingsPane(tab.dataset.pane));
+    tab.addEventListener("keydown", event => {
+      const tabs = [...document.querySelectorAll(".settings-tab")], index = tabs.indexOf(tab);
+      const step = {ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1}[event.key];
+      if (!step) return;
+      event.preventDefault();
+      const next = tabs[(index + step + tabs.length) % tabs.length];
+      showSettingsPane(next.dataset.pane); next.focus();
+    });
+  }
+  // Windows-only controls (firewall lock, microphone check-ins) are hidden on other systems.
+  if (root?.dataset) root.dataset.platform = /Windows/i.test(window.navigator?.userAgent || "") ? "windows" : /Mac/i.test(window.navigator?.userAgent || "") ? "mac" : "other";
+
   async function openSettings() {
+    showSettingsPane(settingsPane);
     try { await refreshModels(); } catch (error) { showError(error); }
     element("setting-theme").value = root?.getAttribute?.("data-theme") || "night";
     element("setting-idle").value = String(lastState?.settings?.idle_unload_minutes ?? 0);
@@ -752,7 +932,7 @@ window.app = (() => {
   element("prompt").addEventListener("keydown", event => {
     if (window.workspaceui?.promptKey(event)) return;
     if (event.key === "ArrowUp" && !element("prompt").value && !event.isComposing && !activeStream(selected)) {
-      const messages = chats.get(selected)?.messages || [];
+      const messages = currentChat()?.messages || [];
       for (let index = messages.length - 1; index >= 0; index--) {
         if (messages[index].role === "user") { event.preventDefault(); startEditing(index); return; }
       }
@@ -962,8 +1142,12 @@ window.app = (() => {
     try {
       const result = await call("rename_chat", id, element("rename-input").value);
       closeDialog("rename-dialog");
-      chats.set(id, {...chats.get(id), title: result.chat.title});
-      renderChats(); renderMessages();
+      if (chats.has(id)) chats.set(id, sidebarChat(result.chat));
+      if (selected === id && currentChat()) {
+        openedChat.title = result.chat.title;
+        element("chat-title").textContent = chatTitle(openedChat);
+      }
+      renderChats();
     } catch (error) { showError(error); }
   });
   element("delete-chat").addEventListener("click", () => deleteChat(selected));
@@ -1053,9 +1237,6 @@ window.app = (() => {
   // Mission Control opens the live Compute window (for a second screen); it is not a view in this window.
   const openMissionControl = () => call("open_compute_window").catch(showError);
   element("open-mission-control").addEventListener("click", openMissionControl);
-  // Windows-only controls (firewall lock, microphone check-ins) are hidden on other systems.
-  const platformRoot = document.documentElement;
-  if (platformRoot?.dataset) platformRoot.dataset.platform = /Windows/i.test(window.navigator?.userAgent || "") ? "windows" : /Mac/i.test(window.navigator?.userAgent || "") ? "mac" : "other";
   element("open-models").addEventListener("click", () => showView("models"));
 
   async function selectModel(name, backend = "Ollama") {
@@ -1070,6 +1251,10 @@ window.app = (() => {
   function setPrompt(text) { element("prompt").value = text; fitPrompt(); scheduleDraft(); element("prompt").focus?.(); }
   window.addEventListener("languagechange", () => { renderMessages(); renderChats(); renderProjectBar(); });
   return {onEvent, showView, syncContext, selectModel, modelChoice, setPrompt,
-          currentChat: () => chats.get(selected), refreshChat: async id => { await reloadChat(id); if (selected === id) renderMessages(); },
+          currentChat, refreshChat: async id => {
+            if (selected !== id) return;
+            await reloadChat(id);
+            if (selected === id && !openingChat) renderMessages();
+          },
           refreshModels: () => refreshModels().catch(showError)};
 })();

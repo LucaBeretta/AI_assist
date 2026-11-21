@@ -5,7 +5,9 @@ window.devui = (() => {
   const t = (text, vars = {}) => window.i18n ? window.i18n.t(text, vars) : text.replace(/\{(\w+)\}/g, (_, key) => String(vars[key] ?? ""));
 
   const element = id => document.getElementById(id);
-  let task = null;          // {id, chatId, steps: [], cards: Map, running}
+  let task = null;
+  let starting = null;
+  let syncing = false;
   let chatId = null;        // Developer chat used for the current project
 
   async function call(method, ...args) {
@@ -198,7 +200,15 @@ window.devui = (() => {
 
   // ---------- events ----------
   function onEvent(event) {
-    if (!task || event.task_id !== task.id) return;
+    if (starting && event.chat_id === starting.chatId) {
+      starting.events.push(event);
+      return;
+    }
+    if (!task?.running || event.task_id !== task.id) return;
+    if (event.type === "plan_approval" || event.type === "approval") {
+      if (task.approvals.has(event.approval_id)) return;
+      task.approvals.add(event.approval_id);
+    }
     switch (event.type) {
       case "status": { const text = window.i18n?.gate?.(event.text) || event.text; status(text); activityLine("info", text); break; }
       case "hybrid_stage": case "hybrid_warning": status(event.text); activityLine("info", event.text); break;
@@ -231,6 +241,22 @@ window.devui = (() => {
     }
   }
 
+  async function syncTask() {
+    if (!task?.running || syncing || !window.pywebview?.api?.developer_task_state) return;
+    const id = task.id;
+    syncing = true;
+    try {
+      const snapshot = await call("developer_task_state", id);
+      if (task.id !== id || !task.running) return;
+      for (const approval of snapshot.approvals) onEvent(approval);
+      if (snapshot.result) onEvent(snapshot.result);
+    } catch (error) {
+      // The next status tick can recover from a transient bridge failure.
+    } finally {
+      syncing = false;
+    }
+  }
+
   function finish(event) {
     task.running = false;
     summarize();
@@ -248,14 +274,17 @@ window.devui = (() => {
 
   function controls() {
     const running = Boolean(task?.running);
-    element("dev-run").disabled = running;
+    const busy = running || Boolean(starting);
+    element("dev-run").disabled = busy;
     element("dev-stop").disabled = !running;
-    element("dev-project").disabled = running;
+    element("dev-project").disabled = busy;
+    element("dev-browse").disabled = busy;
   }
 
   // ---------- run / stop ----------
   async function run(event) {
     event?.preventDefault?.();
+    if (starting || task?.running) return;
     const text = element("dev-task").value.trim();
     const project = element("dev-project").value.trim();
     if (!text) return;
@@ -263,24 +292,32 @@ window.devui = (() => {
     const choice = window.app?.modelChoice() || {name: element("model").value, backend: "Ollama"};
     if (choice.backend !== "Ollama") { status(t("Developer currently requires an Ollama model.")); return; }
     const model = choice.name;
+    starting = {chatId: null, events: []};
+    controls();
     try {
       if (!chatId) {
         const created = await call("new_chat");
         chatId = created.chat.id;
       }
       await call("set_chat_model", chatId, model, "Ollama");
+      starting.chatId = chatId;
       remember("aiassist-dev-project", project);
       const steps = Number(document.querySelector('input[name="dev-steps"]:checked')?.value || 20);
       const context = Number(element("context").value) || 16384;
-      const result = await call("run_agent", chatId, text, project, element("dev-plan").checked, steps, Math.max(2048, context), Boolean(element("dev-quality").checked));
-      task = {id: result.task_id, chatId, running: true, activity: null, current: null};
+      const planFirst = element("dev-plan").checked;
+      const result = await call("run_agent", chatId, text, project, planFirst, steps, Math.max(2048, context), Boolean(element("dev-quality").checked));
+      const events = starting.events;
+      starting = null;
+      task = {id: result.task_id, chatId, running: true, activity: null, current: null, approvals: new Set()};
       const bubble = node("div", "dev-task-bubble");
       bubble.append(node("pre", "", text));
       append(bubble);
       element("dev-task").value = "";
-      status(element("dev-plan").checked ? t("Planning (read-only)…") : t("Working…"));
-      controls();
+      status(planFirst ? t("Planning (read-only)…") : t("Working…"));
+      for (const item of events) onEvent(item);
+      void syncTask();
     } catch (error) { status(error.message); }
+    finally { starting = null; controls(); }
   }
 
   async function stop() {
@@ -296,8 +333,10 @@ window.devui = (() => {
     if (!project) { list.replaceChildren(node("p", "dev-hint", t("Choose a project folder to see its checkpoints."))); return; }
     try {
       const result = await call("list_checkpoints", project);
-      if (!result.checkpoints.length) { list.replaceChildren(node("p", "dev-hint", t("No checkpoints yet. One is saved before the first change of each task."))); return; }
-      list.replaceChildren(...result.checkpoints.map(item => {
+      if (element("dev-project").value.trim() !== project) return;
+      const rows = (result.warnings || []).map(warning => node("p", "dev-warning", warning));
+      if (!result.checkpoints.length) rows.push(node("p", "dev-hint", t("No checkpoints yet. One is saved before the first change of each task.")));
+      for (const item of result.checkpoints) {
         const row = node("div", "checkpoint");
         const files = Object.keys(item.files || {});
         const when = new Date(item.created_at);
@@ -310,8 +349,9 @@ window.devui = (() => {
           try { const done = await call("restore_checkpoint", item.task_id); status(t("Restored {v0} file(s).", {v0: (done.restored)})); }
           catch (error) { status(error.message); }
         }));
-        return row;
-      }));
+        rows.push(row);
+      }
+      list.replaceChildren(...rows);
     } catch (error) { list.replaceChildren(node("p", "dev-hint", error.message)); }
   }
 
@@ -386,11 +426,11 @@ window.devui = (() => {
   }
 
   // ---------- wiring ----------
-  function onShow() { loadCheckpoints(); loadFiles(); loadPins(); element("dev-task").focus?.(); }
+  function onShow() { loadCheckpoints(); loadFiles(); loadPins(); void syncTask(); element("dev-task").focus?.(); }
 
   element("dev-project").value = recall("aiassist-dev-project") || "";
   async function setProject(folder) {
-    if (task?.running) throw new Error(t("Stop the current task before changing its folder."));
+    if (starting || task?.running) throw new Error(t("Stop the current task before changing its folder."));
     if (!chatId) chatId = (await call("new_chat", false, null, folder)).chat.id;
     await call("set_chat_project", chatId, folder);
     element("dev-project").value = folder; remember("aiassist-dev-project", folder);
@@ -412,5 +452,5 @@ window.devui = (() => {
   element("dev-stop").addEventListener("click", stop);
   element("dev-refresh-checkpoints").addEventListener("click", loadCheckpoints);
   controls();
-  return {onEvent, onShow, setProject, isRunning: () => Boolean(task?.running), stop};
+  return {onEvent, onShow, setProject, syncTask, isRunning: () => Boolean(task?.running), stop};
 })();
