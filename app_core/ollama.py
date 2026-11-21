@@ -16,6 +16,7 @@ import urllib.parse
 import urllib.request
 
 import network_gate
+from app_core.streaming import open_stream
 from response_metrics import response_metrics
 
 DEFAULT_URL = "http://localhost:11434"
@@ -159,7 +160,8 @@ def ensure_running(base, check, progress=lambda text: None, environ=None):
     raise RuntimeError("Ollama did not become ready. Check Ollama and click Refresh models.")
 
 
-def stream_chat(base, messages, model, context_length=None, on_chunk=None, on_metrics=None, keep_alive=-1):
+def stream_chat(base, messages, model, context_length=None, on_chunk=None, on_metrics=None, keep_alive=-1,
+                cancel_event=None):
     """Stream one chat answer from ``/api/chat``; returns the complete text.
 
     Each text chunk goes to ``on_chunk`` as it arrives, and Ollama's timing
@@ -175,8 +177,7 @@ def stream_chat(base, messages, model, context_length=None, on_chunk=None, on_me
         method="POST",
     )
     try:
-        with network_gate.task(f"Send your message to {model}"), \
-                urllib.request.urlopen(request, timeout=120) as response:
+        with network_gate.task(f"Send your message to {model}"), open_stream(request, 120, cancel_event) as response:
             parts = []
             received = 0
             while True:
