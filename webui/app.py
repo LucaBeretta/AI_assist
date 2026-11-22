@@ -39,6 +39,7 @@ from webui.colibri import ColibriService
 from webui.api_utils import json_method as _json_method
 from webui.jobs import Jobs
 from webui.parity import ParityApi, hybrid_settings, relaunch
+from webui.feedback_loop import FeedbackApi
 from webui.privacy import PrivacyApi
 from app_core.privacy import privacy_status
 from compute_telemetry import TelemetrySampler
@@ -88,7 +89,7 @@ def inference_message(message):
     return item
 
 
-class Api(SharingApi, PrivacyApi, ParityApi):
+class Api(FeedbackApi, SharingApi, PrivacyApi, ParityApi):
     def __init__(self, bridge, store=None, engine=None, hardware=None, desktop=None, colibri=None):
         self._bridge = bridge
         self._store = store if store is not None else ChatStore()
