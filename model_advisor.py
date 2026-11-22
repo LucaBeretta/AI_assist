@@ -275,6 +275,10 @@ def estimate_memory(size_bytes):
 
 
 def _parameters(variant):
+    # Hugging Face tags name a quantization, not a size; the size comes from the repository name.
+    if "parameters" in variant:
+        value = variant["parameters"]
+        return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
     tag = variant["name"].split(":", 1)[-1]
     match = re.fullmatch(r"e?(\d+(?:\.\d+)?)([bm])", tag, re.I)
     if not match:
@@ -396,5 +400,47 @@ def recommend_models(hardware, catalog):
             "source_url": f"https://ollama.com/library/{urllib.parse.quote(name, safe=':')}",
         })
         if len(cards) >= 6:
+            break
+    return cards
+
+
+# Quantizations in order of preference: Q4_K_M balances quality and size, then
+# better quality, then smaller files for tighter memory.
+_HF_QUANTS = ("Q4_K_M", "Q5_K_M", "Q4_K_S", "Q6_K", "Q8_0", "IQ4_XS", "Q3_K_M")
+
+
+def recommend_hugging_face(hardware, models, limit=3, skip=()):
+    """Up to ``limit`` popular Hugging Face models, each in the preferred quantization that fits.
+
+    ``models`` comes from model_library.fetch_hugging_face_models. A model whose
+    size cannot be judged safely is left out rather than guessed.
+    """
+    if not hardware.get("server_local", True):
+        return []
+    cards, skip = [], set(skip)
+    for model in models:
+        if not isinstance(model, dict) or not isinstance(model.get("variants"), list):
+            continue
+        by_quant = {variant.get("quant"): variant for variant in model["variants"] if isinstance(variant, dict)}
+        for quant in _HF_QUANTS:
+            variant = by_quant.get(quant)
+            if variant is None or variant["name"] in skip:
+                continue
+            sized = {**variant, "parameters": model.get("parameters")}
+            fit = _fit(hardware, sized)
+            if fit is None:
+                continue
+            fit, reason = fit
+            downloads = model.get("downloads")
+            cards.append({
+                "name": variant["name"], "size_bytes": variant["size_bytes"],
+                "purpose": "Popular on Hugging Face" + (f" · {downloads:,} downloads" if downloads else ""),
+                "fit": fit, "reason": reason, "source": "Hugging Face",
+                "estimated_memory_bytes": estimate_memory(variant["size_bytes"]),
+                "context_length": CONTEXT_LENGTH, "setup_steps": _steps(hardware, variant, fit),
+                "source_url": f"https://huggingface.co/{model['repo']}",
+            })
+            break
+        if len(cards) >= limit:
             break
     return cards

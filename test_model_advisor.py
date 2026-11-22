@@ -213,3 +213,41 @@ class RecommendationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HuggingFaceSuggestionTests(unittest.TestCase):
+    def model(self, repo, parameters, sizes, downloads=1000):
+        return {"repo": repo, "parameters": parameters, "downloads": downloads,
+                "variants": [{"name": f"hf.co/{repo}:{quant}", "quant": quant, "size_bytes": int(size * advisor.GIB)}
+                             for quant, size in sizes.items()]}
+
+    def test_the_preferred_quantization_that_fits_is_suggested(self):
+        models = [self.model("org/Small-8B-GGUF", 8, {"Q4_K_M": 4.9, "Q8_0": 8.5}, 2500000),
+                  self.model("org/Big-70B-GGUF", 70, {"Q4_K_M": 42.5, "Q3_K_M": 34.3}),
+                  self.model("org/Mid-14B-GGUF", 14, {"Q8_0": 15.7, "Q5_K_M": 10.5})]
+        cards = advisor.recommend_hugging_face(rig(), models)
+        self.assertEqual([card["name"] for card in cards],
+                         ["hf.co/org/Small-8B-GGUF:Q4_K_M", "hf.co/org/Mid-14B-GGUF:Q5_K_M"])
+        first = cards[0]
+        self.assertEqual(first["source"], "Hugging Face")
+        self.assertEqual(first["source_url"], "https://huggingface.co/org/Small-8B-GGUF")
+        self.assertIn("2,500,000 downloads", first["purpose"])
+        self.assertIn("ollama pull hf.co/org/Small-8B-GGUF:Q4_K_M", " ".join(first["setup_steps"]))
+
+    def test_large_models_are_not_suggested_for_cpu_only_computers(self):
+        laptop = {"ram_total_bytes": 64 * advisor.GIB, "ram_available_bytes": 50 * advisor.GIB, "gpus": [],
+                  "disk_free_bytes": 500 * advisor.GIB, "server_local": True}
+        models = [self.model("org/Mid-27B-GGUF", 27, {"Q4_K_M": 16.5}),
+                  self.model("org/Unknown-GGUF", None, {"Q4_K_M": 4.0}),
+                  self.model("org/Tiny-1.5B-GGUF", 1.5, {"Q4_K_M": 1.1})]
+        self.assertEqual([card["name"] for card in advisor.recommend_hugging_face(laptop, models)],
+                         ["hf.co/org/Unknown-GGUF:Q4_K_M", "hf.co/org/Tiny-1.5B-GGUF:Q4_K_M"])
+
+    def test_skips_names_already_suggested_and_remote_servers(self):
+        models = [self.model("org/Small-8B-GGUF", 8, {"Q4_K_M": 4.9, "Q5_K_M": 5.7})]
+        cards = advisor.recommend_hugging_face(rig(), models, skip={"hf.co/org/Small-8B-GGUF:Q4_K_M"})
+        self.assertEqual([card["name"] for card in cards], ["hf.co/org/Small-8B-GGUF:Q5_K_M"])
+        self.assertEqual(advisor.recommend_hugging_face({**rig(), "server_local": False}, models), [])
+        self.assertEqual(len(advisor.recommend_hugging_face(rig(), [self.model(f"org/M{i}-7B-GGUF", 7, {"Q4_K_M": 4.4})
+                                                                   for i in range(5)])), 3)
+

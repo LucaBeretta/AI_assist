@@ -215,6 +215,38 @@ class HookTests(GateTestCase):
         self.assertEqual((len(self.asked), errors), (1, []))
 
 
+class DeclaredHostsTests(GateTestCase):
+    def lookup(self, host):
+        gate._hook("socket.getaddrinfo", (host, 443, 0, 0, 0))
+
+    def test_one_approval_covers_the_sites_a_task_declares_and_nothing_else(self):
+        self.answer = True
+        with gate.task("Read model lists", "Model list pages.", hosts=("ollama.com", "HuggingFace.co.", "localhost")):
+            self.lookup("ollama.com")
+            self.lookup("huggingface.co")
+            self.lookup("ollama.com")
+            self.assertEqual(len(self.asked), 1)
+            self.assertEqual(self.asked[0].target, "huggingface.co and ollama.com")
+            self.assertEqual(self.asked[0].purpose, "Read model lists")
+            self.assertEqual(self.asked[0].scope, "until this task finishes")
+            self.lookup("example.com")
+            self.assertEqual([request.target for request in self.asked[1:]], ["example.com"])
+            with socket.socket() as connection:
+                gate._hook("socket.connect", (connection, ("93.184.215.14", 443)))
+            self.assertEqual(len(self.asked), 2)
+        # The approval ended with its task.
+        self.lookup("huggingface.co")
+        self.assertEqual(self.asked[-1].target, "huggingface.co")
+
+    def test_refusing_the_shared_request_blocks_every_declared_site(self):
+        with gate.task("Read model lists", hosts=("ollama.com", "huggingface.co")):
+            with self.assertRaises(gate.InternetBlocked):
+                self.lookup("huggingface.co")
+            with self.assertRaises(gate.InternetBlocked):
+                self.lookup("ollama.com")
+        self.assertEqual(len(self.asked), 1)
+
+
 class OllamaTests(GateTestCase):
     def chat(self, model):
         body = json.dumps({"model": model, "messages": []}).encode("utf-8")
@@ -228,6 +260,21 @@ class OllamaTests(GateTestCase):
         self.assertEqual(len(self.asked), 1)
         self.assertEqual(self.asked[0].kind, "Ollama model download")
         self.assertIn("llama3:8b", self.asked[0].target)
+        self.assertIn("online registry", self.asked[0].target)
+
+    def test_hugging_face_downloads_name_hugging_face_and_still_need_approval(self):
+        self.answer = True
+        for name in ("hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M", "HuggingFace.co/org/model-GGUF"):
+            body = json.dumps({"model": name, "stream": True}).encode("utf-8")
+            gate._hook("urllib.Request", ("http://127.0.0.1:11434/api/pull", body, {}, "POST"))
+        self.assertEqual(len(self.asked), 2)
+        for request in self.asked:
+            self.assertEqual(request.kind, "Ollama model download")
+            self.assertIn("from Hugging Face", request.target)
+            self.assertIn("Hugging Face", request.sends)
+        self.assertTrue(gate.hugging_face_model(" hf.co/a/b "))
+        for name in ("llama3:8b", "hf.co", "myhf.co/a/b", None):
+            self.assertFalse(gate.hugging_face_model(name))
 
     def test_cloud_models_need_approval_and_local_models_do_not(self):
         with patch.object(gate, "_remote_model", return_value=False):
