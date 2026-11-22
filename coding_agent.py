@@ -70,11 +70,30 @@ _SYSTEM = (
 )
 
 
+def _blender_hint(path):
+    """How to drive an installed Blender without its window: a script file and one approved command."""
+    if not path:
+        return ""
+    call = f'& "{path}"' if os.name == "nt" else '"' + path.replace('"', '\\"') + '"'
+    return (f" Blender is installed. For 3D work, write a bpy script in the project, then run_command: {call} "
+            "--background --factory-startup [file.blend] --python script.py. Save with "
+            "bpy.ops.wm.save_as_mainfile(filepath=...); render with bpy.ops.render.render(write_still=True). "
+            "Commands stop after 120 seconds, so keep test renders small.")
+
+
 def _system_prompt():
     """Describe the shell actually selected by run_command without growing small requests."""
     if os.name == "nt":
-        return _SYSTEM + "Windows: run_command uses PowerShell 5.1, no && or backslash quote escapes. Prefer script files to long python -c commands."
-    return _SYSTEM + f"OS: {sys.platform}; run_command uses /bin/sh. Prefer script files to long python -c commands."
+        shell = "Windows: run_command uses PowerShell 5.1, no && or backslash quote escapes. Prefer script files to long python -c commands."
+    else:
+        shell = f"OS: {sys.platform}; run_command uses /bin/sh. Prefer script files to long python -c commands."
+    try:
+        blender = projects.find_blender()
+    except Exception:
+        # Looking for Blender must never stop a task; without it the hint is simply left out.
+        log.debug("Could not look for Blender", exc_info=True)
+        blender = None
+    return _SYSTEM + shell + _blender_hint(blender)
 
 
 def _schema(name, description, properties, required=()):
