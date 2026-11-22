@@ -5,13 +5,16 @@ helpers never execute generated code or write project files.
 """
 
 import codecs
+import glob
 import http.client
 import itertools
 import json
 import os
 from pathlib import Path, PureWindowsPath
 import re
+import shutil
 import stat
+import sys
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -391,3 +394,33 @@ def fetch_model_capabilities(host, model):
         "parameter_size": value_or_none(details.get("parameter_size")),
         "quantization": value_or_none(details.get("quantization_level")),
     }
+
+
+def _version_key(path):
+    # "Blender 4.10" is newer than "Blender 4.9": compare the numbers, not the text.
+    return [int(part) for part in re.findall(r"\d+", Path(path).parent.name)]
+
+
+def find_blender():
+    """The Blender program to run in the background, or None when it is not installed.
+
+    AI_ASSIST_BLENDER names one explicitly. Otherwise Blender on PATH, then the
+    standard install places: the newest "Blender Foundation" folder on Windows,
+    or Blender.app on macOS. Nothing is started; only files are looked up.
+    """
+    override = os.environ.get("AI_ASSIST_BLENDER", "").strip()
+    candidates = [override] if override else []
+    candidates.append(shutil.which("blender"))
+    if os.name == "nt":
+        for root in (os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)")):
+            if root:
+                pattern = os.path.join(root, "Blender Foundation", "Blender*", "blender.exe")
+                candidates.extend(sorted(glob.glob(pattern), key=_version_key, reverse=True))
+    elif sys.platform == "darwin":
+        candidates += ["/Applications/Blender.app/Contents/MacOS/Blender",
+                       os.path.expanduser("~/Applications/Blender.app/Contents/MacOS/Blender")]
+    for candidate in candidates:
+        if candidate and os.path.isfile(candidate):
+            return os.path.abspath(candidate)
+    return None
+

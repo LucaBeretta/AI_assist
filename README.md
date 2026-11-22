@@ -70,6 +70,10 @@ Review is off by default. It adds at most one 768-token review request with a 12
 
 Developer commands run with your account's permissions from the chosen project directory; they are not an operating-system sandbox. Review the destination, diff and command before approving. Model file paths remain confined to the project, with secret, binary, dependency and generated paths excluded. Read sizes, context and tool execution are bounded. The saved agent file limit defaults to 64 KB and supports choices up to 1 MB; large text can be read in bounded line ranges.
 
+### Blender
+
+When Blender is installed, Developer tells the model where it is, so a task like "render a 512-pixel preview of scene.blend" or "add a ground plane to every .blend file here" can use it. The model writes a Blender Python script in the project and asks to run Blender in the background (`--background --factory-startup --python script.py`). The file write and the command each need your approval, as usual, and commands stop after 120 seconds. AI Assist looks for Blender on `PATH`, in `Program Files\Blender Foundation` on Windows (the newest version) and in `Applications` on macOS. Set `AI_ASSIST_BLENDER` to choose a specific copy. This does not connect to a Blender window that is already open.
+
 ### Shared memory across chats
 
 Use **Settings → Shared memory** to enable/disable notes, add, edit or forget them. A chat's right-click menu selects its memories. Replies show the memories used for that request. Incognito requests do not read or write shared memory. Changing notes affects future requests and does not remove text already in a conversation.
