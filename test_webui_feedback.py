@@ -1,5 +1,4 @@
 """Post-task feedback never reruns model requests or silently teaches memory."""
-import json
 import unittest
 
 from webui.feedback_loop import FeedbackLog
