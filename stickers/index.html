@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f6f2e8">
+  <meta name="description" content="Discover AI Assist, an open-source desktop workspace for local AI, and find your way to the community.">
+  <title>Stickers | AI Assist</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      color-scheme: light;
+      --paper: #f6f2e8;
+      --ink: #201b26;
+      --violet: #552cba;
+      --lavender: #d9cbff;
+      --rule: #bdb4c5;
+      --display: "Bricolage Grotesque", Georgia, serif;
+      --body: "DM Sans", sans-serif;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    body { margin: 0; min-width: 0; background: var(--paper); color: var(--ink); font-family: var(--body); }
+    [hidden] { display: none !important; }
+    .frame { width: min(74rem, 100%); margin-inline: auto; padding-inline: clamp(1.25rem, 5vw, 4rem); }
+    .masthead { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding-block: 1.1rem; border-bottom: 1px solid var(--rule); }
+    .brand { display: inline-flex; align-items: center; gap: .55rem; font: 800 1.15rem var(--display); }
+    .brand svg { width: 1.6rem; height: 1.6rem; color: var(--violet); }
+    .masthead a, .project-link { color: var(--ink); text-underline-offset: .24em; }
+    a:focus-visible { outline: 3px solid var(--violet); outline-offset: 5px; }
+    .hero { display: grid; gap: clamp(2rem, 6vw, 5rem); padding-block: clamp(2.4rem, 8vw, 6.5rem); align-items: center; }
+    h1 { max-width: 10ch; margin: 0; font: 800 clamp(2.9rem, 7.8vw, 7rem)/.91 var(--display); letter-spacing: -.065em; }
+    h1 span { color: var(--violet); }
+    .intro { max-width: 36ch; margin: 1.3rem 0 1.5rem; font-size: clamp(1rem, 2.5vw, 1.2rem); line-height: 1.55; }
+    .actions { display: flex; flex-wrap: wrap; align-items: center; gap: .85rem 1.1rem; }
+    .button { min-height: 3rem; display: inline-flex; align-items: center; gap: 1rem; padding: .7rem 1.1rem; border: 1px solid var(--ink); background: var(--violet); color: white; font-weight: 700; text-decoration: none; box-shadow: 3px 3px 0 var(--ink); transition: transform .16s ease, box-shadow .16s ease; }
+    .button:hover { transform: translate(-2px, -2px); box-shadow: 5px 5px 0 var(--ink); }
+    .button:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--ink); }
+    .status { margin: 0 0 .85rem; color: #584e60; line-height: 1.5; }
+    .print { position: relative; display: grid; place-items: center; min-height: 14rem; aspect-ratio: 5 / 4; overflow: hidden; isolation: isolate; border: 1px solid var(--ink); background: var(--lavender); background-image: radial-gradient(#7157a16e .65px, transparent .9px); background-size: 8px 8px; }
+    .print::before { content: ""; position: absolute; inset: 12%; border: 1px dashed #7157a1; }
+    .sticker { display: grid; gap: .6rem; justify-items: center; transform: rotate(-9deg); padding: clamp(1.2rem, 4vw, 2.6rem); border: 2px solid var(--ink); border-radius: 21% 16% 20% 15%; background: var(--paper); outline: 6px solid var(--paper); box-shadow: 11px 14px 0 var(--violet); }
+    .sticker svg { width: clamp(3.6rem, 8vw, 6rem); height: auto; color: var(--violet); }
+    .sticker strong { font: 800 clamp(1.3rem, 4vw, 2.3rem)/1 var(--display); letter-spacing: -.05em; }
+    @media (min-width: 48rem) { .hero { grid-template-columns: minmax(0, 1.12fr) minmax(0, 1fr); } }
+    @media (prefers-reduced-motion: reduce) { .button { transition: none; } }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <header class="masthead">
+      <span class="brand">
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M12 2.8 19.8 7v10L12 21.2 4.2 17V7z"/><path d="M8.4 14.7V9.3M12 16.5v-9M15.6 14.7V9.3"/></svg>
+        AI Assist
+      </span>
+      <a href="https://github.com/LucaBeretta/AI_assist">GitHub</a>
+    </header>
+    <main class="hero">
+      <section aria-labelledby="welcome">
+        <h1 id="welcome">Join the <span>AI Assist</span> community.</h1>
+        <p class="intro">AI Assist is an open-source desktop workspace for chatting and coding with local models. Explore the project and help shape it.</p>
+        <p id="join-status" class="status">The community invitation isn’t available yet.</p>
+        <div class="actions">
+          <a id="join-link" class="button" hidden>Join the community <span aria-hidden="true">↗</span></a>
+          <a class="project-link" href="https://github.com/LucaBeretta/AI_assist">Explore the project</a>
+        </div>
+      </section>
+      <div class="print" aria-hidden="true">
+        <div class="sticker">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round"><path d="M12 2.8 19.8 7v10L12 21.2 4.2 17V7z"/><path d="M8.4 14.7V9.3M12 16.5v-9M15.6 14.7V9.3"/></svg>
+          <strong>AI Assist</strong>
+        </div>
+      </div>
+    </main>
+  </div>
+  <script src="./join-config.js"></script>
+  <script>
+    const destination = window.STICKERS_JOIN_URL;
+    if (typeof destination === "string" && destination.trim()) {
+      let url;
+      try { url = new URL(destination); } catch { /* Keep the invitation status visible. */ }
+      if (url?.protocol === "https:") {
+        const link = document.getElementById("join-link");
+        link.href = url.href;
+        link.hidden = false;
+        document.getElementById("join-status").hidden = true;
+      }
+    }
+  </script>
+</body>
+</html>
