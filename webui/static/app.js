@@ -835,6 +835,13 @@ window.app = (() => {
             if (selected === event.chat_id) {
               renderChats();
               refreshUsage(event.chat_id);
+              if (event.type === "done" && event.operation !== "compact" && event.saved !== false) {
+                const record = window.app.currentChat();
+                const index = (record?.messages?.length || 0) - 1;
+                if (record?.id === event.chat_id && !record?.incognito && record?.messages?.[index]?.role === "assistant") {
+                  window.feedbackui?.chat(event.chat_id, index);
+                }
+              }
             }
           }).catch(error => { if (selected === event.chat_id) showError(error); });
         } else {
