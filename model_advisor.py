@@ -409,11 +409,13 @@ def recommend_models(hardware, catalog):
 _HF_QUANTS = ("Q4_K_M", "Q5_K_M", "Q4_K_S", "Q6_K", "Q8_0", "IQ4_XS", "Q3_K_M")
 
 
-def recommend_hugging_face(hardware, models, limit=3, skip=()):
+def recommend_hugging_face(hardware, models, limit=3, skip=(), available=None):
     """Up to ``limit`` popular Hugging Face models, each in the preferred quantization that fits.
 
     ``models`` comes from model_library.fetch_hugging_face_models. A model whose
-    size cannot be judged safely is left out rather than guessed.
+    size cannot be judged safely is left out rather than guessed. ``available(tag)``,
+    when given, is asked about each chosen tag; one it answers False for is never
+    suggested, so the next quantization is tried instead.
     """
     if not hardware.get("server_local", True):
         return []
@@ -428,7 +430,7 @@ def recommend_hugging_face(hardware, models, limit=3, skip=()):
                 continue
             sized = {**variant, "parameters": model.get("parameters")}
             fit = _fit(hardware, sized)
-            if fit is None:
+            if fit is None or (available is not None and available(variant["name"]) is False):
                 continue
             fit, reason = fit
             downloads = model.get("downloads")
