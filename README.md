@@ -64,6 +64,25 @@ Ollama executes the approved task once. Colibri then receives one bounded review
 
 Review is off by default. It adds at most one 768-token review request with a 120-second HTTP deadline. A failed or cancelled review preserves completed worker changes and history; the worker is never automatically retried. Loading and review can add time. Activity records the stages.
 
+### Continuous improvement feedback (opt-in memory)
+
+After a successfully saved chat answer or completed Developer task, AI Assist offers a small,
+non-modal **Was this useful?** prompt. **Yes** records a rating; **Not quite** allows a
+short correction. **Skip** dismisses the prompt. The existing manual **Give feedback**
+action still prepares a revised prompt without sending it.
+
+Ratings and corrections stay in the private local `task-feedback.json` journal.
+They do not trigger a model request, repeat any commands, modify project files,
+or automatically change model instructions. A separate unchecked **Remember this as a
+preference** option explicitly adds the user's written preference to shared memory.
+Incognito chats never persist feedback. The journal contains no original answer,
+prompt, file content or task command. Feedback is bounded and saved atomically.
+The offer is not modal; the user can continue to work without rating.
+
+The goal is to make learning visible and controlled: corrections may guide a future
+revision when the user asks; the journal is not evidence that the model's quality
+has improved without subsequent evaluation.
+
 ### Feedback and verification
 
 **Give feedback** on an answer prepares a follow-up draft with your comments and optional success criteria. Review the draft before sending it. Feedback does not send a request or repeat edits automatically.
