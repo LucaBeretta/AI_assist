@@ -35,6 +35,27 @@ for label, hardware in computers.items():
     for card in cards:
         print(f"  {card['name']}  {card['size_bytes'] / GIB:.1f} GB  [{card['fit']}]  {card['purpose']}")
 
+# Ask Hugging Face's registry, as Ollama does, whether each tag can be pulled.
+import urllib.error
+import urllib.request
+def manifest(tag):
+    repo, quant = tag.removeprefix("hf.co/").rsplit(":", 1)
+    request = urllib.request.Request(f"https://huggingface.co/v2/{repo}/manifests/{quant}", method="GET", headers={
+        "Accept": "application/vnd.docker.distribution.manifest.v2+json", "User-Agent": "ollama/0.40.17"})
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            return response.status, response.read(300).decode("utf-8", "replace")
+    except urllib.error.HTTPError as error:
+        return error.code, error.read(300).decode("utf-8", "replace")
+print("\nRegistry check for every variant:")
+for model in models:
+    for variant in model["variants"]:
+        status, body = manifest(variant["name"])
+        print(f"  {status}  {variant['name']}  {body[:120]!r}")
+top = model_advisor.recommend_hugging_face(computers["PC with RTX 4090 (24 GB)"], models)
+with open(os.environ.get("GITHUB_OUTPUT", os.devnull), "a", encoding="utf-8") as output:
+    output.write(f"top={top[0]['name'] if top else ''}\n")
+
 smallest = min((v for m in models for v in m["variants"]), key=lambda v: v["size_bytes"])
 print(f"\nSmallest tag: {smallest['name']} ({smallest['size_bytes'] / GIB:.2f} GB)")
 with open(os.environ.get("GITHUB_OUTPUT", os.devnull), "a", encoding="utf-8") as output:

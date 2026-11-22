@@ -30,6 +30,8 @@ jobs:
         run: |
           (ollama serve > ollama.log 2>&1 &)
           for i in $(seq 1 30); do curl -sf http://127.0.0.1:11434/api/version && break; sleep 1; done
-          echo "Pulling ${{ steps.suggest.outputs.tag }}"
-          ollama pull "${{ steps.suggest.outputs.tag }}"
+          echo "Pulling the top suggestion for a 4090: ${{ steps.suggest.outputs.top }}"
+          ollama pull "${{ steps.suggest.outputs.top }}"
           ollama list
+          echo "Pulling the smallest tag found: ${{ steps.suggest.outputs.tag }}"
+          ollama pull "${{ steps.suggest.outputs.tag }}" || echo "SMALLEST TAG FAILED"
