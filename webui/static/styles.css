@@ -732,6 +732,12 @@ html:not([data-platform="windows"]) .windows-only { display: none; }
 .compute-window .compute-panel .compute-reading { color: var(--strong); font-size: 12px; }
 .compute-window .compute-panel .setting-hint { color: var(--muted); font-size: 10px; }
 .compute-window .compute-panel progress { height: 4px; margin-top: 2px; accent-color: var(--accent); }
+/* Draw the meters ourselves: with a pale accent, the native bar paints its fill and track alike in the night theme. */
+.compute-window .compute-panel progress { -webkit-appearance: none; appearance: none; border: 0; border-radius: 2px; overflow: hidden;
+  background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.compute-window .compute-panel progress::-webkit-progress-bar { background: color-mix(in srgb, var(--accent) 18%, transparent); border-radius: 2px; }
+.compute-window .compute-panel progress::-webkit-progress-value { background: var(--accent); border-radius: 2px; }
+.compute-window .compute-panel progress::-moz-progress-bar { background: var(--accent); border-radius: 2px; }
 .compute-window .cw-cpu, .compute-window .cw-gpu, .compute-window .cw-ram { transform-origin: left center; }
 .compute-window .cw-models, .compute-window .cw-net { transform-origin: right center; }
 .compute-window .cw-cpu { grid-area: cpu; }
