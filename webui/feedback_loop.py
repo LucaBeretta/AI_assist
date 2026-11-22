@@ -72,7 +72,7 @@ class FeedbackApi:
         with self._lock:
             if self._closed:
                 raise RuntimeError("The app is closing.")
-            record = self._load_chat(chat_id)
+            record = self._chats.load(chat_id)
             if record.get("incognito"):
                 raise ValueError("Incognito work cannot be saved as feedback.")
             if kind == "chat" and (not 0 <= reply_index < len(record["messages"])
