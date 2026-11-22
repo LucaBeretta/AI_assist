@@ -52,7 +52,12 @@ for model in models:
     for variant in model["variants"]:
         status, body = manifest(variant["name"])
         print(f"  {status}  {variant['name']}  {body[:120]!r}")
-top = model_advisor.recommend_hugging_face(computers["PC with RTX 4090 (24 GB)"], models)
+print("\nThe app's own registry check (AI Assist user agent):")
+for model in models:
+    for variant in model["variants"]:
+        print(f"  {model_library.hugging_face_tag_available(variant['name'])}  {variant['name']}")
+top = model_advisor.recommend_hugging_face(computers["PC with RTX 4090 (24 GB)"], models,
+                                           available=model_library.hugging_face_tag_available)
 with open(os.environ.get("GITHUB_OUTPUT", os.devnull), "a", encoding="utf-8") as output:
     output.write(f"top={top[0]['name'] if top else ''}\n")
 
