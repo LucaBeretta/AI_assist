@@ -7,13 +7,29 @@ files. Parsing has a deadline and pypdf's per-context resource limits.
 import io
 import json
 import logging
+import os
 from pathlib import Path
+import site
 import subprocess
 import sys
 
 
 _TIMEOUT = 15
 _MAX_PAGES = 100
+_USER_SITE = "--user-site"
+
+
+def _uses_user_site():
+    """Whether this process imports from the user's own site-packages (``pip install --user``).
+
+    The worker runs isolated (``-I``) so environment variables and the current folder
+    cannot change what it imports, but that also hides the user site folder. When the
+    app itself uses that folder, the worker is asked to add exactly that folder back.
+    """
+    if not site.ENABLE_USER_SITE:
+        return False
+    folder = os.path.normcase(os.path.abspath(site.getusersitepackages()))
+    return any(entry and os.path.normcase(os.path.abspath(entry)) == folder for entry in sys.path)
 
 
 def extract_pdf(data, limit):
@@ -22,8 +38,11 @@ def extract_pdf(data, limit):
     executable = Path(sys.executable)
     if executable.name.lower() == "pythonw.exe":
         executable = executable.with_name("python.exe")
+    command = [str(executable), "-I", str(Path(__file__).resolve()), str(limit)]
+    if _uses_user_site():
+        command.append(_USER_SITE)
     try:
-        result = subprocess.run([str(executable), "-I", str(Path(__file__).resolve()), str(limit)],
+        result = subprocess.run(command,
             input=data, capture_output=True, timeout=_TIMEOUT,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except subprocess.TimeoutExpired as error:
@@ -94,6 +113,8 @@ def _main():
         limit = int(sys.argv[1])
         if not 1000 <= limit <= 4000000:
             raise ValueError("Invalid PDF text limit.")
+        if sys.argv[2:] == [_USER_SITE]:
+            site.addsitedir(site.getusersitepackages())
         data = sys.stdin.buffer.read(limit + 1)
         if not data or len(data) > limit:
             raise ValueError("The PDF exceeds the agent file limit.")

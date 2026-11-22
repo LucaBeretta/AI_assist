@@ -376,7 +376,9 @@
   </section>
   <section class="setting-group" data-pane="models" hidden><h3 data-i18n="Colibri quality review"></h3>
       <form id="hybrid-form"><label class="check-row"><input id="hybrid-enabled" type="checkbox"><span data-i18n="Offer quality review by default"></span></label>
-        <label class="field"><span data-i18n="Reviewer model"></span><input id="hybrid-model" class="mono" maxlength="256"></label>
+        <label class="field"><span data-i18n="Reviewer model"></span><input id="hybrid-model" class="mono" maxlength="256" list="hybrid-model-options" autocomplete="off"></label>
+        <datalist id="hybrid-model-options"></datalist>
+        <p id="hybrid-model-hint" class="setting-hint"></p>
         <label class="check-row"><input id="hybrid-memory" type="checkbox" checked><span data-i18n="Manage local memory handoff"></span></label>
         <p class="setting-hint" data-i18n="Ollama acts once; Colibri reviews without tools. Memory handoff unloads only the selected local worker."></p>
         <div class="setting-actions"><button class="btn" type="submit" data-i18n="Save"></button></div><p id="hybrid-status" class="setting-hint" role="status"></p>

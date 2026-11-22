@@ -1,5 +1,7 @@
 # Modernization backlog
 
+> **Historical, kept for reference.** This backlog was written on 2026-11-19 for the first modernization milestone, when the app still had a Tk interface next to a browser preview. Tk has since been removed and the desktop app uses one pywebview interface. Many items no longer apply as written; for example, CI already runs on Windows, macOS and Linux. For the current state and open ideas, see [CLAUDE.md](../CLAUDE.md). The milestone's branch is archived as the `archive/modernization/web-workstation` tag.
+
 Priorities: **P0**, safety or data-loss risk, do next. **P1**, needed for web-workspace parity or reliable releases. **P2**, packaging and reach. **P3**, polish.
 
 Sizes: S (≤1 day), M (2–4 days), L (1–2 weeks). Each item names its evidence (`audit §` = `docs/architecture-audit.md`).
