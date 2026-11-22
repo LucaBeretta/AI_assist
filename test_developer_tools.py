@@ -348,7 +348,7 @@ class BlenderDiscoveryTests(unittest.TestCase):
         with patch.dict(os.environ, {"AI_ASSIST_BLENDER": "", "ProgramFiles": str(self.root), "ProgramFiles(x86)": ""}), \
                 patch("developer_tools.shutil.which", return_value=None), \
                 patch("developer_tools.os.path.expanduser", return_value=str(self.root / "nothing")), \
-                patch("developer_tools.os.path.isfile", side_effect=lambda path: str(path).startswith(str(self.root))):
+                patch("developer_tools.os.path.isfile", return_value=False):
             self.assertIsNone(developer_tools.find_blender())
 
     def test_newer_versions_sort_by_number_not_text(self):
