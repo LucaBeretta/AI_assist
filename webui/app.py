@@ -431,7 +431,8 @@ class Api(SharingApi, PrivacyApi, ParityApi):
                             try:
                                 cards += model_advisor.recommend_hugging_face(
                                     hardware, model_library.fetch_hugging_face_models(),
-                                    skip={card["name"] for card in cards})
+                                    skip={card["name"] for card in cards},
+                                    available=model_library.hugging_face_tag_available)
                             except (OSError, ValueError, RuntimeError):
                                 # Hugging Face suggestions are extra: Ollama's still stand without them.
                                 log.info("Hugging Face suggestions are unavailable", exc_info=True)

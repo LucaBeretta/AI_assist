@@ -209,6 +209,38 @@ def _gguf_variants(repo, detail):
     return sorted((variant for variant in variants.values() if variant), key=lambda variant: variant["size_bytes"])
 
 
+_HF_TAG_RE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
+# The same request Ollama makes before it pulls an hf.co tag.
+_HF_MANIFEST_HEADERS = {"Accept": "application/vnd.docker.distribution.manifest.v2+json", "User-Agent": "AI-Assist-Desktop/1.0"}
+
+
+def hugging_face_tag_available(tag):
+    """Ask Hugging Face's registry, as Ollama does, whether ``hf.co/<repo>:<quant>`` can be pulled.
+
+    True or False when the registry says so; None when it could not be asked.
+    A file name can suggest a quantization that the registry does not offer.
+    """
+    repo, _, quant = tag.removeprefix("hf.co/").rpartition(":") if isinstance(tag, str) else ("", "", "")
+    if not _HF_REPO_RE.fullmatch(repo) or not _HF_TAG_RE.fullmatch(quant):
+        return False
+    request = urllib.request.Request(f"https://huggingface.co/v2/{urllib.parse.quote(repo, safe='/')}/manifests/{quant}",
+                                     headers=_HF_MANIFEST_HEADERS)
+    try:
+        page_task = contextlib.nullcontext() if network_gate.in_task() else network_gate.task(
+            "Check a Hugging Face model", sends="The model and version names. No chats or files are sent.",
+            hosts=("huggingface.co",))
+        with page_task, urllib.request.urlopen(request, timeout=15) as response:
+            response.read(_MAX_PAGE_BYTES)
+            return response.status == 200
+    except network_gate.InternetBlocked as error:
+        raise RuntimeError(str(error)) from error
+    except urllib.error.HTTPError as error:
+        error.close()
+        return False if error.code in (400, 404) else None
+    except (urllib.error.URLError, TimeoutError, OSError, http.client.HTTPException):
+        return None
+
+
 def fetch_hugging_face_models(limit=6):
     """Hugging Face's most downloaded GGUF chat models, each with its downloadable quantizations.
 

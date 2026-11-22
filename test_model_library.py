@@ -154,6 +154,28 @@ class HuggingFaceTests(unittest.TestCase):
         self.assertTrue(all(url.startswith("https://huggingface.co/api/models") for url in self.urls))
         self.assertEqual(len(self.urls), 4)
 
+    def test_the_registry_decides_which_tags_can_be_pulled(self):
+        import network_gate
+        seen = []
+        def registry(request, timeout):
+            seen.append((request.full_url, request.get_header("Accept"), sorted(network_gate._current_task().hosts)))
+            if request.full_url.endswith("/Q4_0"):
+                raise urllib.error.HTTPError(request.full_url, 400, "Bad Request", {}, io.BytesIO(b'{"error":"tag not available"}'))
+            if request.full_url.endswith("/Q8_0"):
+                raise urllib.error.URLError("offline")
+            reply = response('{"schemaVersion":2}')
+            reply.status = 200
+            return reply
+        with patch("model_library.urllib.request.urlopen", side_effect=registry):
+            self.assertTrue(model_library.hugging_face_tag_available("hf.co/ornith-ai/Ornith-1.5-9B-GGUF:Q4_K_M"))
+            self.assertFalse(model_library.hugging_face_tag_available("hf.co/someone/Mislabeled-GGUF:Q4_0"))
+            self.assertIsNone(model_library.hugging_face_tag_available("hf.co/org/Model-GGUF:Q8_0"))
+            for bad in ("hf.co/no-slash:Q4_K_M", "hf.co/org/model", "hf.co/org/model:../x", None):
+                self.assertFalse(model_library.hugging_face_tag_available(bad))
+        self.assertEqual(seen[0], ("https://huggingface.co/v2/ornith-ai/Ornith-1.5-9B-GGUF/manifests/Q4_K_M",
+                                   "application/vnd.docker.distribution.manifest.v2+json", ["huggingface.co"]))
+        self.assertEqual(len(seen), 3)
+
     def test_answers_that_are_not_model_lists_are_errors(self):
         for body in ("{}", "not json", json.dumps([{"id": "org/Empty-GGUF"}])):
             with self.subTest(body=body), patch("model_library.urllib.request.urlopen",
