@@ -243,6 +243,19 @@ class HuggingFaceSuggestionTests(unittest.TestCase):
         self.assertEqual([card["name"] for card in advisor.recommend_hugging_face(laptop, models)],
                          ["hf.co/org/Unknown-GGUF:Q4_K_M", "hf.co/org/Tiny-1.5B-GGUF:Q4_K_M"])
 
+    def test_tags_the_registry_refuses_are_never_suggested(self):
+        models = [self.model("org/Small-8B-GGUF", 8, {"Q4_K_M": 4.9, "Q5_K_M": 5.7}),
+                  self.model("org/Fake-27B-GGUF", 27, {"Q4_0": 1.6})]
+        answers = {"hf.co/org/Small-8B-GGUF:Q4_K_M": False, "hf.co/org/Small-8B-GGUF:Q5_K_M": None}
+        asked = []
+        def available(tag):
+            asked.append(tag)
+            return answers.get(tag, False)
+        cards = advisor.recommend_hugging_face(rig(), models, available=available)
+        # Refused tags are skipped; an unanswered check keeps the suggestion.
+        self.assertEqual([card["name"] for card in cards], ["hf.co/org/Small-8B-GGUF:Q5_K_M"])
+        self.assertEqual(asked, ["hf.co/org/Small-8B-GGUF:Q4_K_M", "hf.co/org/Small-8B-GGUF:Q5_K_M"])
+
     def test_skips_names_already_suggested_and_remote_servers(self):
         models = [self.model("org/Small-8B-GGUF", 8, {"Q4_K_M": 4.9, "Q5_K_M": 5.7})]
         cards = advisor.recommend_hugging_face(rig(), models, skip={"hf.co/org/Small-8B-GGUF:Q4_K_M"})
