@@ -83,6 +83,13 @@ class Desktop:
     def evaluate(self, script):
         return self.main_window.evaluate_js(script)
 
+    def evaluate_compute(self, script):
+        with self._lock:
+            window = self._compute
+        if window is None:
+            raise RuntimeError("Mission Control is closed.")
+        return window.evaluate_js(script)
+
     def choose_folder(self):
         if self._folder_dialog is not None:
             return self._folder_dialog()

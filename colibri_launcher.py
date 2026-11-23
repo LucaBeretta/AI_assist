@@ -19,6 +19,7 @@ import time
 import urllib.parse
 
 import network_gate
+from app_core.settings import read_json as load_settings, write_json
 
 
 GITHUB_URL = "https://github.com/JustVugg/colibri"
@@ -49,14 +50,6 @@ def coli_path(directory):
     return None
 
 
-def load_settings(path):
-    try:
-        data = json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, ValueError, TypeError):
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
 def save_directory(directory, settings_path=None):
     """Check a colibri folder the user chose and remember it in ``settings_path``."""
     directory = str(Path(directory).expanduser().resolve())
@@ -68,9 +61,7 @@ def save_directory(directory, settings_path=None):
         path = Path(settings_path)
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            temporary = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-            temporary.write_text(json.dumps(data, indent=2), encoding="utf-8")
-            os.replace(temporary, path)
+            write_json(path, data)
         except OSError as error:
             raise ColibriError(f"Could not remember the colibri folder: {error}") from error
     return directory

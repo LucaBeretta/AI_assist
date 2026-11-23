@@ -48,7 +48,7 @@ class PrivacyApi:
                 self._firewall.refresh()
             return {"ok": True, "gate": network_gate.status(), "connections": network_gate.recent()[-200:],
                     "firewall": deepcopy(self._firewall.summary), "busy": self._firewall.busy,
-                    "approval": self._internet.pending()}
+                    "approval": self._internet.pending(window="main")}
 
     @json_method
     def respond_internet(self, approval_id, action):

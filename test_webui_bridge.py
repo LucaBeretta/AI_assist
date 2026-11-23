@@ -37,6 +37,19 @@ class BridgeTests(unittest.TestCase):
         self.assertIn("caffè", self.scripts[0])
         self.assertEqual(events(self.scripts[0])[0]["text"], value)
 
+    def test_mission_control_approvals_and_results_use_its_own_receiver(self):
+        compute = []
+        bridge = Bridge(self.scripts.append, autostart=False, evaluate_compute=compute.append)
+        self.addCleanup(bridge.close)
+        bridge.emit("internet_approval", approval_id="main")
+        bridge.emit("internet_approval", approval_id="pairing", window="compute")
+        bridge.emit("internet_closed", approval_id="pairing", window="compute")
+        bridge.emit("job_done", operation="sharing", window="compute")
+        bridge.flush()
+        self.assertEqual([event["approval_id"] for event in events(self.scripts[0])], ["main"])
+        self.assertEqual([event["type"] for event in events(compute[0])],
+                         ["internet_approval", "internet_closed", "job_done"])
+
     def test_close_drops_pending_and_future_events(self):
         self.bridge.emit("done")
         self.bridge.close()

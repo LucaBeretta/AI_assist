@@ -5,6 +5,8 @@ import threading
 import time
 import uuid
 
+from webui.jobs import job_window
+
 CONFIRM_SECONDS = 3
 
 
@@ -17,11 +19,16 @@ class Approvals:
 
     def _public(self, identity, item):
         return {"approval_id": identity, "request": asdict(item["request"]), "stage": item["stage"],
-                "remaining_seconds": max(0, item["ready"] - self.clock()) if item["stage"] == 2 else CONFIRM_SECONDS}
+                "remaining_seconds": max(0, item["ready"] - self.clock()) if item["stage"] == 2 else CONFIRM_SECONDS,
+                **item["destination"]}
 
-    def pending(self):
+    def pending(self, window=None):
         with self.lock:
-            return self._public(*next(iter(self.waiting.items()))) if self.waiting else None
+            if not self.waiting:
+                return None
+            identity, item = next(iter(self.waiting.items()))
+            if window is None or item["destination"].get("window", "main") == window:
+                return self._public(identity, item)
 
     def _show(self):
         current = self.pending()
@@ -37,6 +44,8 @@ class Approvals:
                 return False
             identity = str(uuid.uuid4())
             item = {"request": request, "done": threading.Event(), "allowed": False, "stage": 1, "ready": 0}
+            window = job_window.get()
+            item["destination"] = {"window": window} if window != "main" else {}
             self.waiting[identity] = item
             if len(self.waiting) == 1:
                 self._show()
@@ -64,16 +73,21 @@ class Approvals:
     def _finish(self, identity, allowed):
         item = self.waiting.pop(identity)
         item["allowed"] = allowed
-        self.emit("internet_closed", approval_id=identity, allowed=allowed)
+        self.emit("internet_closed", approval_id=identity, allowed=allowed, **item["destination"])
         item["done"].set()
         self._show()
 
-    def block_pending(self):
+    def block_pending(self, window=None):
         with self.lock:
-            pending, self.waiting = self.waiting, OrderedDict()
-            for identity, item in pending.items():
-                self.emit("internet_closed", approval_id=identity, allowed=False)
+            first = next(iter(self.waiting), None)
+            for identity, item in list(self.waiting.items()):
+                if window is not None and item["destination"].get("window") != window:
+                    continue
+                del self.waiting[identity]
+                self.emit("internet_closed", approval_id=identity, allowed=False, **item["destination"])
                 item["done"].set()
+            if first is not None and first not in self.waiting and self.waiting:
+                self._show()
 
     def close(self):
         with self.lock:
