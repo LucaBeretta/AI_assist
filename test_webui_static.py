@@ -526,6 +526,150 @@ class StaticTests(unittest.TestCase):
         assert.equal(elements.get('status').textContent,'Ollama offline');
         ''')
 
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_generate_view_preserves_render_when_switching_sections(self):
+        self.run_scenario(r'''
+        await window.listeners.pywebviewready();
+        const el = id => document.getElementById(id);
+        const api = window.pywebview.api;
+        const root = require('node:path').dirname(process.argv[1]);
+        class PhotoReader {
+          readAsDataURL() {
+            this.result = 'data:image/png;base64,cGhvdG8=';
+            this.onload();
+          }
+        }
+        window.i18n = {t: message => message};
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(root, 'photo-video.js'), 'utf8'), {
+          document, window, FileReader: PhotoReader, Blob, URL, atob,
+          setTimeout: callback => callback(),
+        });
+        api.start_photo_video = async () => ({ok: true, job: 'render'});
+        let finish;
+        api.photo_video_status = async () => new Promise(resolve => { finish = resolve; });
+
+        el('nav-generate').listeners.click();
+        assert.equal(el('generate-view').hidden, false);
+        assert.equal(el('chat-view').hidden, true);
+        assert.equal(el('nav-generate').attributes['aria-current'], 'page');
+        el('photo-video-image').files = [{size: 20}];
+        el('photo-video-prompt').value = 'The car moves.';
+        const render = el('photo-video-form').listeners.submit({preventDefault() {}});
+        await new Promise(resolve => setImmediate(resolve));
+        assert.equal(el('photo-video-progress').hidden, false);
+        assert.equal(el('photo-video-generate').disabled, true);
+
+        el('nav-chats').listeners.click();
+        assert.equal(el('generate-view').hidden, true);
+        assert.equal(el('chat-view').hidden, false);
+        assert.equal(el('nav-generate').attributes['aria-current'], 'false');
+        finish({ok: true, ready: true, video: 'Y2xpcA==', name: 'test.mp4'});
+        await render;
+
+        el('nav-generate').listeners.click();
+        assert.equal(el('photo-video-empty').hidden, true);
+        assert.equal(el('photo-video-preview').hidden, false);
+        assert.equal(el('photo-video-progress').hidden, true);
+        assert.equal(el('photo-video-generate').disabled, false);
+        assert.equal(el('photo-video-prompt').value, 'The car moves.');
+
+        let paused = false;
+        el('photo-video-preview').pause = () => { paused = true; };
+        el('nav-chats').listeners.click();
+        assert.equal(paused, true);
+        URL.revokeObjectURL(el('photo-video-preview').src);
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_quick_animation_loads_previews_and_saves_without_comfyui(self):
+        self.run_scenario(r'''
+        await window.listeners.pywebviewready();
+        const el = id => document.getElementById(id);
+        const canvas = el('quick-animation-canvas');
+        const draws = [];
+        let tracksStopped = false;
+        canvas.captureStream = fps => {
+          assert.equal(fps, 30);
+          return {getTracks: () => [{stop() { tracksStopped = true; }}]};
+        };
+        const makeCanvas = document.createElement;
+        document.createElement = tag => {
+          const node = makeCanvas(tag);
+          if (tag === 'canvas') node.getContext = () => ({drawImage() {}});
+          return node;
+        };
+        class Reader {
+          readAsDataURL(file) {
+            this.result = `data:${file.type};base64,Y2xpcA==`;
+            this.onload();
+          }
+        }
+        class Picture {
+          naturalWidth = 1200;
+          naturalHeight = 600;
+          async decode() {}
+        }
+        class Recorder {
+          static isTypeSupported(type) { return type === 'video/mp4'; }
+          constructor(stream, {mimeType}) { this.mimeType = mimeType; this.state = 'inactive'; }
+          start() { this.state = 'recording'; }
+          stop() {
+            this.state = 'inactive';
+            this.ondataavailable({data: new Blob(['clip'], {type: this.mimeType})});
+            this.onstop();
+          }
+        }
+        window.i18n = {t: message => message};
+        window.MediaRecorder = Recorder;
+        window.photoShader = {duration: 3, create: () => ({
+          setImage(image) { assert.deepEqual([image.width, image.height], [720, 360]); },
+          draw(effect, seconds) { draws.push([effect, seconds]); },
+        })};
+        const frames = new Map();
+        let nextFrame = 0;
+        const root = require('node:path').dirname(process.argv[1]);
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(root, 'quick-animation.js'), 'utf8'), {
+          document, window, FileReader: Reader, Image: Picture, MediaRecorder: Recorder, Blob,
+          performance: {now: () => 0},
+          requestAnimationFrame: callback => { frames.set(++nextFrame, callback); return nextFrame; },
+          cancelAnimationFrame: id => frames.delete(id),
+        });
+        el('photo-video-preview').pause = () => {};
+        el('nav-generate').listeners.click();
+        el('generate-wan-mode').listeners.click();
+        assert.equal(el('generate-quick-panel').hidden, true);
+        assert.equal(el('generate-wan-panel').hidden, false);
+        el('generate-quick-mode').listeners.click();
+        const input = el('quick-animation-image');
+        const save = el('quick-animation-save');
+        const play = el('quick-animation-play');
+        el('quick-animation-effect').value = 'ripple';
+        input.files = [{size: 20, type: 'image/png'}];
+        await input.listeners.change();
+        assert.equal(canvas.hidden, false);
+        assert.deepEqual(draws.at(-1), ['ripple', 0]);
+
+        play.listeners.click();
+        assert.equal(frames.size, 1);
+        el('nav-chats').listeners.click();
+        assert.equal(frames.size, 0);
+        el('nav-generate').listeners.click();
+        window.pywebview.api.save_quick_animation = async (...args) => {
+          calls.push(args);
+          return {ok: true, path: '/video.mp4'};
+        };
+        const recording = save.listeners.click();
+        assert.equal(save.disabled, true);
+        const [id, tick] = frames.entries().next().value;
+        frames.delete(id);
+        tick(3000);
+        await recording;
+        assert.equal(tracksStopped, true);
+        assert.equal(save.disabled, false);
+        assert.deepEqual(calls, [['Y2xpcA==', 'video/mp4']]);
+        assert.equal(el('quick-animation-status').textContent, 'Clip saved.');
+        ''')
+
     def run_scenario(self, scenario):
         script = Path(__file__).parent / "webui" / "static" / "app.js"
         source = HARNESS.split("(async () => {", 1)[0] + "\n(async () => {\n" + scenario + r'''
