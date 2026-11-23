@@ -1162,8 +1162,10 @@ window.app = (() => {
   const commands = () => [
     [t("New chat"), t("Ctrl+N"), () => newChat().catch(showError)],
     [t("New incognito chat"), t("Ctrl+Shift+N"), () => newChat(true).catch(showError)],
+    [t("Chats"), "", () => showView("chat")],
     [t("Developer"), "", () => showView("dev")],
     [t("Models"), "", () => showView("models")],
+    [t("Generate"), "", () => showView("generate")],
     [t("Mission Control"), "", () => openMissionControl()],
     [t("Settings"), t("Ctrl+,"), () => openSettings()],
     [t("Switch theme"), t("Ctrl+Shift+L"), () => toggleTheme()],
@@ -1219,12 +1221,23 @@ window.app = (() => {
   });
   element("open-palette").addEventListener("click", openPalette);
 
-  // ---------- views (Chats / Developer / Models) ----------
-  const views = {chat: ["chat-view", "nav-chats"], dev: ["dev-view", "nav-dev"], models: ["models-view", "nav-models"], welcome: ["welcome-view", null], capabilities: ["capabilities-view", "nav-capabilities"]};
+  // ---------- workspace sections ----------
+  const views = {
+    chat: ["chat-view", "nav-chats"],
+    dev: ["dev-view", "nav-dev"],
+    models: ["models-view", "nav-models"],
+    welcome: ["welcome-view", null],
+    capabilities: ["capabilities-view", "nav-capabilities"],
+    generate: ["generate-view", "nav-generate"],
+  };
   function showView(name) {
     for (const [key, [view, nav]] of Object.entries(views)) {
       element(view).hidden = key !== name;
       if (nav) element(nav).setAttribute("aria-current", key === name ? "page" : "false");
+    }
+    if (name !== "generate") {
+      element("photo-video-preview").pause?.();
+      window.quickAnimation?.pause();
     }
     if (name === "dev") window.devui?.onShow?.();
     if (name === "models") window.modelsui?.onShow?.();
@@ -1234,6 +1247,7 @@ window.app = (() => {
   element("nav-dev").addEventListener("click", () => showView("dev"));
   element("nav-models").addEventListener("click", () => showView("models"));
   element("nav-capabilities").addEventListener("click", () => showView("capabilities"));
+  element("nav-generate").addEventListener("click", () => showView("generate"));
   // Mission Control opens the live Compute window (for a second screen); it is not a view in this window.
   const openMissionControl = () => call("open_compute_window").catch(showError);
   element("open-mission-control").addEventListener("click", openMissionControl);

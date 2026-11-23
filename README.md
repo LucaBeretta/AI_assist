@@ -146,3 +146,13 @@ GitHub Actions (`.github/workflows/tests.yml`) runs `ruff check .` (unused or un
 The [macOS desktop checks](.github/workflows/macos.yml) workflow runs the headless suite with default macOS temporary paths. Its optional `native_smoke` input checks chat through the real WKWebView on the hosted runner using temporary data and a simulated model.
 
 `app_core/ollama.py`, `streaming.py` and `providers.py` supply the shared engine; `app_core/runtime.py` is the desktop's thin compatibility adapter. Plain status and handoff logic lives in `status_values.py` and `hybrid_memory.py`. `webui/app.py` exposes JSON methods; workers emit through `webui/bridge.py`. The frontend is vanilla JavaScript with offline assets and English/Italian strings. No worker receives native UI objects. See [the D8 integration report](docs/d8-integration.md) for conflict decisions and verification limits.
+
+## Generate
+
+Open **Generate → Quick animation** to preview a slow zoom, side-to-side pan, or ripple on a JPEG or PNG. Quick animation uses WebGL 2 locally and can save a 3-second MP4 or WebM when the desktop webview supports canvas recording. It does not need ComfyUI or a model download.
+
+### AI video
+
+Start ComfyUI on `127.0.0.1:8188` and install the three model files for **Wan2.2 TI2V 5B** using the [official ComfyUI setup guide](https://docs.comfy.org/tutorials/video/wan/wan2_2#wan2-2-ti2v-5b-hybrid-version-workflow-example). In AI Assist, open **Generate → AI video**, select a JPEG or PNG, describe the motion, and pick an orientation. For example, try “The camera slowly circles the toy car.”
+
+The clip plays in AI Assist and the MP4 is saved in ComfyUI's `output/ai-assist` folder. ComfyUI also stores a copy of the photo in its input folder.

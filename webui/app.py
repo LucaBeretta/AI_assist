@@ -1,6 +1,7 @@
 """Small JSON API over the existing engine and chat store."""
 
 from copy import deepcopy
+import base64
 import importlib
 import json
 import logging
@@ -21,6 +22,7 @@ import model_advisor
 import model_library
 from webui.bridge import Bridge
 from webui.developer import DeveloperTasks
+from app_core import photo_video
 from app_core.chat_service import ChatService
 import developer_tools
 from task_checkpoints import CheckpointStore
@@ -33,7 +35,7 @@ from webui.instance import SingleInstance
 from webui.window_state import rectangle, visible_rectangle, saved_theme
 from webui.status import StatusPush
 from status_values import snapshot_values, generation_rate, is_cloud_model, is_local
-from webui.local_files import write_utf8
+from webui.local_files import write_bytes
 from webui.prompts import PromptStore
 from webui.colibri import ColibriService
 from webui.api_utils import json_method as _json_method
@@ -130,6 +132,38 @@ class Api(SharingApi, PrivacyApi, ParityApi):
         self._restart_requested = False
         self._restart_ready = False
         self._hourly = HourlyStatusReport(self._store, self._hourly_context, self._hourly_event)
+
+    @_json_method
+    def start_photo_video(self, photo, prompt, portrait=False):
+        return {"ok": True, "job": photo_video.start(photo, prompt, portrait)}
+
+    @_json_method
+    def photo_video_status(self, job):
+        return {"ok": True, **photo_video.status(job)}
+
+    @_json_method
+    def save_quick_animation(self, video_base64, mime_type):
+        if not isinstance(mime_type, str) or mime_type not in {"video/mp4", "video/webm"}:
+            raise ValueError("Choose an MP4 or WebM animation.")
+        limit = photo_video.MAX_VIDEO_BYTES
+        if not isinstance(video_base64, str) or len(video_base64) > 4 * ((limit + 2) // 3):
+            raise ValueError("The animation must be 24 MiB or smaller.")
+        try:
+            data = base64.b64decode(video_base64, validate=True)
+        except ValueError:
+            raise ValueError("Could not read the animation.") from None
+        if len(data) > limit:
+            raise ValueError("The animation must be 24 MiB or smaller.")
+
+        if mime_type == "video/mp4":
+            suffix = ".mp4"
+            valid = data[4:8] == b"ftyp" and 16 <= int.from_bytes(data[:4], "big") <= len(data)
+        else:
+            suffix = ".webm"
+            valid = data.startswith(b"\x1a\x45\xdf\xa3") and b"\x42\x82\x84webm" in data[:64]
+        if not valid:
+            raise ValueError("The recording does not match the selected video format.")
+        return self._save_local_file(f"quick-animation{suffix}", data, suffix=suffix)
 
     def _hourly_context(self):
         with self._lock:
@@ -523,11 +557,17 @@ class Api(SharingApi, PrivacyApi, ParityApi):
 
     @_json_method
     def save_code(self, text, suggested_name):
-        if not isinstance(text, str) or not text.strip() or len(text.encode("utf-8")) > 4000000:
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError("Code must be nonempty text up to 4 MB.")
+        data = text.encode("utf-8")
+        if len(data) > 4000000:
             raise ValueError("Code must be nonempty text up to 4 MB.")
         if (not isinstance(suggested_name, str) or not suggested_name.strip() or len(suggested_name) > 255
                 or suggested_name in {".", ".."} or re.search(r'[<>:"/\\|?*\x00-\x1f]', suggested_name)):
             raise ValueError("Choose a file name without a directory or special characters.")
+        return self._save_local_file(suggested_name, data)
+
+    def _save_local_file(self, suggested_name, data, *, suffix=None):
         with self._lock:
             if self._closed:
                 raise RuntimeError("The web UI is closing.")
@@ -535,10 +575,12 @@ class Api(SharingApi, PrivacyApi, ParityApi):
         if not selection:
             return {"ok": True, "cancelled": True}
         path = Path(selection[0] if isinstance(selection, (tuple, list)) else selection).expanduser().absolute()
+        if suffix is not None and path.suffix.lower() != suffix:
+            raise ValueError(f"Use a file name ending in {suffix}.")
         with self._lock:
             if self._closed:
                 raise RuntimeError("The web UI is closing.")
-            write_utf8(path, text)
+            write_bytes(path, data)
         return {"ok": True, "path": str(path)}
 
     @_json_method

@@ -1,4 +1,4 @@
-"""Atomically replace local text with UTF-8, without a BOM."""
+"""Atomically write local files."""
 
 import os
 from pathlib import Path
@@ -6,6 +6,10 @@ import tempfile
 
 
 def write_utf8(path, text):
+    write_bytes(path, text.encode("utf-8"))
+
+
+def write_bytes(path, data):
     path = Path(path)
     if path.is_symlink() or getattr(path, "is_junction", lambda: False)():
         raise ValueError("The destination must not be a link.")
@@ -13,9 +17,9 @@ def write_utf8(path, text):
         raise ValueError("Choose a regular file destination, not a directory.")
     temporary = None
     try:
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="", dir=path.parent, delete=False) as target:
+        with tempfile.NamedTemporaryFile(mode="wb", dir=path.parent, delete=False) as target:
             temporary = Path(target.name)
-            target.write(text)
+            target.write(data)
             target.flush()
             os.fsync(target.fileno())
         os.replace(temporary, path)
