@@ -945,3 +945,35 @@ html:not([data-platform="windows"]) .windows-only { display: none; }
 }
 .generate-stage p { padding: 8px; text-align: center; }
 .photo-video-preview { width: 100%; max-height: 58vh; object-fit: contain; }
+
+.recent-clips-list {
+  display: grid;
+  gap: 6px;
+  max-height: 55vh;
+  margin: 0;
+  padding: 2px;
+  overflow: auto;
+  list-style: none;
+}
+.recent-clip {
+  display: grid;
+  justify-items: start;
+  gap: 2px;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: var(--raised);
+  text-align: start;
+}
+.recent-clip[aria-pressed="true"] { border-color: var(--accent); }
+.recent-clip-title { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent-clip-detail { color: var(--muted); font-size: 12px; }
+#recent-clips-actions { margin-top: 12px; }
+
+.camera-studio-orbit-label { display: flex; justify-content: space-between; gap: 8px; }
+.camera-studio-orbit-label output { font-variant-numeric: tabular-nums; color: var(--muted); }
+#camera-studio-orbit { width: 100%; margin: 0; padding: 0; accent-color: var(--accent); }
+@media (min-width: 950px) {
+  .generate-camera-page { grid-template-columns: minmax(220px, .7fr) minmax(0, 1.4fr); }
+}

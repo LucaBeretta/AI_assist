@@ -628,12 +628,15 @@ class StaticTests(unittest.TestCase):
         const frames = new Map();
         let nextFrame = 0;
         const root = require('node:path').dirname(process.argv[1]);
-        vm.runInNewContext(fs.readFileSync(require('node:path').join(root, 'quick-animation.js'), 'utf8'), {
-          document, window, FileReader: Reader, Image: Picture, MediaRecorder: Recorder, Blob,
+        const globals = {
+          document, window, FileReader: Reader, Image: Picture, Blob,
           performance: {now: () => 0},
           requestAnimationFrame: callback => { frames.set(++nextFrame, callback); return nextFrame; },
           cancelAnimationFrame: id => frames.delete(id),
-        });
+        };
+        for (const script of ['canvas-clip.js', 'quick-animation.js']) {
+          vm.runInNewContext(fs.readFileSync(require('node:path').join(root, script), 'utf8'), globals);
+        }
         el('photo-video-preview').pause = () => {};
         el('nav-generate').listeners.click();
         el('generate-wan-mode').listeners.click();
@@ -668,6 +671,134 @@ class StaticTests(unittest.TestCase):
         assert.equal(save.disabled, false);
         assert.deepEqual(calls, [['Y2xpcA==', 'video/mp4']]);
         assert.equal(el('quick-animation-status').textContent, 'Clip saved.');
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_recent_clips_play_and_reuse_prompts(self):
+        self.run_scenario(r'''
+        await window.listeners.pywebviewready();
+        const el = id => document.getElementById(id);
+        const api = window.pywebview.api;
+        const video = el('recent-clips-preview');
+        const chosen = {
+          id: 'first', name: 'scene.mp4', kind: 'wan', prompt: 'Move the toy car.',
+          portrait: true, created_at: '2026-11-23T05:30:00Z', available: true,
+        };
+        document.documentElement = {lang: 'en'};
+        window.i18n = {t: message => message};
+        video.play = async () => { calls.push('play'); };
+        video.pause = () => { calls.push('pause'); };
+        video.removeAttribute = name => { delete video[name]; };
+        el('photo-video-prompt').focus = () => {};
+        api.list_recent_clips = async () => ({
+          ok: true, clips: [chosen, {...chosen, id: 'missing', available: false}],
+        });
+        api.load_recent_clip = async id => {
+          calls.push(['load', id]);
+          return {ok: true, video: 'Y2xpcA==', mime_type: 'video/mp4'};
+        };
+        api.open_recent_clip = async id => { calls.push(['open', id]); return {ok: true}; };
+        const root = require('node:path').dirname(process.argv[1]);
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(root, 'recent-clips.js'), 'utf8'), {
+          document, window, URL, Blob, atob,
+        });
+
+        el('nav-generate').listeners.click();
+        el('generate-recent-mode').listeners.click();
+        await new Promise(resolve => setImmediate(resolve));
+        const [row, unavailable] = el('recent-clips-list').children.map(entry => entry.children[0]);
+        assert.equal(unavailable.disabled, true);
+        assert.match(unavailable.textContent, /File missing/);
+        assert.equal(el('generate-quick-panel').hidden, true);
+        await row.listeners.click();
+        assert.equal(row.attributes['aria-pressed'], 'true');
+        assert.equal(video.hidden, false);
+        assert.equal(el('recent-clips-actions').hidden, false);
+        assert.deepEqual(calls, [['load', 'first'], 'play']);
+        await el('recent-clips-open').listeners.click();
+        assert.deepEqual(calls.at(-1), ['open', 'first']);
+
+        const clipUrl = video.src;
+        el('generate-wan-mode').click = () => el('generate-wan-mode').listeners.click();
+        el('recent-clips-reuse').listeners.click();
+        assert.equal(el('generate-recent-panel').hidden, true);
+        assert.equal(el('generate-wan-panel').hidden, false);
+        assert.equal(el('photo-video-prompt').value, chosen.prompt);
+        assert.equal(el('photo-video-orientation').value, 'portrait');
+        assert.equal(calls.at(-1), 'pause');
+        URL.revokeObjectURL(clipUrl);
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_camera_mode_controls_and_records_the_selected_view(self):
+        self.run_scenario(r'''
+        await window.listeners.pywebviewready();
+        const el = id => document.getElementById(id);
+        const lens = el('camera-studio-lens');
+        const orbit = el('camera-studio-orbit');
+        const record = el('camera-studio-record');
+        const canvas = el('camera-studio-canvas');
+        const draws = [];
+        lens.value = '24';
+        orbit.value = '0';
+        window.i18n = {t: message => message};
+        window.cameraScene = {
+          duration: 4,
+          create: target => {
+            assert.equal(target, canvas);
+            return {draw: settings => draws.push(JSON.parse(JSON.stringify(settings)))};
+          },
+        };
+        window.canvasClip = {
+          supportedType: target => target === canvas && 'video/mp4',
+          record: async (target, options) => {
+            assert.equal(target, canvas);
+            assert.equal(options.mimeType, 'video/mp4');
+            assert.equal(options.duration, 4);
+            assert.equal(record.disabled, true);
+            options.draw(0);
+            orbit.value = '75';
+            options.draw(2);
+            return {type: 'video/mp4'};
+          },
+          readDataUrl: async () => 'data:video/mp4;base64,Y2xpcA==',
+        };
+        window.pywebview.api.save_camera_clip = async (...args) => {
+          calls.push(args);
+          return {ok: true};
+        };
+        let frame = null;
+        const root = require('node:path').dirname(process.argv[1]);
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(root, 'camera-studio.js'), 'utf8'), {
+          document, window, performance: {now: () => 0},
+          requestAnimationFrame: callback => { frame = callback; return 1; },
+          cancelAnimationFrame: () => { frame = null; },
+        });
+        el('nav-generate').listeners.click();
+        el('generate-camera-mode').listeners.click();
+        assert.equal(el('generate-camera-panel').hidden, false);
+        assert.equal(el('generate-quick-panel').hidden, true);
+        assert.equal(canvas.hidden, false);
+        assert.deepEqual(draws.at(-1), {seconds: 0, focalLength: 24, orbit: 0});
+
+        lens.value = '50';
+        lens.listeners.change();
+        orbit.value = '45';
+        orbit.listeners.input();
+        assert.equal(el('camera-studio-angle').textContent, '45°');
+        assert.deepEqual(draws.at(-1), {seconds: 0, focalLength: 50, orbit: 45});
+        el('camera-studio-play').listeners.click();
+        frame(1000);
+        assert.deepEqual(draws.at(-1), {seconds: 1, focalLength: 50, orbit: 45});
+        await record.listeners.click();
+        assert.equal(frame, null);
+        assert.deepEqual(draws.slice(-2), [
+          {seconds: 0, focalLength: 50, orbit: 45},
+          {seconds: 2, focalLength: 50, orbit: 75},
+        ]);
+        assert.deepEqual(calls, [['Y2xpcA==', 'video/mp4']]);
+        assert.equal(el('camera-studio-status').textContent, 'Clip saved.');
+        assert.equal(record.disabled, false);
         ''')
 
     def run_scenario(self, scenario):

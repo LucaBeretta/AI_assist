@@ -156,3 +156,11 @@ Open **Generate → Quick animation** to preview a slow zoom, side-to-side pan, 
 Start ComfyUI on `127.0.0.1:8188` and install the three model files for **Wan2.2 TI2V 5B** using the [official ComfyUI setup guide](https://docs.comfy.org/tutorials/video/wan/wan2_2#wan2-2-ti2v-5b-hybrid-version-workflow-example). In AI Assist, open **Generate → AI video**, select a JPEG or PNG, describe the motion, and pick an orientation. For example, try “The camera slowly circles the toy car.”
 
 The clip plays in AI Assist and the MP4 is saved in ComfyUI's `output/ai-assist` folder. ComfyUI also stores a copy of the photo in its input folder.
+
+### 3D Camera
+
+Open **Generate → 3D Camera** to orbit an animated 3D scene and switch between a 24 mm wide lens and a 50 mm close lens. Select **Record clip** to save four seconds of the view as an MP4 or WebM. The scene is rendered locally with WebGL 2.
+
+### Recent clips
+
+Open **Generate → Recent clips** to play your last 12 clips, open their files, or reuse an AI video's prompt and orientation. Quick animations and 3D Camera recordings stay where you saved them. AI Assist also keeps its own copy of each new AI video in the app data directory, so you can replay it after ComfyUI closes; the copy is deleted when the video drops off the list, and ComfyUI's original stays in its output folder.

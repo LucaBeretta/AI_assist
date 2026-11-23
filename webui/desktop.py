@@ -2,6 +2,8 @@
 
 import importlib
 import logging
+import os
+import subprocess
 import sys
 import threading
 
@@ -98,6 +100,20 @@ class Desktop:
             raise RuntimeError("The main window is not ready for a save dialog.")
         webview = importlib.import_module("webview")
         return self.main_window.create_file_dialog(webview.SAVE_DIALOG, save_filename=suggested_name)
+
+    def open_file(self, path):
+        """Open a validated local media file in the system's default player."""
+        try:
+            if sys.platform == "win32":
+                os.startfile(str(path))
+            elif sys.platform == "darwin":
+                subprocess.run(["/usr/bin/open", str(path)], check=True, timeout=10)
+            else:
+                subprocess.Popen(["xdg-open", str(path)], stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except (OSError, subprocess.SubprocessError) as error:
+            log.warning("Could not open %s with the default app.", path, exc_info=True)
+            raise RuntimeError("Could not open the file in your default app.") from error
 
     def open_preview(self, uri):
         with self._lock:

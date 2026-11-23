@@ -20,7 +20,11 @@
   <script defer src="sharing.js"></script>
   <script defer src="photo-video.js"></script>
   <script defer src="photo-shader.js"></script>
+  <script defer src="canvas-clip.js"></script>
   <script defer src="quick-animation.js"></script>
+  <script defer src="camera-scene.js"></script>
+  <script defer src="camera-studio.js"></script>
+  <script defer src="recent-clips.js"></script>
 </head>
 <body>
 <div class="app">
@@ -322,9 +326,11 @@
           <h1 id="generate-title" class="strong" data-i18n="Generate"></h1>
         </header>
         <div class="models-scroll">
-          <div class="generate-modes" role="group" aria-label="Generation mode" data-i18n-aria-label="Generation mode">
+          <div class="generate-modes" role="group" aria-label="Generate sections" data-i18n-aria-label="Generate sections">
             <button id="generate-quick-mode" class="btn" type="button" aria-pressed="true" aria-controls="generate-quick-panel" data-i18n="Quick animation"></button>
             <button id="generate-wan-mode" class="btn" type="button" aria-pressed="false" aria-controls="generate-wan-panel" data-i18n="AI video"></button>
+            <button id="generate-camera-mode" class="btn" type="button" aria-pressed="false" aria-controls="generate-camera-panel" data-i18n="3D Camera"></button>
+            <button id="generate-recent-mode" class="btn" type="button" aria-pressed="false" aria-controls="generate-recent-panel" data-i18n="Recent clips"></button>
           </div>
           <div id="generate-quick-panel" class="generate-page">
             <section class="generate-panel" aria-labelledby="quick-animation-title">
@@ -380,6 +386,53 @@
                 <p id="photo-video-empty" class="setting-hint" data-i18n="Your video will appear here."></p>
                 <video id="photo-video-preview" class="photo-video-preview" aria-labelledby="photo-video-preview-title" controls playsinline hidden></video>
               </div>
+            </section>
+          </div>
+          <div id="generate-camera-panel" class="generate-page generate-camera-page" hidden>
+            <section class="generate-panel" aria-labelledby="camera-studio-title">
+              <h2 id="camera-studio-title" data-i18n="Camera controls"></h2>
+              <label class="field"><span data-i18n="Lens"></span>
+                <select id="camera-studio-lens" disabled>
+                  <option value="24" data-i18n="24 mm · Wide"></option>
+                  <option value="50" data-i18n="50 mm · Close"></option>
+                </select>
+              </label>
+              <label class="field">
+                <span class="camera-studio-orbit-label"><span data-i18n="Camera orbit"></span><output id="camera-studio-angle" for="camera-studio-orbit">0°</output></span>
+                <input id="camera-studio-orbit" type="range" min="-180" max="180" value="0" disabled>
+              </label>
+              <div class="model-actions">
+                <button id="camera-studio-play" class="btn" type="button" disabled data-i18n="Play scene"></button>
+                <button id="camera-studio-record" class="btn primary" type="button" disabled data-i18n="Record clip"></button>
+              </div>
+              <p id="camera-studio-status" class="setting-hint" role="status"></p>
+            </section>
+            <section class="generate-panel" aria-labelledby="camera-studio-preview-title">
+              <h2 id="camera-studio-preview-title" data-i18n="Scene preview"></h2>
+              <div class="generate-stage">
+                <p id="camera-studio-empty" class="setting-hint" data-i18n="Preparing the scene…"></p>
+                <canvas id="camera-studio-canvas" class="photo-video-preview" width="960" height="540"
+                        aria-labelledby="camera-studio-preview-title" hidden></canvas>
+              </div>
+            </section>
+          </div>
+          <div id="generate-recent-panel" class="generate-page" hidden>
+            <section class="generate-panel" aria-labelledby="recent-clips-title">
+              <h2 id="recent-clips-title" data-i18n="Recent clips"></h2>
+              <p id="recent-clips-empty" class="setting-hint" data-i18n="Videos you create here will appear after they’re saved."></p>
+              <ul id="recent-clips-list" class="recent-clips-list"></ul>
+            </section>
+            <section class="generate-panel" aria-labelledby="recent-clips-preview-title">
+              <h2 id="recent-clips-preview-title" data-i18n="Clip preview"></h2>
+              <div class="generate-stage">
+                <p id="recent-clips-preview-empty" class="setting-hint" data-i18n="Choose a clip to play it."></p>
+                <video id="recent-clips-preview" class="photo-video-preview" controls playsinline aria-labelledby="recent-clips-preview-title" hidden></video>
+              </div>
+              <div id="recent-clips-actions" class="model-actions" hidden>
+                <button id="recent-clips-open" class="btn" type="button" data-i18n="Open file"></button>
+                <button id="recent-clips-reuse" class="btn" type="button" data-i18n="Reuse prompt" hidden></button>
+              </div>
+              <p id="recent-clips-status" class="setting-hint" role="status"></p>
             </section>
           </div>
         </div>
