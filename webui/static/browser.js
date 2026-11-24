@@ -48,7 +48,8 @@ window.browserui = (() => {
   }
 
   for (const tab of tabs) tab.addEventListener("click", () => press(tab.dataset.nav));
-  el("browser-new-tab")?.addEventListener("click", () => press("new-chat"));
+  // New chat, then show it: the app's New chat button leaves the current section in front.
+  el("browser-new-tab")?.addEventListener("click", () => { press("new-chat"); press("nav-chats"); });
   el("browser-back")?.addEventListener("click", () => go(back, forward));
   el("browser-forward")?.addEventListener("click", () => go(forward, back));
   el("browser-reload")?.addEventListener("click", () => press("refresh"));

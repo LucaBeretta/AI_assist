@@ -64,7 +64,11 @@ assert.equal(text(), 'aiassist://developer');
 tabs[4].listeners.click();                       // a new visit clears the forward list
 assert.equal(nodes.get('browser-forward').disabled, true);
 
-for (const [button, target] of [['browser-new-tab', 'new-chat'], ['browser-reload', 'refresh'], ['browser-address', 'open-palette'],
+tabs[2].listeners.click();                       // on Models, "+" makes a new chat and shows it
+nodes.get('browser-new-tab').listeners.click();
+assert.deepEqual(pressed.slice(-2), ['new-chat', 'nav-chats']);
+assert.deepEqual(selected(), ['nav-chats']);
+for (const [button, target] of [['browser-new-tab', 'nav-chats'], ['browser-reload', 'refresh'], ['browser-address', 'open-palette'],
                                 ['browser-mission', 'open-mission-control'], ['browser-settings', 'open-settings']]) {
   nodes.get(button).listeners.click();
   assert.equal(pressed.at(-1), target, button);
