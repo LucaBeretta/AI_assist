@@ -56,7 +56,7 @@ class CharacterApi:
         def work(progress, cancel):
             progress(status="Blender is building your character…", cancellable=False)
             made = self._build_character(choices, folder, blender=blender)
-            return {"portrait": _portrait_url(folder), "files": made}
+            return {"portrait": _portrait_url(folder), "files": made, "folder": str(folder)}
 
         return self._jobs.start("character", work, key="character")
 

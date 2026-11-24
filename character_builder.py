@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import re
+import struct
 import subprocess
 import tempfile
 
@@ -17,7 +18,7 @@ import network_gate
 
 SCRIPT = Path(__file__).resolve().with_name("blender_character.py")
 OUTPUTS = ("portrait.png", "character.blend")
-OPTIONAL_OUTPUTS = ("character.glb",)  # glTF export needs numpy, which some Linux Blender builds lack
+OPTIONAL_OUTPUTS = ("character.glb", "character.vrm")  # glTF export needs numpy, which some Linux Blender builds lack
 TIMEOUT_SECONDS = 300
 
 HEIGHTS = ("short", "medium", "tall")
@@ -33,6 +34,12 @@ DEFAULTS = {"name": "", "height": "medium", "build": "average", "skin": SKIN_TON
             "accessory": "none", "backdrop": "#dde6ea"}
 _HEX = re.compile(r"#[0-9a-fA-F]{6}")
 _NAME = re.compile(r"[^\x00-\x1f\x7f]{0,40}")
+
+
+# The humanoid bones blender_character.py makes, named as in VRM 1.0 (all of VRM's required bones, plus chest).
+VRM_BONES = ("hips", "spine", "chest", "neck", "head") + tuple(
+    side + part for side in ("left", "right")
+    for part in ("UpperArm", "LowerArm", "Hand", "UpperLeg", "LowerLeg", "Foot"))
 
 
 class CharacterError(RuntimeError):
@@ -90,6 +97,48 @@ def choices_from_model_reply(reply):
     return choices
 
 
+def _glb_chunks(data):
+    magic, version, length = struct.unpack_from("<4sII", data, 0)
+    if magic != b"glTF" or version != 2 or length != len(data):
+        raise ValueError("Not a glTF 2.0 binary file.")
+    chunks, offset = [], 12
+    while offset < length:
+        size, kind = struct.unpack_from("<I4s", data, offset)
+        chunks.append([kind, data[offset + 8:offset + 8 + size]])
+        offset += 8 + size
+    if not chunks or chunks[0][0] != b"JSON":
+        raise ValueError("The glTF file has no JSON chunk.")
+    return chunks
+
+
+def vrm_from_glb(data, name=""):
+    """Turn the character's .glb into a VRM 1.0 avatar: the same file plus VRM's humanoid map and terms of use."""
+    chunks = _glb_chunks(data)
+    document = json.loads(chunks[0][1])
+    nodes = {node.get("name"): index for index, node in enumerate(document.get("nodes", []))}
+    missing = [bone for bone in VRM_BONES if bone not in nodes]
+    if missing:
+        raise ValueError(f"The character has no {missing[0]} bone.")
+    document["extensionsUsed"] = sorted(set(document.get("extensionsUsed", [])) | {"VRMC_vrm"})
+    document.setdefault("extensions", {})["VRMC_vrm"] = {
+        "specVersion": "1.0",
+        "meta": {
+            "name": name or "My character", "version": "1", "authors": [name or "AI Assist user"],
+            "licenseUrl": "https://vrm.dev/licenses/1.0/",
+            # The most careful choices; the owner can change them in any VRM editor.
+            "avatarPermission": "onlyAuthor", "commercialUsage": "personalNonProfit",
+            "allowExcessivelyViolentUsage": False, "allowExcessivelySexualUsage": False,
+            "allowPoliticalOrReligiousUsage": False, "allowAntisocialOrHateUsage": False,
+            "creditNotation": "unnecessary", "allowRedistribution": False, "modification": "allowModification",
+        },
+        "humanoid": {"humanBones": {bone: {"node": nodes[bone]} for bone in VRM_BONES}},
+    }
+    text = json.dumps(document, separators=(",", ":")).encode("utf-8")
+    chunks[0][1] = text + b" " * (-len(text) % 4)
+    body = b"".join(struct.pack("<I4s", len(chunk), kind) + chunk for kind, chunk in chunks)
+    return struct.pack("<4sII", b"glTF", 2, 12 + len(body)) + body
+
+
 def build(choices, output_folder, blender=None, timeout=TIMEOUT_SECONDS):
     """Make the character in Blender and return the paths of its three files."""
     spec = validate(choices)
@@ -120,13 +169,18 @@ def build(choices, output_folder, blender=None, timeout=TIMEOUT_SECONDS):
         if result.returncode != 0 or "AI_ASSIST_CHARACTER_DONE" not in result.stdout or missing:
             detail = (result.stderr or result.stdout).strip().splitlines()[-3:]
             raise CharacterError("Blender could not finish the character. " + " ".join(detail)[:400])
-        files = {"portrait": "portrait.png", "blend": "character.blend", "model": "character.glb"}
+        if (staging / "character.glb").is_file():
+            try:
+                (staging / "character.vrm").write_bytes(vrm_from_glb((staging / "character.glb").read_bytes(), spec["name"]))
+            except (OSError, ValueError):
+                pass  # the .glb still works in Unreal; only the VRM copy is missing
+        files = {"portrait": "portrait.png", "blend": "character.blend", "model": "character.glb", "avatar": "character.vrm"}
         made = {}
         for key, name in files.items():
             if (staging / name).is_file():
                 os.replace(staging / name, output / name)
                 made[key] = str(output / name)
-            elif key == "model":
+            elif key in ("model", "avatar"):
                 (output / name).unlink(missing_ok=True)  # never keep an old model beside a new character
     (output / "character.json").write_text(json.dumps(spec, indent=2), encoding="utf-8")
     return made

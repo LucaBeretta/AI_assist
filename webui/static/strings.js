@@ -663,7 +663,8 @@ window.i18n = (() => {
   "Tall": "Alta",
   "Slim": "Snella",
   "Average": "Normale",
-  "Broad": "Robusta"
+  "Broad": "Robusta",
+  "Your character is ready. Its files for Unreal Engine (.glb) and VRM apps (.vrm) are in {v0}": "Il tuo personaggio è pronto. I file per Unreal Engine (.glb) e per le app VRM (.vrm) sono in {v0}"
 };
   const en = Object.fromEntries(Object.keys(it).map(key => [key, key]));
   const messages = {en, it};

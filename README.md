@@ -103,7 +103,9 @@ The add-on is off until you click Connect, and off again when you click Disconne
 
 ### Your 3D character
 
-`character_builder.py` creates a stylised 3D character with the Blender installed on this computer, running in the background with nothing downloaded. It accepts a name, height, build, skin tone, hairstyle (none, short, long, bun, curly, spiky), hair, eye and clothing colours, and an accessory (glasses, hat, headphones). `blender_character.py` builds the character from Blender's own shapes and writes `portrait.png`, `character.blend` and, where Blender can export glTF, `character.glb`. A description in your own words can fill in the choices: a local model's reply is reduced to valid choices only (`choices_from_model_reply`). The first-run page will offer this step; until then, the builder can be called from Python.
+`character_builder.py` creates a stylised 3D character with the Blender installed on this computer, running in the background with nothing downloaded. It accepts a name, height, build, skin tone, hairstyle (none, short, long, bun, curly, spiky), hair, eye and clothing colours, and an accessory (glasses, hat, headphones). `blender_character.py` builds the character from Blender's own shapes and writes `portrait.png`, `character.blend` and, where Blender can export glTF, `character.glb`. A description in your own words can fill in the choices: a local model's reply is reduced to valid choices only (`choices_from_model_reply`). The first-run page offers this step.
+
+The character has a humanoid skeleton (hips, spine, chest, neck, head, arms, hands, legs and feet, named as in VRM 1.0). Its rest pose is a T-pose, as game engines expect; the portrait lowers the arms. AI Assist also writes `character.vrm`, the same model with VRM's bone map and terms of use, for VRM apps and worlds. To use the character in Unreal Engine 5, import `character.glb` as a skeletal mesh (drag it into the Content Browser), or import `character.vrm` with the VRM4U plugin. The VRM terms start at the most careful settings (only you may use the avatar, non-commercial use); change them in any VRM editor.
 
 ### Shared memory across chats
 

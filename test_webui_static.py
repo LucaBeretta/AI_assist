@@ -483,6 +483,8 @@ class StaticTests(unittest.TestCase):
         assert.equal(elements.get('character-portrait').src,'data:image/png;base64,AAAA');
         assert.equal(elements.get('character-status').textContent,'Your character is ready.');
         assert.equal(elements.get('character-create').disabled,false);
+        window.app.onEvent([{type:'job_done',operation:'character',result:{portrait:'data:image/png;base64,AAAA',files:{avatar:'/x/character.vrm'},folder:'/data/character'}}]);
+        assert.match(elements.get('character-status').textContent,/Unreal Engine.*\/data\/character/);
         window.app.onEvent([{type:'job_error',operation:'character',error:'Blender could not finish the character.'}]);
         assert.equal(elements.get('character-status').textContent,'Blender could not finish the character.');
         ''')

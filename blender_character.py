@@ -6,6 +6,10 @@ Runs inside Blender only, started by AI Assist in the background:
 
 Writes portrait.png (the avatar), character.blend and character.glb into the output
 folder. Everything is made from Blender's own primitive shapes: no downloads, no models.
+
+The character has a humanoid skeleton named after the VRM humanoid bones (hips, spine,
+leftUpperArm, ...). Its rest pose is a T-pose, as Unreal Engine and VRM expect; the
+portrait poses the arms down. character_builder.py turns the .glb into a .vrm.
 """
 import json
 import math
@@ -14,7 +18,9 @@ import sys
 
 import bmesh
 import bpy
-from mathutils import Vector
+from mathutils import Matrix, Vector
+
+ARM_DROP_DEGREES = 72  # the portrait's relaxed arms, from the T-pose
 
 
 def colour(hex_value):
@@ -92,6 +98,113 @@ def hair_cap(head_center, radius, mat, parent, fringe):
     return finish(obj, mat, parent)
 
 
+def _part(name):
+    """Which body part a piece belongs to: everything above the neck moves with the head."""
+    if name.startswith(("Leg", "Shoe")):
+        return name.split(".")[0].split()[0].lower()
+    if name.startswith(("Arm", "Hand")):
+        return name.split(".")[0].split()[0].lower()
+    if name.startswith("Body"):
+        return "body"
+    if name.startswith("Neck"):
+        return "neck"
+    return "head"
+
+
+def _bone_for(part, point, size):
+    side = "left" if point.x > 0 else "right"  # the character faces -Y, so its left is +X
+    if part == "head" or part == "neck":
+        return part
+    if part == "body":
+        if point.z < size["body_z"] - 0.05 * size["tall"]:
+            return "hips"
+        return "spine" if point.z < size["body_z"] + 0.07 * size["tall"] else "chest"
+    if part == "hand":
+        return side + "Hand"
+    if part == "arm":
+        return side + ("UpperArm" if abs(point.x) - size["shoulder_x"] < size["arm_length"] / 2 else "LowerArm")
+    if part == "shoe":
+        return side + "Foot"
+    return side + ("UpperLeg" if point.z > size["knee_z"] else "LowerLeg")
+
+
+def rig(root, size):
+    """Join the body into one mesh and give it a humanoid skeleton (VRM bone names), rest pose = T-pose."""
+    scene = bpy.context.scene
+    pieces = [child for child in root.children if child.type == "MESH"]
+    for piece in pieces:
+        # Apply the soft-edge and thickness modifiers, so the joined mesh keeps the same shape.
+        bpy.ops.object.select_all(action="DESELECT")
+        piece.select_set(True)
+        bpy.context.view_layer.objects.active = piece
+        bpy.ops.object.convert(target="MESH")
+        group = piece.vertex_groups.new(name="part:" + _part(piece.name))
+        group.add(list(range(len(piece.data.vertices))), 1.0, "REPLACE")
+    bpy.ops.object.select_all(action="DESELECT")
+    for piece in pieces:
+        piece.select_set(True)
+    bpy.context.view_layer.objects.active = pieces[0]
+    bpy.ops.object.parent_clear(type="CLEAR_KEEP_TRANSFORM")
+    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+    bpy.ops.object.join()
+    body = bpy.context.active_object
+    body.name = "Avatar"
+
+    hip_z, leg_x, knee_z = size["hip_z"], size["leg_x"], size["knee_z"]
+    body_z, tall, neck_z, head_z, radius = size["body_z"], size["tall"], size["neck_z"], size["head_z"], size["radius"]
+    sx, sz, arm = size["shoulder_x"], size["shoulder_z"], size["arm_length"]
+    bones = [("hips", None, (0, 0, hip_z), (0, 0, body_z - 0.05 * tall)),
+             ("spine", "hips", (0, 0, body_z - 0.05 * tall), (0, 0, body_z + 0.07 * tall)),
+             ("chest", "spine", (0, 0, body_z + 0.07 * tall), (0, 0, neck_z)),
+             ("neck", "chest", (0, 0, neck_z), (0, 0, head_z - radius * 0.9)),
+             ("head", "neck", (0, 0, head_z - radius * 0.9), (0, 0, head_z + radius))]
+    for side, sign in (("left", 1), ("right", -1)):
+        bones += [(side + "UpperArm", "chest", (sign * sx, 0, sz), (sign * (sx + arm / 2), 0, sz)),
+                  (side + "LowerArm", side + "UpperArm", (sign * (sx + arm / 2), 0, sz), (sign * (sx + arm), 0, sz)),
+                  (side + "Hand", side + "LowerArm", (sign * (sx + arm), 0, sz), (sign * (sx + arm + 0.08), 0, sz)),
+                  (side + "UpperLeg", "hips", (sign * leg_x, 0, hip_z), (sign * leg_x, 0, knee_z)),
+                  (side + "LowerLeg", side + "UpperLeg", (sign * leg_x, 0, knee_z), (sign * leg_x, 0, 0.06)),
+                  (side + "Foot", side + "LowerLeg", (sign * leg_x, 0, 0.06), (sign * leg_x, -0.12, 0.03))]
+
+    armature = bpy.data.armatures.new("Skeleton")
+    skeleton = bpy.data.objects.new(root.name, armature)
+    scene.collection.objects.link(skeleton)
+    bpy.ops.object.select_all(action="DESELECT")
+    bpy.context.view_layer.objects.active = skeleton
+    bpy.ops.object.mode_set(mode="EDIT")
+    for name, parent, head, tail in bones:
+        bone = armature.edit_bones.new(name)
+        bone.head, bone.tail = head, tail
+        if parent:
+            bone.parent = armature.edit_bones[parent]
+            bone.use_connect = False
+    bpy.ops.object.mode_set(mode="OBJECT")
+
+    # Each vertex follows one bone, chosen from the piece it came from and where it is.
+    groups = {name: body.vertex_groups.new(name=name) for name, *_ in bones}
+    parts = {group.index: group.name[5:] for group in body.vertex_groups if group.name.startswith("part:")}
+    for vertex in body.data.vertices:
+        part = next((parts[item.group] for item in vertex.groups if item.group in parts), "head")
+        groups[_bone_for(part, vertex.co, size)].add([vertex.index], 1.0, "REPLACE")
+    for group in [group for group in body.vertex_groups if group.name.startswith("part:")]:
+        body.vertex_groups.remove(group)
+    body.parent = skeleton
+    body.modifiers.new("Skeleton", "ARMATURE").object = skeleton
+    name = root.name
+    bpy.data.objects.remove(root)
+    skeleton.name = name  # the character's own name, now that the empty that held it is gone
+
+    # The portrait shows relaxed arms; the saved rest pose stays a T-pose.
+    for side, sign in (("left", 1), ("right", -1)):
+        bone = skeleton.pose.bones[side + "UpperArm"]
+        pivot = Vector((sign * sx, 0, sz))
+        turn = Matrix.Translation(pivot) @ Matrix.Rotation(math.radians(sign * ARM_DROP_DEGREES), 4, "Y") @ Matrix.Translation(-pivot)
+        bone.matrix = turn @ bone.bone.matrix_local
+        bpy.context.view_layer.update()
+    scene["ai_assist_skeleton"] = skeleton.name
+    return skeleton
+
+
 def build(spec):
     bpy.ops.wm.read_factory_settings(use_empty=True)
     scene = bpy.context.scene
@@ -121,14 +234,14 @@ def build(spec):
     body_z = leg_height + 0.17 * tall
     sphere("Body", (0, 0, body_z), (0.17 * wide, 0.13 * wide, 0.21 * tall), top, root)
     arm_length = 0.27 * tall
+    shoulder_z = body_z + 0.13 * tall
+    shoulder_x = 0.15 * wide
     for side in (-1, 1):
-        # Shoulders touch the body and the arms hang slightly outwards.
-        shoulder = Vector((side * 0.15 * wide, 0, body_z + 0.13 * tall))
-        hand = shoulder + Vector((side * 0.07, 0, -arm_length))
-        middle = (shoulder + hand) / 2
-        tilt = math.atan2(hand.x - shoulder.x, shoulder.z - hand.z)
-        cylinder("Arm", middle, 0.048 * wide, arm_length, top, root, rotation=(0, -tilt, 0))
-        sphere("Hand", hand + Vector((0, 0, -0.02)), (0.055, 0.05, 0.055), skin, root)
+        # Built in a T-pose, the rest pose game engines expect; the skeleton lowers them for the portrait.
+        shoulder = Vector((side * shoulder_x, 0, shoulder_z))
+        hand = shoulder + Vector((side * arm_length, 0, 0))
+        cylinder("Arm", (shoulder + hand) / 2, 0.048 * wide, arm_length, top, root, rotation=(0, math.radians(90), 0))
+        sphere("Hand", hand + Vector((side * 0.02, 0, 0)), (0.055, 0.05, 0.055), skin, root)
     cylinder("Neck", (0, 0, body_z + 0.21 * tall), 0.05, 0.06, skin, root)
 
     # Head and face.
@@ -198,6 +311,10 @@ def build(spec):
             cylinder("Ear cup", head + Vector((side * radius * 1.08, 0.01, 0)), 0.075, 0.05, phones, root,
                      rotation=(0, math.radians(90), 0))
 
+    rig(root, {"hip_z": leg_height + 0.04, "leg_x": 0.085 * wide, "knee_z": leg_height / 2 + 0.06,
+               "body_z": body_z, "tall": tall, "shoulder_x": shoulder_x, "shoulder_z": shoulder_z,
+               "arm_length": arm_length, "neck_z": body_z + 0.18 * tall, "head_z": head.z, "radius": radius})
+
     # Light and camera for a friendly 3/4 portrait.
     total_height = head.z + radius
     focus = Vector((0, 0, total_height * 0.64))
@@ -239,9 +356,20 @@ def render_and_save(scene, output):
     scene.render.filepath = os.path.join(output, "portrait.png")
     bpy.ops.render.render(write_still=True)
     bpy.ops.wm.save_as_mainfile(filepath=os.path.join(output, "character.blend"))
+    # Export only the character (skeleton and body) in its T-pose rest position, for game engines.
+    skeleton = bpy.data.objects[scene["ai_assist_skeleton"]]
+    bpy.ops.object.select_all(action="DESELECT")
+    skeleton.select_set(True)
+    for child in skeleton.children:
+        child.select_set(True)
+    bpy.context.view_layer.objects.active = skeleton
+    options = dict(filepath=os.path.join(output, "character.glb"), export_format="GLB", use_selection=True,
+                   export_skins=True, export_animations=False)
     try:
-        bpy.ops.export_scene.gltf(filepath=os.path.join(output, "character.glb"), export_format="GLB",
-                                  use_selection=False, export_apply=True)
+        try:
+            bpy.ops.export_scene.gltf(**options, export_rest_position_armature=True)
+        except TypeError:  # Blender before 3.6 has no rest-position option; it exports the rest pose anyway
+            bpy.ops.export_scene.gltf(**options)
     except Exception as error:  # Some Linux builds of Blender lack the exporter's numpy; the rest still counts.
         print("AI_ASSIST_CHARACTER_NO_GLB", error)
 
