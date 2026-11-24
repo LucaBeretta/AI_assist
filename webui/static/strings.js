@@ -664,6 +664,16 @@ window.i18n = (() => {
   "Slim": "Snella",
   "Average": "Normale",
   "Broad": "Robusta",
+  "3D sound (optional)": "Suono 3D (facoltativo)",
+  "Sound movement": "Movimento del suono",
+  "Circles around you": "Ti gira intorno",
+  "Left to right": "Da sinistra a destra",
+  "Over your head": "Sopra la testa",
+  "3D sound ready. Use headphones to hear it move.": "Suono 3D pronto. Usa le cuffie per sentirlo muoversi.",
+  "Choose an audio file (MP3, WAV, OGG, M4A or FLAC) up to 20 MB.": "Scegli un file audio (MP3, WAV, OGG, M4A o FLAC) fino a 20 MB.",
+  "Could not read this sound file.": "Impossibile leggere questo file audio.",
+  "This window cannot play 3D sound.": "Questa finestra non può riprodurre suono 3D.",
+  "Unknown sound movement.": "Movimento del suono sconosciuto.",
   "Your character is ready. Its files for Unreal Engine (.glb) and VRM apps (.vrm) are in {v0}": "Il tuo personaggio è pronto. I file per Unreal Engine (.glb) e per le app VRM (.vrm) sono in {v0}"
 };
   const en = Object.fromEntries(Object.keys(it).map(key => [key, key]));
