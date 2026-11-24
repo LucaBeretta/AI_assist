@@ -168,8 +168,8 @@ class StaticTests(unittest.TestCase):
         assert.equal(elements.get('sharing-ai').checked,true);
         assert.equal(elements.get('sharing-clients-box').hidden,false);
         assert.match(elements.get('sharing-clients').textContent,/Device abcdef01 may use/);
-        assert.match(elements.get('sharing-clients').textContent,/Lucas-MacBook may use/);
-        assert.match(elements.get('sharing-peers').textContent,/^Studio-PC · 192.168.1.20:1/);
+        assert.match(elements.get('sharing-clients').textContent,/Lucas-MacBook \(fedcba98\) may use/);
+        assert.match(elements.get('sharing-peers').textContent,/^Studio-PC \(pc\) · 192.168.1.20:1/);
         const tick=elements.get('sharing-clients').children[0].children[0].children[0];
         tick.checked=true;
         await tick.listeners.change();

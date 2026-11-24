@@ -64,8 +64,10 @@ def device_name(value):
     """A computer's name as shown to people: printable text, at most 48 characters, or ""."""
     if not isinstance(value, str):
         return ""
-    text = "".join(char for char in value if char.isprintable()).strip()
-    return text[:48].strip()
+    text = "".join(char for char in value if char.isprintable()).strip()[:48]
+    while len(text.encode("utf-8")) > 96:  # keeps pairing packets small even for emoji names
+        text = text[:-1]
+    return text.strip()
 
 
 def this_device_name():

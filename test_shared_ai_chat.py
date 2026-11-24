@@ -152,6 +152,7 @@ class DeviceNameTests(unittest.TestCase):
     def test_names_are_short_printable_labels_and_discovery_keeps_the_generic_name(self):
         from peer_pairing import device_name
         self.assertEqual(device_name("x" * 100), "x" * 48)
+        self.assertLessEqual(len(device_name("\U0001F600" * 48).encode("utf-8")), 96)
         self.assertEqual(device_name("  Mac\nmini  "), "Macmini")
         for value in (None, 5, ["a"], "\x00\x01"):
             self.assertEqual(device_name(value), "")

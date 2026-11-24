@@ -690,7 +690,8 @@ window.app = (() => {
     for (const computer of computers) {
       if (computer.state !== "ready" || !computer.models.length) continue;
       const group = document.createElement("optgroup");
-      group.label = t("Paired computer {v0}", {v0: computer.name || computer.address});
+      // The name comes from the other computer; its address tells two same-named computers apart.
+      group.label = t("Paired computer {v0}", {v0: computer.name ? `${computer.name} (${computer.address})` : computer.address});
       group.sharedComputer = computer.id;
       sharedNames[computer.backend] = computer.name || computer.address;
       for (const name of computer.models) {
