@@ -10,6 +10,8 @@
   const save = el("save");
   const status = el("status");
   const empty = el("empty");
+  const sound = el("sound");
+  const movement = el("movement");
   const mediaType = typeof canvas.captureStream === "function"
     ? ["video/mp4", "video/webm"].find(type => window.MediaRecorder?.isTypeSupported?.(type))
     : undefined;
@@ -18,6 +20,9 @@
   let photoVersion = 0;
   let previewFrame = 0;
   let saving = false;
+  let soundBuffer = null;
+  let soundVersion = 0;
+  let previewSound = null;
 
   function readDataUrl(file) {
     return new Promise((resolve, reject) => {
@@ -33,7 +38,13 @@
     play.textContent = t(label);
   }
 
+  function stopPreviewSound() {
+    previewSound?.stop();
+    previewSound = null;
+  }
+
   function pause() {
+    stopPreviewSound();
     if (!previewFrame) return;
     cancelAnimationFrame(previewFrame);
     previewFrame = 0;
@@ -41,7 +52,7 @@
   }
 
   function updateControls() {
-    input.disabled = effect.disabled = saving;
+    input.disabled = effect.disabled = sound.disabled = movement.disabled = saving;
     play.disabled = !ready || saving;
     save.disabled = !ready || saving || !mediaType;
   }
@@ -62,6 +73,10 @@
       }
     }
     setPlayLabel("Pause preview");
+    if (soundBuffer) {
+      try { previewSound = window.spatialSound.start(soundBuffer, movement.value, window.photoShader.duration); }
+      catch (error) { status.textContent = t(error.message); }
+    }
     previewFrame = requestAnimationFrame(tick);
   }
 
@@ -110,13 +125,37 @@
     }
   }
 
+  async function loadSound() {
+    const version = ++soundVersion;
+    const wasPlaying = Boolean(previewFrame);
+    pause();
+    soundBuffer = null;
+    el("movement-field").hidden = true;
+    status.textContent = "";
+    try {
+      const file = window.spatialSound.checkFile(sound.files[0]);
+      if (!file) return;
+      const buffer = await window.spatialSound.decode(file);
+      if (version !== soundVersion) return;
+      soundBuffer = buffer;
+      el("movement-field").hidden = false;
+      status.textContent = t("3D sound ready. Use headphones to hear it move.");
+      if (wasPlaying && ready) startPreview();
+    } catch (error) {
+      if (version === soundVersion) status.textContent = t(error.message);
+    }
+  }
+
   async function recordClip() {
     drawFrame(0);
     const stream = canvas.captureStream(30);
+    const audio = soundBuffer ? window.spatialSound.start(soundBuffer, movement.value, window.photoShader.duration, {record: true}) : null;
+    audio?.tracks.forEach(track => stream.addTrack(track));
     let frame = 0;
     let recorder;
     try {
-      recorder = new MediaRecorder(stream, {mimeType: mediaType, videoBitsPerSecond: 3_000_000});
+      recorder = new MediaRecorder(stream, {mimeType: mediaType, videoBitsPerSecond: 3_000_000,
+                                            ...(audio ? {audioBitsPerSecond: 192_000} : {})});
       return await new Promise((resolve, reject) => {
         const parts = [];
         const started = performance.now();
@@ -150,6 +189,7 @@
       if (frame) cancelAnimationFrame(frame);
       if (recorder && recorder.state !== "inactive") recorder.stop();
       stream.getTracks().forEach(track => track.stop());
+      audio?.stop();
     }
   }
 
@@ -188,6 +228,10 @@
   }
 
   input.addEventListener("change", loadPhoto);
+  sound.addEventListener("change", loadSound);
+  movement.addEventListener("change", () => {
+    if (previewFrame) { pause(); startPreview(); }
+  });
   effect.addEventListener("change", () => {
     if (ready && !previewFrame) {
       try { drawFrame(0); }
