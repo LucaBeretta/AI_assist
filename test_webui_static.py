@@ -522,6 +522,18 @@ class StaticTests(unittest.TestCase):
         ''')
 
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_welcome_reads_saved_preferences_when_this_computer_has_no_engine(self):
+        self.run_scenario(r'''
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'welcome.js'),'utf8'), {document,window,Map,Set,Error,String,Number,Boolean,Array});
+        const api=window.pywebview.api;
+        api.set_web_preferences=async()=>({ok:true});
+        api.web_preferences=async()=>({ok:true,settings:{first_run_complete:true}});
+        api.shared_ai_models=async()=>({ok:true,computers:[{id:'pc',state:'ready',models:['qwen3:32b']}]});
+        await window.welcomeui.onReady(null);  // the state call failed: no Ollama here
+        assert.notEqual(document.getElementById('welcome-view').hidden,false);
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
     def test_welcome_character_builds_with_blender_and_explains_when_missing(self):
         self.run_scenario(r'''
         vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'welcome.js'),'utf8'), {document,window,Map,Set,Error,String,Number,Boolean,Array});
