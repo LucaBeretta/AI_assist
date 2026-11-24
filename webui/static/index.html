@@ -91,6 +91,24 @@
           <h1 id="welcome-title"><span data-i18n="Your first local conversation"></span></h1>
           <p class="welcome-lead"><span data-i18n="Choose a model that fits this computer. Your conversations stay here."></span></p>
           <section class="side-group"><h2><span data-i18n="This computer"></span></h2><p id="welcome-hardware" class="mono"><span data-i18n="Reading hardware…"></span></p></section>
+          <section id="welcome-character" class="side-group" hidden><h2 data-i18n="Your 3D character"></h2>
+            <p class="setting-hint" data-i18n="Make a character that looks like you. Blender builds it on this computer; nothing goes online."></p>
+            <div class="character-layout">
+            <div id="character-form" class="character-form" hidden>
+              <label class="field"><span data-i18n="Name"></span><input id="character-name" maxlength="40" autocomplete="off"></label>
+              <label class="field"><span data-i18n="Skin tone"></span><select id="character-skin"></select></label>
+              <label class="field"><span data-i18n="Hair"></span><select id="character-hair_style"></select></label>
+              <label class="field"><span data-i18n="Hair colour"></span><input id="character-hair_color" type="color" value="#3b2a20"></label>
+              <label class="field"><span data-i18n="Top colour"></span><input id="character-top_color" type="color" value="#0e8c78"></label>
+              <label class="field"><span data-i18n="Height"></span><select id="character-height"></select></label>
+              <label class="field"><span data-i18n="Build"></span><select id="character-build"></select></label>
+              <label class="field"><span data-i18n="Extra"></span><select id="character-accessory"></select></label>
+            </div>
+            <img id="character-portrait" class="character-portrait" alt="" hidden>
+            </div>
+            <p id="character-status" class="setting-hint" role="status" aria-live="polite"></p>
+            <div class="welcome-actions"><button id="character-create" class="btn" type="button" hidden><span data-i18n="Create with Blender"></span></button></div>
+          </section>
           <section class="side-group"><h2 data-i18n="A model to start with"></h2>
             <label class="field"><span><span data-i18n="Recommended model"></span></span><select id="welcome-model"></select></label>
             <p id="welcome-reason" class="setting-hint"></p>

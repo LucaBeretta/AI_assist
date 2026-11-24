@@ -450,6 +450,44 @@ class StaticTests(unittest.TestCase):
         ''')
 
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_welcome_character_builds_with_blender_and_explains_when_missing(self):
+        self.run_scenario(r'''
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'welcome.js'),'utf8'), {document,window,Map,Set,Error,String,Number,Boolean,Array});
+        const api=window.pywebview.api;
+        const options={height:['short','medium','tall'],build:['slim','average','broad'],hair_style:['none','short','bun'],accessory:['none','headphones'],skin:['light','medium']};
+        api.set_web_preferences=async()=>({ok:true});
+        api.recommend_models=async()=>({ok:true,hardware:{cpu:'CPU',gpus:[]},recommendations:[]});
+        api.character_state=async()=>({ok:true,blender:false,choices:null,portrait:null,building:false,options});
+        await window.listeners.pywebviewready();
+        await window.welcomeui.onReady({engine:'Ollama',models:[],settings:{first_run_complete:false}});
+        await new Promise(resolve=>setImmediate(resolve));
+        assert.equal(elements.get('welcome-character').hidden,false);
+        assert.equal(elements.get('character-create').hidden,true);
+        assert.match(elements.get('character-status').textContent,/blender\.org/);
+        api.character_state=async()=>({ok:true,blender:true,choices:null,portrait:null,building:false,options});
+        api.build_character=async choices=>{calls.push(['character',choices]);return {ok:true,job_id:'c1'};};
+        await window.welcomeui.loadCharacter();
+        assert.equal(elements.get('character-create').hidden,false);
+        assert.equal(elements.get('character-form').hidden,false);
+        assert.equal(elements.get('character-skin').value,'light');
+        assert.equal(elements.get('character-hair_style').children.at(-1).textContent,'Bun');
+        elements.get('character-name').value='Luca';
+        elements.get('character-accessory').value='headphones';
+        await elements.get('character-create').listeners.click();
+        const [, choices]=calls.find(item=>item[0]==='character');
+        assert.equal(choices.name,'Luca');
+        assert.equal(choices.accessory,'headphones');
+        assert.equal(elements.get('character-create').disabled,true);
+        window.app.onEvent([{type:'job_done',operation:'character',result:{portrait:'data:image/png;base64,AAAA'}}]);
+        assert.equal(elements.get('character-portrait').hidden,false);
+        assert.equal(elements.get('character-portrait').src,'data:image/png;base64,AAAA');
+        assert.equal(elements.get('character-status').textContent,'Your character is ready.');
+        assert.equal(elements.get('character-create').disabled,false);
+        window.app.onEvent([{type:'job_error',operation:'character',error:'Blender could not finish the character.'}]);
+        assert.equal(elements.get('character-status').textContent,'Blender could not finish the character.');
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
     def test_d5_memory_prompts_status_and_backend_selection(self):
         self.run_scenario(r'''
         vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'workspace.js'),'utf8'), {document,window,Map,Error,String,Number,Boolean,Array});
