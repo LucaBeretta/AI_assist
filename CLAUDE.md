@@ -44,10 +44,16 @@ This repository is public: keep secrets and personal details out of this file.
   - LucaBeretta/AI_assist#22: Developer uses an installed Blender in the background (`developer_tools.find_blender`, a short hint in `coding_agent._system_prompt`).
   - LucaBeretta/AI_assist#27 (owner): **Generate** — a local WebGL quick animation from a photo, and AI video through a local ComfyUI (Wan2.2 TI2V 5B) on `127.0.0.1:8188`.
   - A `stickers/` community landing page with a QR code that points to `https://stickers-bay.vercel.app/`. Its join link in `stickers/join-config.js` is still empty.
+  - LucaBeretta/AI_assist#31: Developer works on the scene open in Blender through an add-on (`blender_addon/ai_assist_bridge.py`, `blender_bridge.py`). It is off until Connect is clicked, listens on 127.0.0.1 only, and every change is approved.
+  - LucaBeretta/AI_assist#28: pairing and approval prompts in Mission Control, NVIDIA GPU temperature and power draw, and the tap-to-join NFC sticker artwork. A live check with two computers is still outstanding.
+  - LucaBeretta/AI_assist#33: chat reads also retry briefly on Windows (`app_core.paths.read_bytes_retrying`).
+  - LucaBeretta/AI_assist#34: `character_builder.py` and `blender_character.py` build the person's own 3D character with the Blender on this computer. There is no screen for it yet.
+  - LucaBeretta/AI_assist#36 and #37: model download sizes in decimal GB, as ollama.com shows them (RAM and VRAM stay binary); sharper Quick animation photos, with a Node test of `photo-shader.js`.
+  - LucaBeretta/AI_assist#24: a non-modal "Was this useful?" prompt after a saved answer or a finished Developer task. Answers go to a local journal, incognito chats are left out, and shared memory changes only with an explicit opt-in.
+  - LucaBeretta/AI_assist#26, #32 and #35: the first part of the network's **use** layer (see below).
 - Waiting on the owner:
   - Delete the leftover branch `live-check-huggingface` on GitHub; cloud sessions cannot delete branches.
-  - Changes left uncommitted in the PC's `main` worktree were never pushed (a `pc-unsaved-work` branch was suggested to Zencoder).
-- Five old branches that were never merged are archived as tags under `archive/`: `modernization/web-workstation`, `integration/compute-dashboard-web`, `code-quality-pass`, `feature/continuous-user-feedback` (closed: no feedback prompt after replies and tasks) and `mac-mission-control` (split into #11 and `mac-mission-control-only`). Each tag's message says why. Restore one with `git push origin "archive/NAME^{commit}:refs/heads/NAME"`.
+- Five old branches that were never merged are archived as tags under `archive/`: `modernization/web-workstation`, `integration/compute-dashboard-web`, `code-quality-pass`, `feature/continuous-user-feedback` (closed: no feedback prompt after replies and tasks; #24 later restored the idea on current `main`) and `mac-mission-control` (split into #11 and `mac-mission-control-only`). Each tag's message says why. Restore one with `git push origin "archive/NAME^{commit}:refs/heads/NAME"`.
 - `docs/modernization-backlog.md` is marked historical. The other milestone documents (`architecture-audit.md`, `architecture-decision.md`) also predate the removal of Tk.
 
 ## Hugging Face models
@@ -63,9 +69,15 @@ There are three layers:
 
 1. **See**: built. The Mission Control network scan in `lan_devices.py` runs only when the person clicks Scan.
 2. **Monitor**: built. Paired devices can share live CPU, RAM and GPU load over TLS after PIN pairing (`peer_pairing.py`, `webui/sharing.py`). `share_usage.py` does the same for computers without a screen.
-3. **Use**: not built. A paired computer runs AI for another one, for example a Windows PC with a powerful graphics card serving a Mac. It is planned as a "Compute location" control (This device / Auto / Choose device) in `docs/compute-routing.md`. The policy in `compute_routing.py` is written but nothing calls it. An early Mac -> Windows prototype, built on the removed Tk interface, is in the `archive/integration/compute-dashboard-web` tag (`lan_inference.py`, `lan_client.py`, `docs/mac-windows-lan-inference.md`): a reference, not code to merge.
+3. **Use**: started, with no screen yet. A paired computer runs AI for another one, for example a Windows PC with a powerful graphics card serving a Mac.
+   - `PairingHost(ollama="http://127.0.0.1:11434")` lets a paired device list models and chat with this computer's Ollama through the pinned-TLS pairing channel (#32). `open_shared_ai` is the client side.
+   - Only `/api/tags`, `/api/version`, `/api/show` and `/api/chat` are forwarded. Chat requests are data only (`peer_inference_contract.validate_request`, #26), and this computer writes Ollama's request itself. Cloud models are refused.
+   - Pairing alone is not enough: each device needs its own permission (`TrustStore.allow_ai`), which unpairing removes.
+   - `ai_network.py` (#35) maps this computer and the paired ones, with each one's models, load and status in plain words. It picks a computer with `compute_routing.choose_route`: this computer by default, never a silent fallback.
+   - Nothing turns sharing on yet. Next come the switch on the sharing computer and the "Compute location" control (This device / Auto / Choose device) planned in `docs/compute-routing.md`.
+   - An early Mac -> Windows prototype, built on the removed Tk interface, is in the `archive/integration/compute-dashboard-web` tag (`lan_inference.py`, `lan_client.py`, `docs/mac-windows-lan-inference.md`): a reference, not code to merge.
 
-Pointing AI Assist at another computer's Ollama URL already works, but that connection is unencrypted and unauthenticated. The next step is inference only for paired devices, over the existing pinned-TLS pairing channel.
+Pointing AI Assist at another computer's Ollama URL also works, but that connection is unencrypted and unauthenticated. The paired route replaces it once it has a screen.
 
 The design is local-network only: no cloud relay and no router port-forwarding. Reaching a home machine from outside would be a separate decision for the owner.
 
@@ -77,14 +89,14 @@ The design is local-network only: no cloud relay and no router port-forwarding. 
   - run `python AIassist.py`.
 
   Never advise turning Smart App Control off: it cannot be turned back on without reinstalling Windows. The real fix is signed installers.
-- **Windows briefly refuses renames.** It can refuse to replace a file, or rename a folder, for a moment while antivirus or search indexing holds it. Use `app_core.paths.replace_retrying` for app data rather than `os.replace`. GitHub's Windows runners rarely show this; a real PC does.
+- **Windows briefly refuses renames and reads.** It can refuse to replace a file, rename a folder, or open a file that is being replaced, for a moment while antivirus, search indexing or another thread holds it. Use `app_core.paths.replace_retrying` and `read_bytes_retrying` for app data rather than `os.replace` and `open`. GitHub's Windows runners rarely show this; a real PC does.
 - **Mission Control** showed as a panel overlapping the chat message box when run on Linux with Qt at 1280x840, although its commit says it opens in its own window. This is not yet checked on macOS. Check before changing it, since Luigi owns this code.
 - Bigger improvements discussed, each needing a decision from the owner or agreement with Luigi:
   - signed installers (a notarized macOS `.dmg` needs an Apple developer account; Windows needs a code-signing certificate);
   - a `src/` and `tests/` layout;
   - splitting `webui/app.py` and `app.js`;
   - branch protection that requires the **Tests** and **macOS desktop checks** workflows to pass before merging into `main`.
-- A plain-language explainer page made for the owner: https://claude.ai/artifact/1UxAFvr1TBtcK1K6YjB6Q6. Last updated on 24 November (Hugging Face, Blender, Generate, Mission Control, and the network's see / monitor / use steps).
+- A plain-language explainer page made for the owner: https://claude.ai/artifact/1UxAFvr1TBtcK1K6YjB6Q6. Last updated early on 24 November (Hugging Face, Blender, Generate, Mission Control, and the network's see / monitor / use steps). It does not yet cover #24, #28 or #31 to #37.
 
 ## Running the app in a cloud Linux container
 
