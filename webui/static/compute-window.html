@@ -8,6 +8,8 @@
   <link rel="stylesheet" href="styles.css">
   <script defer src="strings.js"></script>
   <script defer src="compute.js"></script>
+  <script defer src="security.js"></script>
+  <script defer src="sharing.js"></script>
   <script defer src="compute-window.js"></script>
 </head>
 <body class="compute-window">
@@ -15,7 +17,12 @@
   <header class="header"><h1 id="compute-title" data-i18n="Mission Control"></h1><p id="compute-note" class="setting-hint" role="status"></p><button id="compute-fullscreen" class="btn" type="button" title="F11" data-i18n="Full screen"></button></header>
   <div class="compute-grid">
     <section class="compute-panel cw-cpu"><h2>CPU</h2><p id="compute-cpu-name"></p><p id="compute-cpu" class="compute-reading"></p><progress id="compute-cpu-meter" max="100" hidden></progress></section>
-    <section class="compute-panel cw-gpu"><h2>GPU</h2><p id="compute-gpu-name"></p><p id="compute-gpu" class="compute-reading"></p><progress id="compute-gpu-meter" max="100" hidden></progress></section>
+    <section class="compute-panel cw-gpu">
+      <div class="compute-gpu-header"><h2>GPU</h2><span id="compute-gpu-sensors" class="setting-hint" hidden></span></div>
+      <p id="compute-gpu-name"></p>
+      <p id="compute-gpu" class="compute-reading"></p>
+      <progress id="compute-gpu-meter" max="100" aria-label="GPU" hidden></progress>
+    </section>
     <section class="compute-panel cw-ram"><h2>RAM</h2><p id="compute-ram" class="compute-reading"></p><progress id="compute-ram-meter" max="100" hidden></progress></section>
     <div class="cube-stage" aria-hidden="true">
       <svg class="particle-cloud" viewBox="0 0 400 400" focusable="false">
@@ -76,6 +83,31 @@
     <section class="compute-panel compute-models cw-models"><h2 data-i18n="Models"></h2><p id="compute-model-note" class="setting-hint"></p><div class="compute-model-lists"><div><h3 data-i18n="Loaded now"></h3><ul id="compute-loaded"></ul></div><div><h3 data-i18n="Installed"></h3><ul id="compute-installed"></ul></div></div></section>
     <section class="compute-panel cw-net" aria-labelledby="net-title">
       <div class="net-head"><h2 id="net-title" data-i18n="Network"></h2><span id="net-meta" class="net-meta"></span><button id="net-scan" class="btn" type="button" data-i18n="Scan"></button></div>
+      <details class="setting-details" id="net-pairing">
+        <summary data-i18n="LAN pairing"></summary>
+        <div class="net-pairing-fields">
+          <p class="setting-hint" data-i18n="Manual only. Off on every launch. Pairing shares no chats, files, commands or inference."></p>
+          <label class="setting-row"><span class="setting-title" data-i18n="This computer's LAN IPv4 address"></span><input id="sharing-address" class="setting-input mono" type="text" placeholder="192.168.1.10" autocomplete="off"></label>
+          <label class="check-row"><input id="sharing-enabled" type="checkbox"><span data-i18n="Enable LAN pairing"></span></label>
+          <label class="check-row"><input id="sharing-usage" type="checkbox"><span><span data-i18n="Also share this computer's CPU, RAM and GPU usage with paired devices"></span><span class="setting-hint" data-i18n="Only devices you paired with a PIN can read it, while pairing is on. Off every time AI Assist starts."></span></span></label>
+          <div id="sharing-details" hidden>
+            <p class="setting-hint" data-i18n="Compare this certificate code on the other device before entering the PIN. PIN expires after 120 seconds; three attempts."></p>
+            <dl><dt data-i18n="Address"></dt><dd id="sharing-endpoint" class="mono"></dd><dt data-i18n="Certificate code"></dt><dd id="sharing-code" class="mono"></dd><dt>PIN</dt><dd id="sharing-pin" class="mono"></dd></dl>
+            <button id="sharing-new-pin" class="btn" type="button" data-i18n="New pairing PIN"></button>
+          </div>
+          <details class="setting-details"><summary data-i18n="Pair another device"></summary>
+            <form id="pair-form">
+              <p class="setting-hint" data-i18n="Paste the host's displayed address to fill in its IPv4 address and port. Compare the certificate code on the host before entering the PIN."></p>
+              <label class="setting-row"><span class="setting-title" data-i18n="Target LAN IPv4 address"></span><input class="setting-input mono" id="pair-address" type="text" required autocomplete="off"></label>
+              <label class="setting-row"><span class="setting-title" data-i18n="Port"></span><input class="setting-input mono" id="pair-port" type="number" min="1" max="65535" required></label>
+              <label class="setting-row"><span class="setting-title" data-i18n="Certificate code"></span><input class="setting-input mono" id="pair-code" type="text" pattern="[0-9A-Fa-f]{16}" required autocomplete="off"></label>
+              <label class="setting-row"><span class="setting-title">PIN</span><input class="setting-input mono" id="pair-pin" type="password" inputmode="numeric" pattern="[0-9]{6}" required autocomplete="off"></label>
+              <div class="setting-actions"><button id="pair-submit" class="btn" type="submit" data-i18n="Pair device"></button></div>
+            </form>
+          </details>
+          <ul id="sharing-peers" class="connection-log"></ul><p id="sharing-status" class="setting-hint" role="status"></p>
+        </div>
+      </details>
       <div id="net-paired" class="net-paired"></div>
       <p id="net-note" class="setting-hint" role="status" tabindex="0" data-i18n="Click Scan to look for devices on your network. Nothing is sent until you do."></p>
       <div id="net-list" class="net-list"></div>
@@ -83,5 +115,12 @@
     </section>
   </div>
 </section>
+<dialog id="internet-dialog" class="dialog" aria-labelledby="internet-title">
+  <div class="dialog-head"><h2 id="internet-title"></h2></div>
+  <p class="setting-hint" data-i18n="Nothing has been sent yet. Block is the default; Enter, Esc or closing blocks the request."></p>
+  <dl class="internet-details"><dt data-i18n="What"></dt><dd id="internet-kind"></dd><dt data-i18n="Where"></dt><dd id="internet-target"></dd><dt data-i18n="Why"></dt><dd id="internet-purpose"></dd><dt data-i18n="Leaves this computer"></dt><dd id="internet-sends"></dd><dt data-i18n="Asked by"></dt><dd id="internet-source"></dd><dt data-i18n="If allowed"></dt><dd id="internet-scope"></dd></dl>
+  <p id="internet-error" class="setting-hint" role="alert"></p>
+  <div class="dialog-actions"><button id="internet-allow" class="btn" type="button"></button><button id="internet-block" class="btn primary" type="button" data-i18n="Block"></button></div>
+</dialog>
 </body>
 </html>

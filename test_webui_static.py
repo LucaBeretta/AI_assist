@@ -113,6 +113,16 @@ class StaticTests(unittest.TestCase):
         elements.get('sharing-enabled').checked=true;document.getElementById('sharing-address').value='192.168.1.10';
         await elements.get('sharing-enabled').listeners.change();
         assert.deepEqual(calls.at(-1),['sharing',true,'192.168.1.10',false]);
+        let handled = false;
+        elements.get('pair-address').listeners.paste({
+          clipboardData:{getData:()=> ' 192.168.1.20:49152 '},
+          preventDefault(){handled = true;}
+        });
+        assert(handled);
+        assert.equal(elements.get('pair-address').value,'192.168.1.20');
+        assert.equal(elements.get('pair-port').value,'49152');
+        window.sharingui.onEvent({type:'job_done',operation:'sharing',result:{peer_id:'peer'}});
+        assert.equal(elements.get('sharing-status').textContent,'Device paired securely. Open Compute to check live usage.');
         ''')
 
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
@@ -150,6 +160,8 @@ class StaticTests(unittest.TestCase):
         const timers=[];
         const context={document,window,Map,Set,Error,String,Number,Boolean,Array,Date,setInterval:(fn,ms)=>{timers.push([fn,ms]);return 1;}};
         vm.runInNewContext(fs.readFileSync(require('node:path').join(dir,'compute.js'),'utf8'),context);
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(dir,'security.js'),'utf8'),context);
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(dir,'sharing.js'),'utf8'),context);
         vm.runInNewContext(fs.readFileSync(require('node:path').join(dir,'compute-window.js'),'utf8'),context);
         const api=window.pywebview.api;
         api.set_compute_active=async (...args)=>{calls.push(['compute',...args]);return {ok:true,data:null};};
@@ -165,7 +177,34 @@ class StaticTests(unittest.TestCase):
         assert.equal(elements.get('compute-cpu-meter').value,40);
         assert.equal(elements.get('cube-cpu').textContent,'40%');
         assert.equal(elements.get('cube-gpu').textContent,'–');
+        assert.equal(elements.get('compute-gpu-sensors').hidden,true);
+        data.snapshot.gpus=[{percent:8,temperature_c:31,power_w:19.12}];
+        data.values.gpus=[{name:'NVIDIA GeForce RTX 4090',percent:'8.0%',memory:'17.2 GiB / 24.0 GiB'}];
+        await window.computewindow.refresh();
+        assert.equal(elements.get('compute-gpu-meter').value,8);
+        assert.equal(elements.get('compute-gpu-sensors').hidden,false);
+        assert.equal(elements.get('compute-gpu-sensors').textContent,'31 °C · 19.1 W');
+        assert.equal(elements.get('cube-gpu-detail').textContent,'31 °C');
         assert.equal(elements.get('cube-model').textContent,'qwen3.5:9b');
+        api.sharing_state=async()=>{calls.push(['sharing_state']);return {ok:true,enabled:false};};
+        api.pair_device=async (...args)=>{calls.push(['pair',...args]);return {ok:true,job_id:'pair'};};
+        api.respond_internet=async (...args)=>{calls.push(['respond',...args]);return {ok:true};};
+        const pairing=elements.get('net-pairing');
+        pairing.open=true;
+        pairing.listeners.toggle();
+        assert.deepEqual(calls.at(-1),['sharing_state']);
+        for (const [id,value] of [['address','192.168.1.20'],['port','49152'],['code','0123456789abcdef'],['pin','012345']]) {
+          document.getElementById('pair-'+id).value=value;
+        }
+        elements.get('pair-form').listeners.submit({preventDefault(){}});
+        assert.deepEqual(calls.at(-1),['pair','192.168.1.20',49152,'0123456789abcdef','012345','compute']);
+        window.app.onEvent([{type:'internet_approval',approval_id:'pair-approval',stage:1,remaining_seconds:3,request:{target:'192.168.1.20'}}]);
+        assert.equal(elements.get('internet-dialog').open,true);
+        await elements.get('internet-allow').listeners.click();
+        assert.deepEqual(calls.at(-1),['respond','pair-approval','continue']);
+        window.app.onEvent([{type:'internet_closed',approval_id:'pair-approval'},{type:'job_done',operation:'sharing',result:{peer_id:'peer'}}]);
+        assert.equal(elements.get('internet-dialog').open,false);
+        assert.equal(elements.get('sharing-status').textContent,'Device paired securely. Look for Live under Paired computers.');
         await elements.get('compute-fullscreen').listeners.click();
         assert.equal(elements.get('compute-fullscreen').textContent,'Exit full screen');
         await window.computewindow.toggleFullscreen();
@@ -386,7 +425,7 @@ class StaticTests(unittest.TestCase):
         vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'welcome.js'),'utf8'), {document,window,Map,Set,Error,String,Number,Boolean,Array});
         const api=window.pywebview.api;
         api.set_web_preferences=async value=>{calls.push(['preferences',value.first_run_complete]); return {ok:true};};
-        api.recommend_models=async()=>({ok:true,hardware:{cpu:'CPU',ram_total_bytes:32*1024**3,gpus:[]},recommendations:[{name:'recommended',fit:'fits GPU'}]});
+        api.recommend_models=async()=>({ok:true,hardware:{cpu:'CPU',ram_total_bytes:32*1024**3,gpus:[]},recommendations:[{name:'recommended',fit:'fits GPU',size_bytes:5.2e9}]});
         api.pull_model=async name=>{
           window.app.onEvent([{type:'pull_progress',pull_id:'p1',model:name,completed:5,total:10,status:'downloading'},
                               {type:'pull_done',pull_id:'p1',model:name}]);
@@ -398,6 +437,7 @@ class StaticTests(unittest.TestCase):
         await window.welcomeui.onReady({engine:'Ollama',models:[],settings:{first_run_complete:false}});
         assert.equal(elements.get('welcome-view').hidden,false);
         assert.match(elements.get('welcome-hardware').textContent,/32.0 GB RAM/);
+        assert.match(elements.get('welcome-reason').textContent,/5\.2 GB download/);
         await elements.get('welcome-start').listeners.click();
         assert.equal(elements.get('welcome-progress').value,5);
         assert.equal(elements.get('welcome-open').hidden,false);

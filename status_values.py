@@ -1,5 +1,6 @@
 """Plain status values shared by the local model APIs and web UI."""
 from app_core import privacy as core_privacy
+from app_core.ollama import placement as placement
 import network_gate
 
 AGENT_MAX_STEPS = 12
@@ -13,22 +14,6 @@ def short_tokens(count):
         return str(count)
     value = count / 1000
     return f"{value:.1f}k" if value < 10 and round(value, 1) != int(value) else f"{round(value):.0f}k"
-
-
-def placement(detail):
-    """Where Ollama placed a running model: gpu, cpu, or the GPU share."""
-    if not detail or not detail.get("size"):
-        return ""
-    share = detail.get("size_vram", 0) / detail["size"]
-    if share >= 0.98:
-        return "gpu"
-    if share <= 0.02:
-        return "cpu"
-    return f"gpu {share:.0%} · cpu"
-
-
-
-
 
 
 def generation_rate(metrics):

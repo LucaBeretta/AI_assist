@@ -74,6 +74,14 @@ Developer commands run with your account's permissions from the chosen project d
 
 When Blender is installed, Developer tells the model where it is, so a task like "render a 512-pixel preview of scene.blend" or "add a ground plane to every .blend file here" can use it. The model writes a Blender Python script in the project and asks to run Blender in the background (`--background --factory-startup --python script.py`). The file write and the command each need your approval, as usual, and commands stop after 120 seconds. AI Assist looks for Blender on `PATH`, in `Program Files\Blender Foundation` on Windows (the newest version) and in `Applications` on macOS. Set `AI_ASSIST_BLENDER` to choose a specific copy. This does not connect to a Blender window that is already open.
 
+### Blender, live
+
+To let Developer work on the scene you have open, install the add-on once. In Blender, choose **Edit → Preferences → Add-ons → Install…** and pick `blender_addon/ai_assist_bridge.py` from the AI Assist folder, then enable **AI Assist Bridge**. Open the 3D Viewport sidebar (N), choose the **AI Assist** tab and click **Connect**.
+
+While Blender is connected, Developer gets two more tools. **blender_scene** reads the scene: objects, transforms, materials, selection, frames and render settings. **blender_run** runs Blender Python. It shows you the code first, and runs only when you click **Run**. Each run is one undo step in Blender, so Ctrl+Z takes it back.
+
+The add-on is off until you click Connect, and off again when you click Disconnect or quit Blender. It listens only on this computer (127.0.0.1) and answers only AI Assist, which reads a secret from its private data folder (`blender-bridge.json`). Code running in Blender is not sandboxed, and AI Assist's internet gate cannot see inside Blender, so read it before you approve. To check the add-on with a real Blender, run `blender --background --factory-startup --python tools/blender_bridge_smoke.py`.
+
 ### Your 3D character
 
 `character_builder.py` creates a stylised 3D character with the Blender installed on this computer, running in the background with nothing downloaded. It accepts a name, height, build, skin tone, hairstyle (none, short, long, bun, curly, spiky), hair, eye and clothing colours, and an accessory (glasses, hat, headphones). `blender_character.py` builds the character from Blender's own shapes and writes `portrait.png`, `character.blend` and, where Blender can export glTF, `character.glb`. A description in your own words can fill in the choices: a local model's reply is reduced to valid choices only (`choices_from_model_reply`). The first-run page will offer this step; until then, the builder can be called from Python.
