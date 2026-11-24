@@ -26,6 +26,7 @@
   <script defer src="quick-animation.js"></script>
   <script defer src="feedback-loop.js"></script>
   <script defer src="cockpit.js"></script>
+  <script defer src="opencode.js"></script>
 </head>
 <body>
 <div class="app">
@@ -258,6 +259,10 @@
             </div>
           </div>
           <aside class="dev-side" aria-label="Task options" data-i18n-aria-label="Task options">
+            <section class="side-group"><h3>OpenCode</h3>
+              <p id="opencode-hint" class="dev-hint" data-i18n="Opens this folder in OpenCode, with your local models only. It asks before every edit and command."></p>
+              <button id="opencode-open" class="btn" type="button" data-i18n="Open in OpenCode"></button>
+              <p id="opencode-status" class="dev-hint" role="status" aria-live="polite"></p></section>
             <section class="side-group"><h3 data-i18n="Publish web project"></h3>
               <p class="dev-hint" data-i18n="Uploads the selected web folder to Vercel, after confirmation."></p>
               <button id="deploy-open" class="btn" type="button" data-i18n="Deploy…"></button></section>

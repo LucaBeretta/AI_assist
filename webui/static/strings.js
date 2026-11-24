@@ -690,7 +690,13 @@ window.i18n = (() => {
   "Look": "Aspetto",
   "The cube button at the top switches anywhere.": "Il pulsante a cubo in alto cambia aspetto ovunque.",
   "Classic": "Classico",
-  "3D cockpit": "Cabina 3D"
+  "3D cockpit": "Cabina 3D",
+  "Opens this folder in OpenCode, with your local models only. It asks before every edit and command.": "Apre questa cartella in OpenCode, solo con i tuoi modelli locali. Chiede prima di ogni modifica e comando.",
+  "Open in OpenCode": "Apri in OpenCode",
+  "OpenCode is not installed on this computer. Install it from opencode.ai, then try again.": "OpenCode non è installato su questo computer. Installalo da opencode.ai, poi riprova.",
+  "Install OpenCode from opencode.ai to use this button.": "Installa OpenCode da opencode.ai per usare questo pulsante.",
+  "OpenCode opened in a new window.": "OpenCode è stato aperto in una nuova finestra.",
+  "No terminal program was found. Run OpenCode from a terminal in your project folder instead.": "Nessun terminale trovato. Avvia OpenCode da un terminale nella cartella del progetto."
 };
   const en = Object.fromEntries(Object.keys(it).map(key => [key, key]));
   const messages = {en, it};
