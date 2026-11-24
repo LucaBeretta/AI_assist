@@ -74,6 +74,10 @@ Developer commands run with your account's permissions from the chosen project d
 
 When Blender is installed, Developer tells the model where it is, so a task like "render a 512-pixel preview of scene.blend" or "add a ground plane to every .blend file here" can use it. The model writes a Blender Python script in the project and asks to run Blender in the background (`--background --factory-startup --python script.py`). The file write and the command each need your approval, as usual, and commands stop after 120 seconds. AI Assist looks for Blender on `PATH`, in `Program Files\Blender Foundation` on Windows (the newest version) and in `Applications` on macOS. Set `AI_ASSIST_BLENDER` to choose a specific copy. This does not connect to a Blender window that is already open.
 
+### Your 3D character
+
+`character_builder.py` creates a stylised 3D character with the Blender installed on this computer, running in the background with nothing downloaded. It accepts a name, height, build, skin tone, hairstyle (none, short, long, bun, curly, spiky), hair, eye and clothing colours, and an accessory (glasses, hat, headphones). `blender_character.py` builds the character from Blender's own shapes and writes `portrait.png`, `character.blend` and, where Blender can export glTF, `character.glb`. A description in your own words can fill in the choices: a local model's reply is reduced to valid choices only (`choices_from_model_reply`). The first-run page will offer this step; until then, the builder can be called from Python.
+
 ### Shared memory across chats
 
 Use **Settings → Shared memory** to enable/disable notes, add, edit or forget them. A chat's right-click menu selects its memories. Replies show the memories used for that request. Incognito requests do not read or write shared memory. Changing notes affects future requests and does not remove text already in a conversation.
