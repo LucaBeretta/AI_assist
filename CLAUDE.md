@@ -21,6 +21,7 @@ This repository is public: keep secrets and personal details out of this file.
   - `.github/workflows/macos.yml` (Luigi's): the macOS headless suite, plus an optional native WKWebView smoke test.
 
   A pull request's `pull_request` run tests the branch merged into the current `main`, so new code on `main` can fail it.
+- Cloud sessions cannot delete branches (`git push --delete` and the refs API are refused), so ask the owner to delete them on GitHub's Branches page.
 - Each pull request's CI checks it alone. When several are open, check that they also merge together (`git merge-tree --write-tree A B`) and that the ruff check still passes, then suggest an order to the owner.
 
 ## Git and GitHub on the owner's Windows PC
@@ -28,17 +29,33 @@ This repository is public: keep secrets and personal details out of this file.
 - `gh` is not installed. `git push` works. Read pull requests and check runs through the public REST API with `curl`. The owner opens a new pull request from a link like `https://github.com/LucaBeretta/AI_assist/compare/main...BRANCH?expand=1`.
 - Keep the owner's checkout on `main` and work on pull request branches in separate worktrees.
 
-## State on 2026-11-21
+## State on 2026-11-24
 
-- Merged by the end of the day:
+- Merged on 21 November:
   - LucaBeretta/AI_assist#11 (Luigi): chat streaming moved into `app_core/chat_service.py`; settings reorganised.
   - LucaBeretta/AI_assist#12: CI on all three systems.
-  - LucaBeretta/AI_assist#13: brief Windows retries for chat saves and the new checkpoint folder rename (`app_core.paths.replace_retrying`).
+  - LucaBeretta/AI_assist#13: brief Windows retries for chat saves and the checkpoint folder rename (`app_core.paths.replace_retrying`).
   - LucaBeretta/AI_assist#14: a ruff check (`ruff.toml`, rules F and E9, ruff 0.17.6 in CI).
   - LucaBeretta/AI_assist#15: this file.
+  - LucaBeretta/AI_assist#16, #17 and #18: the modernization backlog marked historical, the PDF worker seeing user-site packages, and a list of served Colibri models for the reviewer.
+- Merged from 22 to 24 November:
+  - LucaBeretta/AI_assist#20 and #29: Hugging Face suggestions (see below). #19's wording change went in with #20, so #19 was closed.
+  - LucaBeretta/AI_assist#21: an "orbital" look for the separate Mission Control window, made with Zencoder on the owner's PC. It includes explicitly drawn usage meters, because the native ones lost their fill in the night theme.
+  - LucaBeretta/AI_assist#22: Developer uses an installed Blender in the background (`developer_tools.find_blender`, a short hint in `coding_agent._system_prompt`).
+  - LucaBeretta/AI_assist#27 (owner): **Generate** — a local WebGL quick animation from a photo, and AI video through a local ComfyUI (Wan2.2 TI2V 5B) on `127.0.0.1:8188`.
+  - A `stickers/` community landing page with a QR code that points to `https://stickers-bay.vercel.app/`. Its join link in `stickers/join-config.js` is still empty.
+- Waiting on the owner:
+  - Delete the leftover branch `live-check-huggingface` on GitHub; cloud sessions cannot delete branches.
+  - Changes left uncommitted in the PC's `main` worktree were never pushed (a `pc-unsaved-work` branch was suggested to Zencoder).
 - Five old branches that were never merged are archived as tags under `archive/`: `modernization/web-workstation`, `integration/compute-dashboard-web`, `code-quality-pass`, `feature/continuous-user-feedback` (closed: no feedback prompt after replies and tasks) and `mac-mission-control` (split into #11 and `mac-mission-control-only`). Each tag's message says why. Restore one with `git push origin "archive/NAME^{commit}:refs/heads/NAME"`.
 - `docs/modernization-backlog.md` is marked historical. The other milestone documents (`architecture-audit.md`, `architecture-decision.md`) also predate the removal of Tk.
-- The repeated ollama.com approval popup on macOS was fixed on `main` by 378f1ca: one gated task now covers every catalog page.
+
+## Hugging Face models
+
+- The model suggestion step reads ollama.com and huggingface.co under one approval: `network_gate.task(..., hosts=(...))` declares both sites, and the first one reached asks once for both. Any other site still asks on its own.
+- `model_library.fetch_hugging_face_models` reads the most downloaded GGUF chat models. `model_advisor.recommend_hugging_face` picks the first of Q4_K_M, Q5_K_M, Q4_K_S, Q6_K, Q8_0, IQ4_XS, Q3_K_M that fits, and shows up to three as `hf.co/<repo>:<quant>`.
+- A file name's quantization is not always a pullable tag. `model_library.hugging_face_tag_available` asks the registry first (`/v2/<repo>/manifests/<quant>`, as Ollama does), and refused tags are never suggested.
+- Cloud sessions cannot reach huggingface.co. To check against the live site, push a temporary branch with a workflow that runs on GitHub's runners (they have internet and can install Ollama), then ask the owner to delete the branch. That is how the registry check and a real `ollama pull` were verified.
 
 ## Product direction: the local network ("intranet")
 
@@ -67,7 +84,7 @@ The design is local-network only: no cloud relay and no router port-forwarding. 
   - a `src/` and `tests/` layout;
   - splitting `webui/app.py` and `app.js`;
   - branch protection that requires the **Tests** and **macOS desktop checks** workflows to pass before merging into `main`.
-- A plain-language explainer page made for the owner (https://claude.ai/artifact/1UxAFvr1TBtcK1K6YjB6Q6) predates the network scan and usage sharing. Its local-network section needs updating.
+- A plain-language explainer page made for the owner: https://claude.ai/artifact/1UxAFvr1TBtcK1K6YjB6Q6. Last updated on 24 November (Hugging Face, Blender, Generate, Mission Control, and the network's see / monitor / use steps).
 
 ## Running the app in a cloud Linux container
 
