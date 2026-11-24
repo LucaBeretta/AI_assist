@@ -13,7 +13,7 @@ import zipfile
 import chat_attachments
 
 from app_core.conversation import NEW_CHAT_TITLE, title_from
-from app_core.paths import data_directory, ensure_private_directory, replace_retrying
+from app_core.paths import data_directory, ensure_private_directory, read_bytes_retrying, replace_retrying
 
 
 _MAX_CHAT_BYTES = 64 * 1024 * 1024
@@ -450,8 +450,8 @@ class ChatStore:
         """Read one chat, raising a diagnostic error for damaged files."""
         path = self._path(chat_id)
         try:
-            with path.open("rb") as source:
-                data = source.read(_MAX_CHAT_BYTES + 1)
+            # A save replacing this file at the same moment can make Windows refuse the read briefly.
+            data = read_bytes_retrying(path, _MAX_CHAT_BYTES + 1)
             if len(data) > _MAX_CHAT_BYTES:
                 raise ChatStoreError("The saved chat exceeds the 64 MiB file limit.")
             chat = json.loads(data.decode("utf-8"))

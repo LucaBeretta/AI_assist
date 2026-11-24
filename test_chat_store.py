@@ -404,6 +404,34 @@ class WindowsInUseReplaceTests(unittest.TestCase):
         self.sleep = patcher.start()
         self.addCleanup(patcher.stop)
 
+    def test_load_retries_while_a_save_briefly_holds_the_file(self):
+        import builtins
+        real_open, attempts = builtins.open, []
+
+        def busy_twice(path, *args, **kwargs):
+            if str(path).endswith(f"{self.chat['id']}.json") and len(attempts) < 2:
+                attempts.append(path)
+                raise PermissionError(13, "Permission denied")
+            return real_open(path, *args, **kwargs)
+
+        with patch("app_core.paths._RETRY_REPLACE", True), patch("app_core.paths.open", side_effect=busy_twice, create=True):
+            self.assertEqual(self.store.load(self.chat["id"])["id"], self.chat["id"])
+        self.assertEqual(len(attempts), 2)
+        self.assertEqual(self.sleep.call_count, 2)
+
+    def test_a_file_that_stays_unreadable_is_reported_after_a_bounded_wait(self):
+        with patch("app_core.paths._RETRY_REPLACE", True), \
+                patch("app_core.paths.open", side_effect=PermissionError(13, "Permission denied"), create=True):
+            with self.assertRaisesRegex(ChatStoreError, "Permission denied"):
+                self.store.load(self.chat["id"])
+        self.assertLess(sum(call.args[0] for call in self.sleep.call_args_list), 1)
+        with patch("app_core.paths._RETRY_REPLACE", False), \
+                patch("app_core.paths.open", side_effect=PermissionError(13, "Permission denied"), create=True):
+            self.sleep.reset_mock()
+            with self.assertRaises(ChatStoreError):
+                self.store.load(self.chat["id"])
+            self.sleep.assert_not_called()
+
     def test_save_retries_while_the_file_is_briefly_in_use(self):
         calls = []
 
