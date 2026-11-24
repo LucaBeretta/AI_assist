@@ -13,6 +13,7 @@ window.welcomeui = (() => {
   };
   const installed = () => state?.ollama?.models || (state?.engine === "Ollama" ? state.models || [] : []);
   const gb = bytes => (bytes / 1024 ** 3).toFixed(1) + " GB";
+  const downloadGb = bytes => (bytes / 1000 ** 3).toFixed(1) + " GB";  // decimal, as ollama.com lists it
   function render() {
     const name = el("welcome-model").value;
     const ready = installed().includes(name);
@@ -22,7 +23,7 @@ window.welcomeui = (() => {
     el("welcome-stop").hidden = !pendingModel; el("welcome-download").hidden = !pendingModel;
     el("welcome-model").disabled = Boolean(pendingModel);
     const card = (advice?.recommendations || []).find(item => item.name === name);
-    el("welcome-reason").textContent = card ? [card.purpose, card.fit, card.reason, card.size_bytes ? gb(card.size_bytes) + t(" download") : ""].filter(Boolean).join(" · ") : t("Already installed on this computer.");
+    el("welcome-reason").textContent = card ? [card.purpose, card.fit, card.reason, card.size_bytes ? downloadGb(card.size_bytes) + t(" download") : ""].filter(Boolean).join(" · ") : t("Already installed on this computer.");
   }
   async function load(retry = false) {
     el("welcome-status").textContent = t("Reading hardware and recommendations…");

@@ -425,7 +425,7 @@ class StaticTests(unittest.TestCase):
         vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'welcome.js'),'utf8'), {document,window,Map,Set,Error,String,Number,Boolean,Array});
         const api=window.pywebview.api;
         api.set_web_preferences=async value=>{calls.push(['preferences',value.first_run_complete]); return {ok:true};};
-        api.recommend_models=async()=>({ok:true,hardware:{cpu:'CPU',ram_total_bytes:32*1024**3,gpus:[]},recommendations:[{name:'recommended',fit:'fits GPU'}]});
+        api.recommend_models=async()=>({ok:true,hardware:{cpu:'CPU',ram_total_bytes:32*1024**3,gpus:[]},recommendations:[{name:'recommended',fit:'fits GPU',size_bytes:5.2e9}]});
         api.pull_model=async name=>{
           window.app.onEvent([{type:'pull_progress',pull_id:'p1',model:name,completed:5,total:10,status:'downloading'},
                               {type:'pull_done',pull_id:'p1',model:name}]);
@@ -437,6 +437,7 @@ class StaticTests(unittest.TestCase):
         await window.welcomeui.onReady({engine:'Ollama',models:[],settings:{first_run_complete:false}});
         assert.equal(elements.get('welcome-view').hidden,false);
         assert.match(elements.get('welcome-hardware').textContent,/32.0 GB RAM/);
+        assert.match(elements.get('welcome-reason').textContent,/5\.2 GB download/);
         await elements.get('welcome-start').listeners.click();
         assert.equal(elements.get('welcome-progress').value,5);
         assert.equal(elements.get('welcome-open').hidden,false);

@@ -28,7 +28,10 @@ window.modelsui = (() => {
     item.addEventListener("click", onClick);
     return item;
   }
+  // Memory (RAM, VRAM) in binary gigabytes, as Task Manager and Activity Monitor show it.
   function gb(bytes) { return Number.isFinite(bytes) ? (bytes / 1024 ** 3).toFixed(bytes >= 10 * 1024 ** 3 ? 0 : 1) + " GB" : "?"; }
+  // Download sizes in decimal gigabytes, as ollama.com and Hugging Face list them.
+  function downloadGb(bytes) { return Number.isFinite(bytes) ? (bytes / 1000 ** 3).toFixed(bytes >= 10 * 1000 ** 3 ? 0 : 1) + " GB" : "?"; }
   function note(text) { element("models-status").textContent = text; }
 
   // ---------- hardware ----------
@@ -102,7 +105,7 @@ window.modelsui = (() => {
       if (card.reason) item.append(node("p", "dev-hint", card.reason));
       const foot = node("div", "model-card-foot");
       foot.append(node("span", "dev-hint mono",
-        `${card.size_bytes ? gb(card.size_bytes) + t(" download") : ""}${card.estimated_memory_bytes ? t(" · needs ~") + gb(card.estimated_memory_bytes) : ""}`));
+        `${card.size_bytes ? downloadGb(card.size_bytes) + t(" download") : ""}${card.estimated_memory_bytes ? t(" · needs ~") + gb(card.estimated_memory_bytes) : ""}`));
       foot.append(node("span", "grow"));
       if (installed.includes(card.name)) foot.append(node("span", "pill ok", t("installed")));
       else if (pull?.model === card.name) foot.append(progress());
