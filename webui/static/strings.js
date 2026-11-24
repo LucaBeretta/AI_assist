@@ -610,7 +610,7 @@ window.i18n = (() => {
   "colibri downloads the model and its engine files from the internet.": "colibri scarica da internet il modello e i file del suo motore.",
   "The chosen web project folder is uploaded to Vercel by its CLI.": "La cartella del progetto web scelto viene caricata su Vercel dalla sua CLI.",
   "Discovery metadata and pairing credentials over verified TLS; no chats, files or commands.": "Dati di individuazione e credenziali di abbinamento su TLS verificato; nessuna chat, file o comando.",
-  "The six-digit PIN and this device's random ID, sent only after checking the target TLS code.": "Il PIN di sei cifre e l'ID casuale di questo dispositivo, inviati solo dopo aver verificato il codice TLS.",
+  "The six-digit PIN, this device's random ID and its name, sent only after checking the target TLS code.": "Il PIN di sei cifre, l'ID casuale di questo dispositivo e il suo nome, inviati solo dopo aver verificato il codice TLS.",
   "Another program, usually the browser, opens this address from the internet.": "Un altro programma, di solito il browser, apre questo indirizzo da internet.",
   "Ollama downloads the model from its online registry.": "Ollama scarica il modello dal suo registro online.",
   "Ollama downloads the model from Hugging Face.": "Ollama scarica il modello da Hugging Face.",
@@ -678,7 +678,8 @@ window.i18n = (() => {
   "Also let devices I allow use this computer's AI": "Permetti ai dispositivi che autorizzo di usare l'IA di questo computer",
   "They can see its models and chat with them, encrypted, while pairing is on. No files, commands or downloads. Off every time AI Assist starts.": "Possono vedere i suoi modelli e chattare con loro, in modo cifrato, mentre l'abbinamento è attivo. Niente file, comandi o download. Spento a ogni avvio di AI Assist.",
   "Devices paired with this computer. Tick the ones that may use its AI.": "Dispositivi abbinati a questo computer. Spunta quelli che possono usare la sua IA.",
-  "Device {v0} may use this computer's AI": "Il dispositivo {v0} può usare l'IA di questo computer",
+  "{v0} may use this computer's AI": "{v0} può usare l'IA di questo computer",
+  "Device {v0}": "Dispositivo {v0}",
   "Only Ollama running on this computer can be shared.": "Si può condividere solo Ollama in esecuzione su questo computer.",
   "Choose a paired device.": "Scegli un dispositivo abbinato.",
   "Paired computer {v0}": "Computer abbinato {v0}",
@@ -690,7 +691,9 @@ window.i18n = (() => {
   "Look": "Aspetto",
   "The cube button at the top switches anywhere.": "Il pulsante a cubo in alto cambia aspetto ovunque.",
   "Classic": "Classico",
-  "3D cockpit": "Cabina 3D"
+  "3D cockpit": "Cabina 3D",
+  "a paired computer": "un computer abbinato",
+  "Runs on {v0}, over your home network. Answers can be wrong.": "Gira su {v0}, tramite la tua rete di casa. Le risposte possono contenere errori."
 };
   const en = Object.fromEntries(Object.keys(it).map(key => [key, key]));
   const messages = {en, it};

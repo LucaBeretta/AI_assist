@@ -60,6 +60,19 @@ def _safe_id(value):
     return isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,64}", value) is not None
 
 
+def device_name(value):
+    """A computer's name as shown to people: printable text, at most 48 characters, or ""."""
+    if not isinstance(value, str):
+        return ""
+    text = "".join(char for char in value if char.isprintable()).strip()
+    return text[:48].strip()
+
+
+def this_device_name():
+    """This computer's own network name, without a ".local" or domain suffix."""
+    return device_name(socket.gethostname().split(".")[0])
+
+
 def _atomic_json(path, data):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -91,24 +104,41 @@ class TrustStore:
         except FileNotFoundError:
             return {}
 
-    def save_client(self, peer_id, fingerprint, token, address, port):
+    def save_client(self, peer_id, fingerprint, token, address, port, name=None):
+        """``name`` is the paired computer's own name; None keeps the one saved before (a new address)."""
         if not _safe_id(peer_id) or len(fingerprint) != 64 or not token:
             raise PairingError("Invalid paired peer record.")
         if not permitted_ipv4(address, loopback=True):
             raise PairingError("Refusing a non-local peer address.")
         with self._lock:
             data = self._read("paired_servers.json")
-            data[peer_id] = {"fingerprint": fingerprint, "token": token,
-                             "address": address, "port": port}
+            previous = data.get(peer_id) if isinstance(data.get(peer_id), dict) else {}
+            record = {"fingerprint": fingerprint, "token": token, "address": address, "port": port}
+            shown = device_name(previous.get("name")) if name is None else device_name(name)
+            if shown:
+                record["name"] = shown
+            data[peer_id] = record
             _atomic_json(self.directory / "paired_servers.json", data)
 
-    def save_server(self, peer_id, token):
+    def save_server(self, peer_id, token, name=""):
         if not _safe_id(peer_id):
             raise PairingError("Invalid client identity.")
         with self._lock:
             data = self._read("paired_clients.json")
             data[peer_id] = hashlib.sha256(token.encode("utf-8")).hexdigest()
             _atomic_json(self.directory / "paired_clients.json", data)
+            # Names live apart from token digests, so authentication never reads them.
+            names = self._read("client_names.json")
+            if device_name(name):
+                names[peer_id] = device_name(name)
+            else:
+                names.pop(peer_id, None)
+            _atomic_json(self.directory / "client_names.json", names)
+
+    def client_name(self, peer_id):
+        """The name a paired device gave when it paired with this computer, or ""."""
+        with self._lock:
+            return device_name(self._read("client_names.json").get(peer_id))
 
     def revoke(self, peer_id, *, server=False):
         with self._lock:
@@ -121,6 +151,9 @@ class TrustStore:
                 consent = self._read("ai_clients.json")
                 if consent.pop(peer_id, None) is not None:
                     _atomic_json(self.directory / "ai_clients.json", consent)
+                names = self._read("client_names.json")
+                if names.pop(peer_id, None) is not None:
+                    _atomic_json(self.directory / "client_names.json", names)
 
     def allow_ai(self, peer_id, allowed=True):
         """Let one paired device use this computer's shared AI, or stop it. Pairing alone never does."""
@@ -590,8 +623,10 @@ class PairingHost:
                     self.send_error(403)
                     return
                 token = secrets.token_urlsafe(32)
-                host.store.save_server(obj["client_id"], token)
-                payload = _json_packet({"node_id": host.node_id, "token": token})
+                # The name is only a label for people; identity stays the ID, token and pinned certificate.
+                host.store.save_server(obj["client_id"], token, device_name(obj.get("name")))
+                # This computer's name goes only to the device that just proved the PIN, never into discovery.
+                payload = _json_packet({"node_id": host.node_id, "token": token, "name": this_device_name()})
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Cache-Control", "no-store")
@@ -633,7 +668,7 @@ class PairingHost:
             self._thread = None
 
 
-def pair_with_host(address, port, target_verification_code, pin, client_id, store):
+def pair_with_host(address, port, target_verification_code, pin, client_id, store, client_name=""):
     """TLS-pin the target *before* submitting any PIN; never trust UDP metadata."""
     if not permitted_ipv4(address, loopback=True) or type(port) is not int or not 1 <= port <= 65535:
         raise PairingError("Refusing a non-LAN address or invalid port.")
@@ -655,7 +690,7 @@ def pair_with_host(address, port, target_verification_code, pin, client_id, stor
         if not hmac.compare_digest(verification_code(fingerprint),
                                    target_verification_code.upper()):
             raise PairingError("Target certificate code differs. Stop: possible spoofing.")
-        body = _json_packet({"client_id": client_id, "pin": pin})
+        body = _json_packet({"client_id": client_id, "pin": pin, **({"name": device_name(client_name)} if device_name(client_name) else {})})
         conn.request("POST", "/pair", body=body, headers={"Content-Type": "application/json",
                                                            "Accept": "application/json"})
         response = conn.getresponse()
@@ -667,7 +702,7 @@ def pair_with_host(address, port, target_verification_code, pin, client_id, stor
         payload = json.loads(data)
         if not isinstance(payload, dict) or not _safe_id(payload.get("node_id")) or not isinstance(payload.get("token"), str) or len(payload["token"]) < 32:
             raise PairingError("Invalid pairing response.")
-        store.save_client(payload["node_id"], fingerprint, payload["token"], address, port)
+        store.save_client(payload["node_id"], fingerprint, payload["token"], address, port, device_name(payload.get("name")))
         return payload["node_id"]
     except (OSError, ssl.SSLError, http.client.HTTPException, ValueError) as exc:
         if isinstance(exc, PairingError):

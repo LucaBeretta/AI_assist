@@ -28,7 +28,7 @@ window.sharingui = (() => {
       countdown(); timer = window.setInterval?.(countdown, 1000) ?? null;
     }
     el("sharing-peers").replaceChildren(...Object.entries(state.peers || {}).map(([id, peer]) => {
-      const item = document.createElement("li"); item.textContent = `${id} · ${peer.address}:${peer.port}`; return item;
+      const item = document.createElement("li"); item.textContent = `${peer.name || id} · ${peer.address}:${peer.port}`; return item;
     }));
   }
   function renderClients(clients) {
@@ -46,7 +46,8 @@ window.sharingui = (() => {
         catch (error) { box.checked = !box.checked; box.disabled = false; el("sharing-status").textContent = error.message; }
       });
       const text = document.createElement("span");
-      text.textContent = t("Device {v0} may use this computer's AI", {v0: client.id.slice(0, 8)});
+      const shown = client.name || t("Device {v0}", {v0: client.id.slice(0, 8)});
+      text.textContent = t("{v0} may use this computer's AI", {v0: shown});
       label.append(box, text);
       item.append(label);
       return item;

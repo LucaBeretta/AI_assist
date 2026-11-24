@@ -142,6 +142,10 @@ class StaticTests(unittest.TestCase):
         elements.get('prompt').value='Hi';
         await elements.get('composer').listeners.submit({preventDefault(){}});
         assert.deepEqual(calls.at(-1).slice(1),['Hi','qwen3:32b',null,'peer:pc1']);
+        assert.equal(elements.get('footnote').textContent,'Runs on 192.168.1.20, over your home network. Answers can be wrong.');
+        elements.get('model').value='fake:7b';
+        await elements.get('model').listeners.change();
+        assert.equal(elements.get('footnote').textContent,'Everything runs on this computer. Answers can be wrong.');
         ''')
 
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
@@ -158,12 +162,14 @@ class StaticTests(unittest.TestCase):
         await elements.get('sharing-enabled').listeners.change();
         assert.deepEqual(calls.at(-1),['sharing',true,'192.168.1.10',false,false]);
         // Sharing AI is its own choice, and each paired device needs its own tick.
-        window.pywebview.api.sharing_state=async()=>({ok:true,enabled:true,usage:false,ai:true,host:null,peers:{},clients:[{id:'abcdef0123456789',ai:false}]});
+        window.pywebview.api.sharing_state=async()=>({ok:true,enabled:true,usage:false,ai:true,host:null,peers:{pc:{address:'192.168.1.20',port:1,name:'Studio-PC'}},clients:[{id:'abcdef0123456789',ai:false},{id:'fedcba9876543210',name:'Lucas-MacBook',ai:false}]});
         window.pywebview.api.allow_shared_ai=async (...args)=>{calls.push(['allow',...args]);return {ok:true,clients:[{id:'abcdef0123456789',ai:true}]};};
         await window.sharingui.openSettings();
         assert.equal(elements.get('sharing-ai').checked,true);
         assert.equal(elements.get('sharing-clients-box').hidden,false);
-        assert.match(elements.get('sharing-clients').textContent,/abcdef01/);
+        assert.match(elements.get('sharing-clients').textContent,/Device abcdef01 may use/);
+        assert.match(elements.get('sharing-clients').textContent,/Lucas-MacBook may use/);
+        assert.match(elements.get('sharing-peers').textContent,/^Studio-PC · 192.168.1.20:1/);
         const tick=elements.get('sharing-clients').children[0].children[0].children[0];
         tick.checked=true;
         await tick.listeners.change();

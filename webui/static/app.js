@@ -15,6 +15,7 @@ window.app = (() => {
   let selected = null;
   let connected = false;
   let engineReady = false;
+  const sharedNames = {};  // backend "peer:<id>" -> the paired computer's name, for the footnote
   let submitting = false;
   let openingChat = false;
   let selectionVersion = 0;
@@ -40,6 +41,7 @@ window.app = (() => {
   }
 
   function controls() {
+    updateFootnote();
     const active = activeStream(selected);
     element("send").disabled = !connected || !engineReady || !selected || openingChat || !element("model").value || submitting || Boolean(active);
     element("prompt").disabled = openingChat;
@@ -664,6 +666,19 @@ window.app = (() => {
 
   // Paired computers that share their AI with this one, each as its own group (local network only, pinned TLS).
   let wantedModel = "";
+  function updateFootnote() {
+    const note = element("footnote");
+    if (!note) return;
+    const backend = modelChoice().backend;
+    const computer = backend.startsWith("peer:") ? sharedNames[backend] || t("a paired computer") : null;
+    if (computer) {
+      note.removeAttribute?.("data-i18n");
+      note.textContent = t("Runs on {v0}, over your home network. Answers can be wrong.", {v0: computer});
+    } else {
+      note.setAttribute?.("data-i18n", "Everything runs on this computer. Answers can be wrong.");
+      note.textContent = t("Everything runs on this computer. Answers can be wrong.");
+    }
+  }
   async function addSharedComputers(previous) {
     if (!window.pywebview.api.shared_ai_models) return false;
     let computers = [];
@@ -675,8 +690,9 @@ window.app = (() => {
     for (const computer of computers) {
       if (computer.state !== "ready" || !computer.models.length) continue;
       const group = document.createElement("optgroup");
-      group.label = t("Paired computer {v0}", {v0: computer.address});
+      group.label = t("Paired computer {v0}", {v0: computer.name || computer.address});
       group.sharedComputer = computer.id;
+      sharedNames[computer.backend] = computer.name || computer.address;
       for (const name of computer.models) {
         const option = document.createElement("option");
         option.value = modelValue(name, computer.backend); option.textContent = name;
