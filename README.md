@@ -184,6 +184,14 @@ The [macOS desktop checks](.github/workflows/macos.yml) workflow runs the headle
 
 Open **Generate → Quick animation** to preview a slow zoom, side-to-side pan, or ripple on a JPEG or PNG. Quick animation uses WebGL 2 locally and can save a 3-second MP4 or WebM when the desktop webview supports canvas recording. It does not need ComfyUI or a model download.
 
+### Infinite
+
+[Infinite](https://github.com/n1m21n/Infinite) is a free, open-source app (MIT licence) that builds moving pictures, music and 3D from connected nodes. When it is installed, open **Generate → Infinite**, describe a clip (for example “a glowing star that pulses with a slow synth melody”), choose a model and a length of 4, 8 or 12 seconds, and click **Make clip**. A local Ollama model writes the clip as an Infinite patch, a small text file. Infinite checks the patch without opening a window. When it reports a problem, the model gets Infinite's message and the controls of the nodes it used, and tries again, up to three times. Infinite then renders the MP4, with sound when the patch makes any. **Save clip** saves the MP4; **Save patch** saves the `.inf` file, which opens in Infinite for further changes. The last eight clips stay in the app data folder (`infinite`).
+
+AI Assist looks for Infinite in `Applications` on macOS, in `Program Files\Infinite` or `%LOCALAPPDATA%\Infinite` on Windows, and on `PATH`. Set `AI_ASSIST_INFINITE` (or Infinite's own `INFINITE_BIN`) to choose a copy. The first clip reads Infinite's list of nodes, which takes about 20 seconds; the list is kept for that Infinite version.
+
+Infinite runs outside AI Assist's internet gate, so every patch is checked first. Patches that read or write files, use a camera, microphone or MIDI device, talk to other programs or the network (Syphon, NDI, OSC), load audio plugins or run JavaScript are refused before Infinite sees them. Thinking models (such as Qwen 3.5 or DeepSeek R1) are asked to answer without reasoning first, because their reasoning can take many minutes. Cloud models are not used. Developer also knows when Infinite is installed: it can check and render `.inf` patches in a project, with the usual approval for each command.
+
 ### AI video
 
 Start ComfyUI on `127.0.0.1:8188` and install the three model files for **Wan2.2 TI2V 5B** using the [official ComfyUI setup guide](https://docs.comfy.org/tutorials/video/wan/wan2_2#wan2-2-ti2v-5b-hybrid-version-workflow-example). In AI Assist, open **Generate → AI video**, select a JPEG or PNG, describe the motion, and pick an orientation. For example, try “The camera slowly circles the toy car.”

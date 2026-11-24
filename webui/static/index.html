@@ -19,6 +19,7 @@
   <script defer src="parity.js"></script>
   <script defer src="security.js"></script>
   <script defer src="hourly.js"></script>
+  <script defer src="infinite-studio.js"></script>
   <script defer src="sharing.js"></script>
   <script defer src="photo-video.js"></script>
   <script defer src="photo-shader.js"></script>
@@ -352,6 +353,7 @@
           <div class="generate-modes" role="group" aria-label="Generation mode" data-i18n-aria-label="Generation mode">
             <button id="generate-quick-mode" class="btn" type="button" aria-pressed="true" aria-controls="generate-quick-panel" data-i18n="Quick animation"></button>
             <button id="generate-wan-mode" class="btn" type="button" aria-pressed="false" aria-controls="generate-wan-panel" data-i18n="AI video"></button>
+            <button id="generate-infinite-mode" class="btn" type="button" aria-pressed="false" aria-controls="generate-infinite-panel" data-i18n="Infinite"></button>
           </div>
           <div id="generate-quick-panel" class="generate-page">
             <section class="generate-panel" aria-labelledby="quick-animation-title">
@@ -417,6 +419,48 @@
                 <p id="photo-video-empty" class="setting-hint" data-i18n="Your video will appear here."></p>
                 <video id="photo-video-preview" class="photo-video-preview" aria-labelledby="photo-video-preview-title" controls playsinline hidden></video>
               </div>
+            </section>
+          </div>
+          <div id="generate-infinite-panel" class="generate-page" hidden>
+            <form id="infinite-form" class="generate-panel" aria-labelledby="infinite-title">
+              <h2 id="infinite-title" data-i18n="Pictures and sound with Infinite"></h2>
+              <p class="setting-hint" data-i18n="Describe a moving picture, with or without music. A model on this computer writes it as an Infinite patch, and the free Infinite app makes the clip."></p>
+              <p id="infinite-missing" class="setting-hint" hidden data-i18n="Infinite is not installed on this computer. Install it for free from github.com/n1m21n/Infinite, then try again."></p>
+              <label class="field"><span data-i18n="What should it look and sound like?"></span>
+                <textarea id="infinite-prompt" rows="4" maxlength="1500" required></textarea>
+              </label>
+              <label class="field"><span data-i18n="Model"></span>
+                <select id="infinite-model"></select>
+              </label>
+              <label class="field"><span data-i18n="Length"></span>
+                <select id="infinite-length">
+                  <option value="4" data-i18n="4 seconds"></option>
+                  <option value="8" data-i18n="8 seconds"></option>
+                  <option value="12" data-i18n="12 seconds"></option>
+                </select>
+              </label>
+              <div class="model-actions">
+                <button id="infinite-generate" class="btn primary" type="submit" data-i18n="Make clip"></button>
+                <button id="infinite-stop" class="btn" type="button" hidden data-i18n="Stop"></button>
+              </div>
+              <p id="infinite-status" class="setting-hint" role="status"></p>
+              <progress id="infinite-progress" aria-label="Making the clip" data-i18n-aria-label="Making the clip" hidden></progress>
+            </form>
+            <section class="generate-panel" aria-labelledby="infinite-preview-title">
+              <h2 id="infinite-preview-title" data-i18n="Video preview"></h2>
+              <div class="generate-stage">
+                <p id="infinite-empty" class="setting-hint" data-i18n="Your clip will appear here."></p>
+                <video id="infinite-preview" class="photo-video-preview" aria-labelledby="infinite-preview-title" controls playsinline loop hidden></video>
+              </div>
+              <div id="infinite-actions" class="model-actions" hidden>
+                <button id="infinite-save" class="btn primary" type="button" data-i18n="Save clip"></button>
+                <button id="infinite-save-patch" class="btn" type="button" data-i18n="Save patch"></button>
+              </div>
+              <p id="infinite-credit" class="setting-hint" hidden></p>
+              <details id="infinite-patch-details" class="setting-details" hidden>
+                <summary data-i18n="Show the patch"></summary>
+                <div class="command-result"><pre id="infinite-patch"></pre></div>
+              </details>
             </section>
           </div>
         </div>

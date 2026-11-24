@@ -62,6 +62,23 @@ class BlenderHintTests(unittest.TestCase):
         self.assertEqual(coding_agent._blender_hint(None), "")
 
 
+class InfiniteHintTests(unittest.TestCase):
+    def test_an_installed_infinite_is_described_with_check_and_render_commands(self):
+        program = "/Applications/Infinite.app/Contents/MacOS/Infinite"
+        with patch("coding_agent.projects.find_blender", return_value=None), \
+                patch("coding_agent.infinite_engine.find_infinite", return_value=program):
+            prompt = coding_agent._system_prompt()
+        self.assertIn("Infinite (node-based pictures, sound and 3D) is installed", prompt)
+        self.assertIn(program, prompt)
+        self.assertIn("--validate patch.inf", prompt)
+        self.assertIn("--timeout 100", prompt)  # within run_command's 120 seconds
+
+    def test_no_infinite_adds_nothing(self):
+        with patch("coding_agent.infinite_engine.find_infinite", return_value=None):
+            self.assertNotIn("Infinite", coding_agent._system_prompt())
+        self.assertEqual(coding_agent._infinite_hint(None), "")
+
+
 class AgentTests(unittest.TestCase):
     def setUp(self):
         self.data_directory = isolate_agent_data(self)

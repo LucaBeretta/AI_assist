@@ -828,6 +828,7 @@ window.app = (() => {
       }
       window.workspaceui?.onEvent(event);
       window.welcomeui?.onEvent(event);
+      if (window.infiniteui?.onEvent(event)) continue;
       if (window.sharingui?.onEvent(event)) continue;
       if (window.securityui?.onEvent(event)) continue;
       if (window.computeui?.onEvent(event)) continue;

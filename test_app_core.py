@@ -211,6 +211,11 @@ class OllamaClientTests(OllamaServerCase):
         self.assertEqual(metrics, [{"eval_count": 4, "eval_duration": 1_000_000_000}])
         path, body = FakeOllama.requests[-1]
         self.assertEqual((path, body["options"]["num_ctx"], body["stream"]), ("/api/chat", 4096, True))
+        self.assertNotIn("think", body)  # Ollama's own default unless a caller asks
+
+    def test_stream_chat_can_turn_a_models_thinking_off(self):
+        ollama.stream_chat(self.base, [{"role": "user", "content": "hi"}], "alpha:8b", think=False)
+        self.assertIs(FakeOllama.requests[-1][1]["think"], False)
 
     def test_unreachable_server_is_a_clear_error(self):
         with self.assertRaisesRegex(RuntimeError, "Could not connect to Ollama"):
