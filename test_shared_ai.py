@@ -10,6 +10,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import peer_inference_contract
 import peer_pairing
 from peer_pairing import PairingHost, TrustStore, open_shared_ai, pair_with_host, verification_code
 
@@ -72,6 +73,11 @@ class SharedAITests(unittest.TestCase):
         pin = self.host.window.open()
         self.peer = pair_with_host("127.0.0.1", self.host.port, verification_code(self.host.fingerprint), pin, "client1", self.store)
         self.record = self.store.client_record(self.peer)
+        # Pairing alone is not enough: this computer allows client1 to use its AI.
+        self.host.store.allow_ai("client1")
+
+    def chat(self, model="qwen3.5:27b", **extra):
+        return {"request_id": "req_1", "model": model, "messages": [{"role": "user", "content": "Hi"}], **extra}
 
     def read(self, response):
         try:
@@ -82,12 +88,12 @@ class SharedAITests(unittest.TestCase):
     def test_a_paired_device_lists_models_and_chats_with_a_streamed_answer(self):
         tags = json.loads(self.read(open_shared_ai(self.record, "client1", "GET", "/api/tags")))
         self.assertEqual(tags["models"], [{"name": "qwen3.5:27b"}])
-        response = open_shared_ai(self.record, "client1", "POST", "/api/chat",
-                                  {"model": "qwen3.5:27b", "messages": [{"role": "user", "content": "Hi"}], "stream": True})
+        response = open_shared_ai(self.record, "client1", "POST", "/api/chat", self.chat())
         lines = [json.loads(line) for line in self.read(response).splitlines()]
         self.assertEqual("".join(line.get("message", {}).get("content", "") for line in lines), "Ciao Luca")
-        self.assertEqual(self.ollama.seen[-1][:2], ("POST", "/api/chat"))
-        self.assertEqual(self.ollama.seen[-1][2]["messages"][0]["content"], "Hi")
+        # This computer writes Ollama's request itself: model, plain messages, streaming, nothing else.
+        self.assertEqual(self.ollama.seen[-1], ("POST", "/api/chat", {
+            "model": "qwen3.5:27b", "messages": [{"role": "user", "content": "Hi"}], "stream": True}))
 
     def test_only_listing_and_chatting_are_shared(self):
         for method, path in (("POST", "/api/pull"), ("DELETE", "/api/delete"), ("POST", "/api/create"), ("POST", "/api/generate")):
@@ -106,9 +112,9 @@ class SharedAITests(unittest.TestCase):
 
     def test_cloud_models_are_refused_and_ollama_errors_come_back(self):
         with self.assertRaisesRegex(peer_pairing.PairingError, "Cloud models are not shared"):
-            open_shared_ai(self.record, "client1", "POST", "/api/chat", {"model": "gpt-oss:120b-cloud", "messages": []})
+            open_shared_ai(self.record, "client1", "POST", "/api/chat", self.chat("gpt-oss:120b-cloud"))
         with self.assertRaisesRegex(peer_pairing.PairingError, "not found"):
-            open_shared_ai(self.record, "client1", "POST", "/api/chat", {"model": "missing:1b", "messages": []})
+            open_shared_ai(self.record, "client1", "POST", "/api/chat", self.chat("missing:1b"))
         self.assertFalse(any(body and body.get("model") == "gpt-oss:120b-cloud" for _, _, body in self.ollama.seen))
 
     def test_strangers_and_a_wrong_certificate_never_reach_ollama(self):
@@ -120,6 +126,37 @@ class SharedAITests(unittest.TestCase):
         with patch.object(self.host.store, "authenticate_client", side_effect=AssertionError("token was sent")):
             with self.assertRaisesRegex(peer_pairing.PairingError, "certificate changed"):
                 open_shared_ai(impostor, "client1", "GET", "/api/tags")
+        self.assertEqual(self.ollama.seen, [])
+
+    def test_only_plain_messages_cross_and_tools_never_do(self):
+        for body in (self.chat(tools=[{"type": "function"}]), self.chat(options={"num_ctx": 999999}),
+                     dict(self.chat(), messages=[{"role": "tool", "content": "x"}])):
+            with self.subTest(body=str(body)[:60]), self.assertRaises(peer_inference_contract.InvalidInferenceRequest):
+                open_shared_ai(self.record, "client1", "POST", "/api/chat", body)
+        # A client that skips its own check is refused by this computer too.
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.check_hostname, context.verify_mode = False, ssl.CERT_NONE
+        conn = http.client.HTTPSConnection("127.0.0.1", self.host.port, timeout=5, context=context)
+        conn.request("POST", "/ollama/api/chat", body=json.dumps(self.chat(tools=[])).encode(), headers={
+            "X-AI-Assist-Client": "client1", "Authorization": "Bearer " + self.record["token"], "Content-Type": "application/json"})
+        response = conn.getresponse()
+        self.assertEqual(response.status, 400)
+        self.assertIn("Only request_id, model and messages", json.loads(response.read())["error"])
+        conn.close()
+        with self.assertRaises(peer_inference_contract.InvalidInferenceRequest):
+            open_shared_ai(self.record, "client1", "POST", "/api/show", {"model": "qwen3.5:27b", "verbose": True})
+        self.assertEqual(self.ollama.seen, [])
+
+    def test_a_paired_device_needs_its_own_permission_and_loses_it_when_unpaired(self):
+        self.host.store.allow_ai("client1", False)
+        with self.assertRaisesRegex(peer_pairing.PairingError, "has not allowed this device"):
+            open_shared_ai(self.record, "client1", "GET", "/api/tags")
+        self.host.store.allow_ai("client1")
+        self.assertTrue(self.host.store.ai_allowed("client1"))
+        self.host.store.revoke("client1", server=True)
+        self.assertFalse(self.host.store.ai_allowed("client1"))
+        with self.assertRaisesRegex(peer_pairing.PairingError, "Pair this device"):
+            self.host.store.allow_ai("client1")
         self.assertEqual(self.ollama.seen, [])
 
     def test_sharing_off_and_ollama_not_running(self):

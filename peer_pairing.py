@@ -29,6 +29,8 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import peer_inference_contract as contract
+
 DISCOVERY_PORT = 49381
 MAGIC = "ai-assist-discovery"
 PROTOCOL = 1
@@ -114,6 +116,29 @@ class TrustStore:
             data = self._read(file)
             data.pop(peer_id, None)
             _atomic_json(self.directory / file, data)
+            if server:
+                # A device that is no longer paired loses any AI permission with it.
+                consent = self._read("ai_clients.json")
+                if consent.pop(peer_id, None) is not None:
+                    _atomic_json(self.directory / "ai_clients.json", consent)
+
+    def allow_ai(self, peer_id, allowed=True):
+        """Let one paired device use this computer's shared AI, or stop it. Pairing alone never does."""
+        if not _safe_id(peer_id):
+            raise PairingError("Invalid client identity.")
+        with self._lock:
+            if allowed and peer_id not in self._read("paired_clients.json"):
+                raise PairingError("Pair this device before allowing it to use this computer's AI.")
+            consent = self._read("ai_clients.json")
+            if allowed:
+                consent[peer_id] = True
+            else:
+                consent.pop(peer_id, None)
+            _atomic_json(self.directory / "ai_clients.json", consent)
+
+    def ai_allowed(self, peer_id):
+        with self._lock:
+            return _safe_id(peer_id) and self._read("ai_clients.json").get(peer_id) is True
 
     def client_record(self, peer_id):
         with self._lock:
@@ -312,7 +337,7 @@ USAGE_MIN_INTERVAL = 1.0
 # Shared AI: what a paired device may ask this computer's Ollama, and nothing else.
 # Downloading, deleting or creating models, and Ollama's cloud models, are never offered.
 AI_ROUTES = {("GET", "/api/tags"), ("GET", "/api/version"), ("POST", "/api/show"), ("POST", "/api/chat")}
-MAX_AI_REQUEST = 16 * 1024 * 1024
+MAX_AI_REQUEST = contract.MAX_REQUEST_BYTES
 AI_TIMEOUT = 600
 AI_CONCURRENT = 2
 MAX_USAGE_BYTES = 8192
@@ -355,6 +380,19 @@ def sanitize_usage(value):
             "time": _finite(value.get("time")),
             "cpu": {"name": str(cpu.get("name") or "")[:96], "percent": _finite(cpu.get("percent"), 0, 100)},
             "ram": {"total_bytes": total, "available_bytes": available}, "gpus": gpus, "loaded": loaded}
+
+
+def _shared_ai_body(route, request):
+    """The only bodies a paired device may send to a shared Ollama, rebuilt here field by field."""
+    if route == "/api/chat":
+        valid = contract.validate_request(request)
+        return {"model": valid["model"], "messages": valid["messages"], "stream": True}
+    if not isinstance(request, dict) or set(request) != {"model"}:
+        raise contract.InvalidInferenceRequest("Only a model name is accepted.")
+    model = request["model"]
+    if not isinstance(model, str) or contract._MODEL_RE.fullmatch(model) is None or "://" in model:
+        raise contract.InvalidInferenceRequest("Invalid installed model identifier.")
+    return {"model": model}
 
 
 def _cloud_model(name):
@@ -423,8 +461,12 @@ class PairingHost:
                 if host.ollama is None or (method, route) not in AI_ROUTES:
                     self.send_error(404)
                     return
-                if self._paired_client() is None:
+                client = self._paired_client()
+                if client is None:
                     self.send_error(403)
+                    return
+                if not host.store.ai_allowed(client):
+                    self._json_reply(403, {"error": "This computer has not allowed this device to use its AI."})
                     return
                 body = None
                 if method == "POST":
@@ -435,19 +477,19 @@ class PairingHost:
                     if size < 2 or size > MAX_AI_REQUEST:
                         self.send_error(413)
                         return
-                    body = self.rfile.read(size)
                     try:
-                        request = json.loads(body)
-                    except (UnicodeError, ValueError):
-                        self.send_error(400)
+                        # Data only (peer_inference_contract): plain-text messages, never tools,
+                        # files, commands or Ollama options. This computer writes Ollama's request itself.
+                        request = json.loads(self.rfile.read(size))
+                        forward_body = _shared_ai_body(route, request)
+                    except (UnicodeError, ValueError) as error:
+                        self._json_reply(400, {"error": str(error) if isinstance(error, contract.InvalidInferenceRequest)
+                                               else "The request is not valid JSON."})
                         return
-                    model = request.get("model") if isinstance(request, dict) else None
-                    if not isinstance(model, str) or not model.strip():
-                        self.send_error(400)
-                        return
-                    if _cloud_model(model):
+                    if _cloud_model(forward_body["model"]):
                         self._json_reply(403, {"error": "Cloud models are not shared. Choose a model on this computer."})
                         return
+                    body = json.dumps(forward_body).encode("utf-8")
                 if not host._ai_slots.acquire(blocking=False):
                     self._json_reply(429, {"error": "This computer is already answering other devices. Try again shortly."})
                     return
@@ -688,6 +730,11 @@ def open_shared_ai(record, client_id, method, path, body=None, timeout=AI_TIMEOU
         raise PairingError("Refusing a non-LAN address or invalid port.")
     if not _safe_id(client_id) or not isinstance(token, str) or not isinstance(pinned, str) or len(pinned) != 64:
         raise PairingError("Invalid paired peer record.")
+    payload = None
+    if method == "POST":
+        # Refuse here what the shared computer would refuse, before connecting.
+        payload = json.dumps(contract.validate_request(body) if path == "/api/chat"
+                             else _shared_ai_body(path, body)).encode("utf-8")
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     context.check_hostname = False
     context.verify_mode = ssl.CERT_NONE  # Pinned explicitly below, before any credential is sent.
@@ -699,9 +746,7 @@ def open_shared_ai(record, client_id, method, path, body=None, timeout=AI_TIMEOU
         if not hmac.compare_digest(fingerprint, pinned):
             raise PairingError("This device's certificate changed. Pair it again.")
         headers = {"X-AI-Assist-Client": client_id, "Authorization": "Bearer " + token, "Accept": "application/json"}
-        payload = None
-        if body is not None:
-            payload = json.dumps(body).encode("utf-8")
+        if payload is not None:
             headers["Content-Type"] = "application/json"
         conn.request(method, "/ollama" + path, body=payload, headers=headers)
         response = conn.getresponse()
