@@ -55,7 +55,7 @@ class UpdateTests(unittest.TestCase):
     def test_every_shipped_file_in_this_copy_is_recognised(self):
         from update_checker import is_shipped
         here = Path(__file__).resolve().parent
-        for folder, pattern in (("app_core", "*.py"), ("webui", "*.py"), ("webui/static", "*")):
+        for folder, pattern in (("app_core", "*.py"), ("webui", "*.py"), ("webui/static", "*"), ("blender_addon", "*.py")):
             for path in sorted((here / folder).glob(pattern)):
                 if path.is_file():
                     with self.subTest(path=path.name):
