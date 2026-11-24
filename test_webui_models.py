@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from app_core import runtime
+import model_library
 import test_webui_app as fixtures
 
 
@@ -13,6 +14,10 @@ class ModelApiTests(unittest.TestCase):
     def setUp(self):
         fixtures.ApiTests.setUp(self)
         self.engine.ollama_api = Mock()
+        # Never reach Hugging Face from a test; tests that need its list patch this again.
+        hugging_face = patch("model_library.fetch_hugging_face_models", return_value=[])
+        self.hugging_face = hugging_face.start()
+        self.addCleanup(hugging_face.stop)
 
     def test_recommendations_reuse_detected_hardware_and_catalog(self):
         hardware = {"server_local": True, "gpus": []}
@@ -22,6 +27,34 @@ class ModelApiTests(unittest.TestCase):
             result = self.api.recommend_models()
         self.assertEqual(result["recommendations"], [{"name": "recommended"}])
         recommend.assert_called_once_with(hardware, [{"name": "family"}])
+
+    def test_hugging_face_suggestions_follow_ollamas_under_the_same_approval(self):
+        import network_gate
+        hardware = {"server_local": True, "gpus": []}
+        self.api._hardware = hardware
+        seen = []
+        def models():
+            current = network_gate._current_task()
+            seen.append((current.purpose, sorted(current.hosts)))
+            return [{"repo": "org/model-GGUF"}]
+        with patch("model_library.fetch_popular_models", return_value=[{"name": "family"}]), \
+             patch("model_advisor.recommend_models", return_value=[{"name": "family:7b"}]), \
+             patch("model_library.fetch_hugging_face_models", side_effect=models), \
+             patch("model_advisor.recommend_hugging_face", return_value=[{"name": "hf.co/org/model-GGUF:Q4_K_M"}]) as hf:
+            result = self.api.recommend_models()
+        self.assertEqual(seen, [("Read model lists from Ollama and Hugging Face", ["huggingface.co", "ollama.com"])])
+        self.assertEqual([card["name"] for card in result["recommendations"]], ["family:7b", "hf.co/org/model-GGUF:Q4_K_M"])
+        hf.assert_called_once_with(hardware, [{"repo": "org/model-GGUF"}], skip={"family:7b"},
+                                   available=model_library.hugging_face_tag_available)
+
+    def test_hugging_face_failure_keeps_ollamas_suggestions(self):
+        self.api._hardware = {"server_local": True, "gpus": []}
+        with patch("model_library.fetch_popular_models", return_value=[{"name": "family"}]), \
+             patch("model_advisor.recommend_models", return_value=[{"name": "family:7b"}]), \
+             patch("model_library.fetch_hugging_face_models", side_effect=RuntimeError("Could not reach Hugging Face.")):
+            result = self.api.recommend_models()
+        self.assertEqual(result["recommendations"], [{"name": "family:7b"}])
+        self.assertIsNone(result["catalog_error"])
 
     def test_blocked_catalog_still_returns_hardware_and_is_not_asked_again(self):
         hardware = {"server_local": True, "gpus": []}

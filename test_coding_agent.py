@@ -41,6 +41,27 @@ class FakeProcess:
         self.returncode = -9
 
 
+class BlenderHintTests(unittest.TestCase):
+    def test_an_installed_blender_is_described_with_a_background_command(self):
+        with patch("coding_agent.projects.find_blender", return_value="/opt/Blender 4.2/blender"):
+            prompt = coding_agent._system_prompt()
+        self.assertIn("Blender is installed", prompt)
+        self.assertIn("--background --factory-startup", prompt)
+        self.assertIn("/opt/Blender 4.2/blender", prompt)
+        self.assertIn("120 seconds", prompt)
+
+    def test_no_blender_adds_nothing(self):
+        with patch("coding_agent.projects.find_blender", return_value=None):
+            prompt = coding_agent._system_prompt()
+        self.assertNotIn("Blender", prompt)
+
+    def test_the_command_suits_each_shell(self):
+        hint = coding_agent._blender_hint('C:/Program Files/Blender Foundation/Blender 4.2/blender.exe')
+        expected = '& "C:/Program Files' if coding_agent.os.name == "nt" else '"C:/Program Files'
+        self.assertIn("run_command: " + expected, hint)
+        self.assertEqual(coding_agent._blender_hint(None), "")
+
+
 class AgentTests(unittest.TestCase):
     def setUp(self):
         self.data_directory = isolate_agent_data(self)

@@ -2,6 +2,7 @@
 
 import io
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -320,6 +321,49 @@ class ModelCapabilitiesTests(unittest.TestCase):
                 with self.subTest(host=host, model=model), self.assertRaises(ValueError):
                     fetch_model_capabilities(host, model)
             opened.assert_not_called()
+
+
+class BlenderDiscoveryTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name).resolve()
+
+    def program(self, *parts):
+        path = self.root.joinpath(*parts)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"")
+        return str(path)
+
+    def test_an_explicit_path_wins_and_missing_files_are_ignored(self):
+        chosen = self.program("custom", "blender")
+        on_path = self.program("bin", "blender")
+        with patch.dict(os.environ, {"AI_ASSIST_BLENDER": chosen}), patch("developer_tools.shutil.which", return_value=on_path):
+            self.assertEqual(developer_tools.find_blender(), chosen)
+        with patch.dict(os.environ, {"AI_ASSIST_BLENDER": str(self.root / "gone")}), \
+                patch("developer_tools.shutil.which", return_value=on_path):
+            self.assertEqual(developer_tools.find_blender(), on_path)
+
+    def test_nothing_installed_means_no_blender(self):
+        with patch.dict(os.environ, {"AI_ASSIST_BLENDER": "", "ProgramFiles": str(self.root), "ProgramFiles(x86)": ""}), \
+                patch("developer_tools.shutil.which", return_value=None), \
+                patch("developer_tools.os.path.expanduser", return_value=str(self.root / "nothing")), \
+                patch("developer_tools.os.path.isfile", return_value=False):
+            self.assertIsNone(developer_tools.find_blender())
+
+    def test_newer_versions_sort_by_number_not_text(self):
+        folders = ["Blender 4.9", "Blender 4.10", "Blender 3.6"]
+        ordered = sorted((f"C:/Program Files/Blender Foundation/{name}/blender.exe" for name in folders),
+                         key=developer_tools._version_key, reverse=True)
+        self.assertEqual([Path(path).parent.name for path in ordered], ["Blender 4.10", "Blender 4.9", "Blender 3.6"])
+
+    @unittest.skipUnless(os.name == "nt", "Windows install folders")
+    def test_the_newest_windows_install_is_found(self):
+        self.program("Blender Foundation", "Blender 4.9", "blender.exe")
+        newest = self.program("Blender Foundation", "Blender 4.10", "blender.exe")
+        with patch.dict(os.environ, {"AI_ASSIST_BLENDER": "", "ProgramFiles": str(self.root), "ProgramFiles(x86)": ""}), \
+                patch("developer_tools.shutil.which", return_value=None):
+            self.assertEqual(developer_tools.find_blender(), newest)
 
 
 if __name__ == "__main__":

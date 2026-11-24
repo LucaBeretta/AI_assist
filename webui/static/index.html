@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-eval'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-eval'; style-src 'self'; img-src 'self' data:; media-src blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <title>AI Assist</title>
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="feedback-loop.css">
@@ -19,6 +19,9 @@
   <script defer src="security.js"></script>
   <script defer src="hourly.js"></script>
   <script defer src="sharing.js"></script>
+  <script defer src="photo-video.js"></script>
+  <script defer src="photo-shader.js"></script>
+  <script defer src="quick-animation.js"></script>
   <script defer src="feedback-loop.js"></script>
 </head>
 <body>
@@ -53,6 +56,9 @@
         </button>
         <button id="nav-capabilities" class="nav-item" type="button" aria-current="false">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6v4h4v8h-4v4H9v-4H5V8h4z"></path></svg><span data-i18n="Capabilities"></span>
+        </button>
+        <button id="nav-generate" class="nav-item" type="button" aria-current="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="m10 9 5 3-5 3z"></path></svg><span data-i18n="Generate"></span>
         </button>
       </nav>
 
@@ -301,7 +307,7 @@
               <h2 id="other-title" class="models-h"><span data-i18n="Another model"></span></h2>
               <form id="pull-other" class="pull-other">
                 <label class="sr-only" for="pull-other-name"><span data-i18n="Model tag"></span></label>
-                <input id="pull-other-name" class="mono" placeholder="e.g. qwen3:14b (from ollama.com/library)" spellcheck="false" data-i18n-placeholder="e.g. qwen3:14b (from ollama.com/library)">
+                <input id="pull-other-name" class="mono" placeholder="e.g. qwen3:14b, or hf.co/user/model-GGUF:Q4_K_M from Hugging Face" spellcheck="false" data-i18n-placeholder="e.g. qwen3:14b, or hf.co/user/model-GGUF:Q4_K_M from Hugging Face">
                 <button id="pull-other-button" class="btn" type="submit"><span data-i18n="Download"></span></button>
                 <span id="pull-other-progress"></span>
               </form>
@@ -312,6 +318,73 @@
       <section id="capabilities-view" class="view" aria-labelledby="capabilities-title" hidden>
         <header class="header"><h1 id="capabilities-title" data-i18n="Capabilities"></h1><button id="capabilities-refresh" class="btn" type="button" data-i18n="Refresh"></button></header>
         <div class="models-scroll"><div class="models-page"><p class="setting-hint" data-i18n="Capabilities reported by the selected model. Unreported features remain unknown."></p><div id="capabilities-result" class="model-list" role="status"></div></div></div>
+      </section>
+      <section id="generate-view" class="view" aria-labelledby="generate-title" hidden>
+        <header class="header">
+          <h1 id="generate-title" class="strong" data-i18n="Generate"></h1>
+        </header>
+        <div class="models-scroll">
+          <div class="generate-modes" role="group" aria-label="Generation mode" data-i18n-aria-label="Generation mode">
+            <button id="generate-quick-mode" class="btn" type="button" aria-pressed="true" aria-controls="generate-quick-panel" data-i18n="Quick animation"></button>
+            <button id="generate-wan-mode" class="btn" type="button" aria-pressed="false" aria-controls="generate-wan-panel" data-i18n="AI video"></button>
+          </div>
+          <div id="generate-quick-panel" class="generate-page">
+            <section class="generate-panel" aria-labelledby="quick-animation-title">
+              <h2 id="quick-animation-title" data-i18n="Quick animation"></h2>
+              <p class="setting-hint" data-i18n="Add a live effect to a photo and save a 3-second loop."></p>
+              <label class="field"><span data-i18n="Photo (JPEG or PNG, up to 10 MB)"></span>
+                <input id="quick-animation-image" type="file" accept="image/jpeg,image/png">
+              </label>
+              <label class="field"><span data-i18n="Motion effect"></span>
+                <select id="quick-animation-effect">
+                  <option value="zoom" data-i18n="Slow zoom"></option>
+                  <option value="pan" data-i18n="Side-to-side pan"></option>
+                  <option value="ripple" data-i18n="Ripple"></option>
+                </select>
+              </label>
+              <div class="model-actions">
+                <button id="quick-animation-play" class="btn" type="button" disabled data-i18n="Play preview"></button>
+                <button id="quick-animation-save" class="btn primary" type="button" disabled data-i18n="Save clip"></button>
+              </div>
+              <p id="quick-animation-status" class="setting-hint" role="status"></p>
+            </section>
+            <section class="generate-panel" aria-labelledby="quick-animation-preview-title">
+              <h2 id="quick-animation-preview-title" data-i18n="Animation preview"></h2>
+              <div class="generate-stage">
+                <p id="quick-animation-empty" class="setting-hint" data-i18n="Choose a photo to see the preview."></p>
+                <canvas id="quick-animation-canvas" class="photo-video-preview" aria-labelledby="quick-animation-preview-title" hidden></canvas>
+              </div>
+            </section>
+          </div>
+          <div id="generate-wan-panel" class="generate-page" hidden>
+            <form id="photo-video-form" class="generate-panel" aria-labelledby="photo-video-title">
+              <h2 id="photo-video-title" data-i18n="Photo to video"></h2>
+              <p class="setting-hint" data-i18n="Requires local ComfyUI and Wan 2.2 TI2V 5B."></p>
+              <label class="field"><span data-i18n="Photo (JPEG or PNG, up to 10 MB)"></span>
+                <input id="photo-video-image" type="file" accept="image/jpeg,image/png" required>
+              </label>
+              <label class="field"><span data-i18n="What should move?"></span>
+                <textarea id="photo-video-prompt" rows="4" maxlength="2000" required></textarea>
+              </label>
+              <label class="field"><span data-i18n="Video orientation"></span>
+                <select id="photo-video-orientation">
+                  <option value="landscape" data-i18n="Landscape"></option>
+                  <option value="portrait" data-i18n="Portrait"></option>
+                </select>
+              </label>
+              <button id="photo-video-generate" class="btn primary" type="submit" data-i18n="Generate video"></button>
+              <p id="photo-video-status" class="setting-hint" role="status"></p>
+              <progress id="photo-video-progress" aria-label="Generating video" data-i18n-aria-label="Generating video" hidden></progress>
+            </form>
+            <section class="generate-panel" aria-labelledby="photo-video-preview-title">
+              <h2 id="photo-video-preview-title" data-i18n="Video preview"></h2>
+              <div class="generate-stage">
+                <p id="photo-video-empty" class="setting-hint" data-i18n="Your video will appear here."></p>
+                <video id="photo-video-preview" class="photo-video-preview" aria-labelledby="photo-video-preview-title" controls playsinline hidden></video>
+              </div>
+            </section>
+          </div>
+        </div>
       </section>
     </main>
   </div>

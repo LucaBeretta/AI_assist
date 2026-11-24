@@ -155,6 +155,132 @@ def fetch_popular_models(limit=30):
     return models
 
 
+HUGGING_FACE_API = "https://huggingface.co/api/models"
+_HF_REPO_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,95}/[A-Za-z0-9][A-Za-z0-9_.-]{0,95}")
+# The quantization Ollama's hf.co/<repo>:<quant> tag selects, from a single-file GGUF name.
+_HF_QUANT_RE = re.compile(r"[-._](i?q\d(?:_[a-z0-9]+)*|f16|bf16)\.gguf$", re.I)
+_HF_SPLIT_RE = re.compile(r"-\d{5}-of-\d{5}\.gguf$", re.I)
+_HF_PARAMETERS_RE = re.compile(r"(?<![\d.])(\d+(?:\.\d+)?)[Bb](?![A-Za-z0-9])")
+
+
+def _read_hugging_face(url):
+    request = urllib.request.Request(url, headers={"User-Agent": "AI-Assist-Desktop/1.0", "Accept": "application/json"})
+    try:
+        # Inside a caller's task (the model suggestions) its approval covers every request.
+        page_task = contextlib.nullcontext() if network_gate.in_task() else network_gate.task(
+            "Read Hugging Face's model list", sends="A request for model information on huggingface.co. "
+            "No chats or files are sent.", hosts=("huggingface.co",))
+        with page_task, urllib.request.urlopen(request, timeout=25) as response:
+            data = response.read(_MAX_PAGE_BYTES + 1)
+        if len(data) > _MAX_PAGE_BYTES:
+            raise RuntimeError("Hugging Face returned more data than expected.")
+        return json.loads(data.decode("utf-8"))
+    except network_gate.InternetBlocked as error:
+        raise RuntimeError(str(error)) from error
+    except urllib.error.HTTPError as error:
+        error.close()
+        raise RuntimeError(f"Hugging Face returned HTTP {error.code}.") from error
+    except (urllib.error.URLError, TimeoutError, OSError, http.client.HTTPException) as error:
+        raise RuntimeError("Could not reach Hugging Face. Check your internet connection and retry.") from error
+    except (UnicodeDecodeError, ValueError) as error:
+        raise RuntimeError("Hugging Face returned an unreadable answer.") from error
+
+
+def _gguf_variants(repo, detail):
+    """Single-file GGUF quantizations Ollama can pull as hf.co/<repo>:<quant>, smallest first."""
+    files = detail.get("siblings") if isinstance(detail, dict) else None
+    variants = {}
+    for item in files if isinstance(files, list) else []:
+        name = item.get("rfilename") if isinstance(item, dict) else None
+        size = item.get("size") if isinstance(item, dict) else None
+        # Folders, split files and vision projectors are not what a quantization tag selects.
+        if (not isinstance(name, str) or "/" in name or "mmproj" in name.lower() or _HF_SPLIT_RE.search(name)
+                or type(size) is not int or size <= 0):
+            continue
+        match = _HF_QUANT_RE.search(name)
+        if match is None:
+            continue
+        quant = match.group(1).upper()
+        if quant in variants:
+            # Two files claim one quantization; the tag would be ambiguous.
+            variants[quant] = None
+            continue
+        variants[quant] = {"name": f"hf.co/{repo}:{quant}", "quant": quant, "size_bytes": size}
+    return sorted((variant for variant in variants.values() if variant), key=lambda variant: variant["size_bytes"])
+
+
+_HF_TAG_RE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
+# The same request Ollama makes before it pulls an hf.co tag.
+_HF_MANIFEST_HEADERS = {"Accept": "application/vnd.docker.distribution.manifest.v2+json", "User-Agent": "AI-Assist-Desktop/1.0"}
+
+
+def hugging_face_tag_available(tag):
+    """Ask Hugging Face's registry, as Ollama does, whether ``hf.co/<repo>:<quant>`` can be pulled.
+
+    True or False when the registry says so; None when it could not be asked.
+    A file name can suggest a quantization that the registry does not offer.
+    """
+    repo, _, quant = tag.removeprefix("hf.co/").rpartition(":") if isinstance(tag, str) else ("", "", "")
+    if not _HF_REPO_RE.fullmatch(repo) or not _HF_TAG_RE.fullmatch(quant):
+        return False
+    request = urllib.request.Request(f"https://huggingface.co/v2/{urllib.parse.quote(repo, safe='/')}/manifests/{quant}",
+                                     headers=_HF_MANIFEST_HEADERS)
+    try:
+        page_task = contextlib.nullcontext() if network_gate.in_task() else network_gate.task(
+            "Check a Hugging Face model", sends="The model and version names. No chats or files are sent.",
+            hosts=("huggingface.co",))
+        with page_task, urllib.request.urlopen(request, timeout=15) as response:
+            response.read(_MAX_PAGE_BYTES)
+            return response.status == 200
+    except network_gate.InternetBlocked as error:
+        raise RuntimeError(str(error)) from error
+    except urllib.error.HTTPError as error:
+        error.close()
+        return False if error.code in (400, 404) else None
+    except (urllib.error.URLError, TimeoutError, OSError, http.client.HTTPException):
+        return None
+
+
+def fetch_hugging_face_models(limit=6):
+    """Hugging Face's most downloaded GGUF chat models, each with its downloadable quantizations.
+
+    Download counts are Hugging Face's own; they show popularity, not quality.
+    Each model needs one more request for its file sizes, so ``limit`` bounds the work.
+    """
+    if not isinstance(limit, int) or limit < 1:
+        raise ValueError("The model limit must be a positive integer.")
+    query = urllib.parse.urlencode({"filter": "gguf", "pipeline_tag": "text-generation",
+                                    "sort": "downloads", "direction": "-1", "limit": str(limit * 4)})
+    rows = _read_hugging_face(f"{HUGGING_FACE_API}?{query}")
+    if not isinstance(rows, list):
+        raise RuntimeError("Hugging Face returned an invalid model list.")
+    models, checked = [], 0
+    for row in rows:
+        repo = row.get("id") if isinstance(row, dict) else None
+        if not isinstance(repo, str) or not _HF_REPO_RE.fullmatch(repo):
+            continue
+        if checked >= limit * 2:
+            break
+        checked += 1
+        try:
+            detail = _read_hugging_face(f"{HUGGING_FACE_API}/{urllib.parse.quote(repo, safe='/')}?blobs=true")
+        except RuntimeError:
+            continue
+        variants = _gguf_variants(repo, detail)
+        if not variants:
+            continue
+        parameters = _HF_PARAMETERS_RE.search(repo.split("/", 1)[1])
+        downloads = row.get("downloads")
+        models.append({"repo": repo, "variants": variants,
+                       "parameters": float(parameters.group(1)) if parameters else None,
+                       "downloads": downloads if type(downloads) is int else None})
+        if len(models) >= limit:
+            break
+    if not models:
+        raise RuntimeError("No downloadable Hugging Face models were found. Try again later.")
+    return models
+
+
 def fetch_model_variants(name):
     """Return exact local pull tags with advertised download sizes, smallest first."""
     if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", name):
@@ -224,9 +350,10 @@ def pull_model(host, name, on_progress, cancel_event=None):
         headers={"Content-Type": "application/json"}, method="POST",
     )
     try:
-        with network_gate.task(f"Download {name} through Ollama",
-                               sends="Ollama asks its online registry for this model and downloads it. "
-                                     "No chats or files are sent.", minutes=24 * 60), \
+        source = ("Ollama downloads this model from Hugging Face. " if network_gate.hugging_face_model(name)
+                  else "Ollama asks its online registry for this model and downloads it. ")
+        with network_gate.task(f"Download {name} through Ollama", sends=source + "No chats or files are sent.",
+                               minutes=24 * 60), \
                 urllib.request.urlopen(request, timeout=45) as response:
             while True:
                 _check_cancelled(cancel_event)

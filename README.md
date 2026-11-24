@@ -89,6 +89,10 @@ has improved without subsequent evaluation.
 
 Developer commands run with your account's permissions from the chosen project directory; they are not an operating-system sandbox. Review the destination, diff and command before approving. Model file paths remain confined to the project, with secret, binary, dependency and generated paths excluded. Read sizes, context and tool execution are bounded. The saved agent file limit defaults to 64 KB and supports choices up to 1 MB; large text can be read in bounded line ranges.
 
+### Blender
+
+When Blender is installed, Developer tells the model where it is, so a task like "render a 512-pixel preview of scene.blend" or "add a ground plane to every .blend file here" can use it. The model writes a Blender Python script in the project and asks to run Blender in the background (`--background --factory-startup --python script.py`). The file write and the command each need your approval, as usual, and commands stop after 120 seconds. AI Assist looks for Blender on `PATH`, in `Program Files\Blender Foundation` on Windows (the newest version) and in `Applications` on macOS. Set `AI_ASSIST_BLENDER` to choose a specific copy. This does not connect to a Blender window that is already open.
+
 ### Shared memory across chats
 
 Use **Settings → Shared memory** to enable/disable notes, add, edit or forget them. A chat's right-click menu selects its memories. Replies show the memories used for that request. Incognito requests do not read or write shared memory. Changing notes affects future requests and does not remove text already in a conversation.
@@ -98,6 +102,10 @@ History defaults to `%LOCALAPPDATA%\AI Assist\chats` on Windows or `~/.aiassist/
 ## Model downloads
 
 Open **Models** for hardware-based recommendations and installed models. Downloads show progress and can be stopped; a model can then be selected in the chat composer. Loaded models can be unloaded explicitly or after the configured idle period. Recommendations are estimates, not guarantees of speed or GPU placement. The status bar reports model placement, context, VRAM and measured token speed when available.
+
+Recommendations come from two public lists, read once per session after one approval that names both sites: Ollama's library on ollama.com, and Hugging Face's most downloaded GGUF chat models on huggingface.co. For each Hugging Face model, AI Assist picks the first quantization in the order Q4_K_M, Q5_K_M, Q4_K_S, Q6_K, Q8_0, IQ4_XS, Q3_K_M that fits this computer, using the same memory estimate as the Ollama suggestions, and shows up to three. Download counts show popularity, not quality. Nothing downloads until you click Download.
+
+Any single-file GGUF model on Hugging Face can also be downloaded by name in **Download another model**, for example `hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M` (repository, then quantization). Ollama fetches it from Hugging Face, and the internet approval says so.
 
 ## Privacy, Compute and local check-ins
 
@@ -157,3 +165,13 @@ GitHub Actions (`.github/workflows/tests.yml`) runs `ruff check .` (unused or un
 The [macOS desktop checks](.github/workflows/macos.yml) workflow runs the headless suite with default macOS temporary paths. Its optional `native_smoke` input checks chat through the real WKWebView on the hosted runner using temporary data and a simulated model.
 
 `app_core/ollama.py`, `streaming.py` and `providers.py` supply the shared engine; `app_core/runtime.py` is the desktop's thin compatibility adapter. Plain status and handoff logic lives in `status_values.py` and `hybrid_memory.py`. `webui/app.py` exposes JSON methods; workers emit through `webui/bridge.py`. The frontend is vanilla JavaScript with offline assets and English/Italian strings. No worker receives native UI objects. See [the D8 integration report](docs/d8-integration.md) for conflict decisions and verification limits.
+
+## Generate
+
+Open **Generate → Quick animation** to preview a slow zoom, side-to-side pan, or ripple on a JPEG or PNG. Quick animation uses WebGL 2 locally and can save a 3-second MP4 or WebM when the desktop webview supports canvas recording. It does not need ComfyUI or a model download.
+
+### AI video
+
+Start ComfyUI on `127.0.0.1:8188` and install the three model files for **Wan2.2 TI2V 5B** using the [official ComfyUI setup guide](https://docs.comfy.org/tutorials/video/wan/wan2_2#wan2-2-ti2v-5b-hybrid-version-workflow-example). In AI Assist, open **Generate → AI video**, select a JPEG or PNG, describe the motion, and pick an orientation. For example, try “The camera slowly circles the toy car.”
+
+The clip plays in AI Assist and the MP4 is saved in ComfyUI's `output/ai-assist` folder. ComfyUI also stores a copy of the photo in its input folder.

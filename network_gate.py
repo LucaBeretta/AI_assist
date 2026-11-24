@@ -65,6 +65,8 @@ _OLLAMA_REGISTRY = {
     "/api/push": ("Ollama model upload", "Ollama uploads the model to its online registry."),
     "/api/create": ("Ollama model creation", "Ollama may download a base model from its online registry."),
 }
+# Ollama downloads GGUF models from Hugging Face when a name starts with one of these.
+_HUGGING_FACE_PREFIXES = ("hf.co/", "huggingface.co/")
 _OLLAMA_MODEL_PATHS = frozenset({"/api/chat", "/api/generate", "/api/embed", "/api/embeddings"})
 # Extensions that open their own connections from native code, out of the hook's sight.
 _NATIVE_NETWORK_MODULES = frozenset({"hf_xet", "hf_transfer", "pycurl"})
@@ -120,11 +122,13 @@ class Request:
 
 
 class _Task:
-    def __init__(self, purpose, sends, seconds):
+    def __init__(self, purpose, sends, seconds, hosts=()):
         self.purpose = purpose
         self.sends = sends
         self.deadline = time.monotonic() + seconds
         self.active = True
+        # Internet names declared up front, approved together in one request.
+        self.hosts = frozenset(_normal(host) for host in hosts if classify(host) == INTERNET)
 
     def live(self):
         return self.active and time.monotonic() < self.deadline
@@ -279,10 +283,14 @@ def in_task():
 
 
 @contextlib.contextmanager
-def task(purpose, sends="", minutes=10):
-    """Say why the code in this block may go online. Approvals given inside it end with it."""
+def task(purpose, sends="", minutes=10, hosts=()):
+    """Say why the code in this block may go online. Approvals given inside it end with it.
+
+    ``hosts`` lists internet names the block will contact. The first of them it
+    reaches asks once for all of them, so one approval covers, for example,
+    reading model lists from two sites. Any other name still asks on its own."""
     previous = getattr(_local, "task", None)
-    current = _Task(purpose, sends, minutes * 60)
+    current = _Task(purpose, sends, minutes * 60, hosts)
     _local.task = current
     try:
         yield
@@ -466,10 +474,12 @@ def _address_granted(ip):
             return True
     # DNS answers can rotate between the gate's lookup and the caller's.
     for key, grant in list(grants.items()):
-        if key[0] == "host" and _ip_text(key[1]) is None:
-            grant.addresses.update(_resolve(key[1]))
-            if ip in grant.addresses:
-                return True
+        names = key[1] if key[0] == "hosts" else (key[1],) if key[0] == "host" else ()
+        for name in names:
+            if _ip_text(name) is None:
+                grant.addresses.update(_resolve(name))
+        if names and ip in grant.addresses:
+            return True
     return False
 
 
@@ -499,8 +509,13 @@ def _check_request(url, data):
         kind, sends = _OLLAMA_REGISTRY[path]
         model = _body_model(data)
         name = model if isinstance(model, str) else "a model"
-        _refuse_if_locked(kind, f"{name} (Ollama contacts its online registry)", sends)
-        _authorize(("ollama", path, name), kind, f"{name} (Ollama contacts its online registry)", sends)
+        # Name the site a person will recognise: a Hugging Face model does not come from Ollama's registry.
+        if path == "/api/pull" and hugging_face_model(name):
+            target, sends = f"{name} (Ollama downloads it from Hugging Face)", "Ollama downloads the model from Hugging Face."
+        else:
+            target = f"{name} (Ollama contacts its online registry)"
+        _refuse_if_locked(kind, target, sends)
+        _authorize(("ollama", path, name), kind, target, sends)
     elif path in _OLLAMA_MODEL_PATHS:
         model = _body_model(data)
         if model is _UNREADABLE:
@@ -516,6 +531,11 @@ def _check_request(url, data):
             sends = current.sends if current and current.sends else "Your message and the conversation sent with it."
             _refuse_if_locked("Ollama cloud model", f"{model} (runs on Ollama's servers)", sends)
             _authorize(("ollama cloud", model), "Ollama cloud model", f"{model} (runs on Ollama's servers)", sends)
+
+
+def hugging_face_model(name):
+    """True when Ollama would download ``name`` from Hugging Face rather than its own registry."""
+    return isinstance(name, str) and name.strip().lower().startswith(_HUGGING_FACE_PREFIXES)
 
 
 def _body_model(data):
@@ -602,12 +622,14 @@ def _current_task():
 
 
 def _authorize(key, kind, target, sends=""):
+    current = _current_task()
+    if current is not None and current.hosts and key[0] == "host" and key[1] in current.hosts:
+        key, target = ("hosts", current.hosts), " and ".join(sorted(current.hosts))
     grants = _grants()
     grant = grants.get(key)
     if grant is not None and grant.valid():
         return grant
     grants.pop(key, None)
-    current = _current_task()
     request = Request(
         kind=kind, target=target, purpose=current.purpose if current else "",
         sends=sends or (current.sends if current else ""), source=_source(),
