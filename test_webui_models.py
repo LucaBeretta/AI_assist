@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from app_core import runtime
+import model_library
 import test_webui_app as fixtures
 
 
@@ -43,7 +44,8 @@ class ModelApiTests(unittest.TestCase):
             result = self.api.recommend_models()
         self.assertEqual(seen, [("Read model lists from Ollama and Hugging Face", ["huggingface.co", "ollama.com"])])
         self.assertEqual([card["name"] for card in result["recommendations"]], ["family:7b", "hf.co/org/model-GGUF:Q4_K_M"])
-        hf.assert_called_once_with(hardware, [{"repo": "org/model-GGUF"}], skip={"family:7b"})
+        hf.assert_called_once_with(hardware, [{"repo": "org/model-GGUF"}], skip={"family:7b"},
+                                   available=model_library.hugging_face_tag_available)
 
     def test_hugging_face_failure_keeps_ollamas_suggestions(self):
         self.api._hardware = {"server_local": True, "gpus": []}
