@@ -82,6 +82,10 @@ While Blender is connected, Developer gets two more tools. **blender_scene** rea
 
 The add-on is off until you click Connect, and off again when you click Disconnect or quit Blender. It listens only on this computer (127.0.0.1) and answers only AI Assist, which reads a secret from its private data folder (`blender-bridge.json`). Code running in Blender is not sandboxed, and AI Assist's internet gate cannot see inside Blender, so read it before you approve. To check the add-on with a real Blender, run `blender --background --factory-startup --python tools/blender_bridge_smoke.py`.
 
+### Your 3D character
+
+`character_builder.py` creates a stylised 3D character with the Blender installed on this computer, running in the background with nothing downloaded. It accepts a name, height, build, skin tone, hairstyle (none, short, long, bun, curly, spiky), hair, eye and clothing colours, and an accessory (glasses, hat, headphones). `blender_character.py` builds the character from Blender's own shapes and writes `portrait.png`, `character.blend` and, where Blender can export glTF, `character.glb`. A description in your own words can fill in the choices: a local model's reply is reduced to valid choices only (`choices_from_model_reply`). The first-run page will offer this step; until then, the builder can be called from Python.
+
 ### Shared memory across chats
 
 Use **Settings → Shared memory** to enable/disable notes, add, edit or forget them. A chat's right-click menu selects its memories. Replies show the memories used for that request. Incognito requests do not read or write shared memory. Changing notes affects future requests and does not remove text already in a conversation.
