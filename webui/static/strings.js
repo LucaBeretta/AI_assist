@@ -674,7 +674,11 @@ window.i18n = (() => {
   "Could not read this sound file.": "Impossibile leggere questo file audio.",
   "This window cannot play 3D sound.": "Questa finestra non può riprodurre suono 3D.",
   "Unknown sound movement.": "Movimento del suono sconosciuto.",
-  "Your character is ready. Its files for Unreal Engine (.glb) and VRM apps (.vrm) are in {v0}": "Il tuo personaggio è pronto. I file per Unreal Engine (.glb) e per le app VRM (.vrm) sono in {v0}"
+  "Your character is ready. Its files for Unreal Engine (.glb) and VRM apps (.vrm) are in {v0}": "Il tuo personaggio è pronto. I file per Unreal Engine (.glb) e per le app VRM (.vrm) sono in {v0}",
+  "Paired computer {v0}": "Computer abbinato {v0}",
+  "Pictures stay on this computer. Choose a model on this computer to send images.": "Le immagini restano su questo computer. Scegli un modello su questo computer per inviare immagini.",
+  "Choose Ollama, Colibri or a paired computer.": "Scegli Ollama, Colibri o un computer abbinato.",
+  "This computer is no longer paired. Pair it again in Settings.": "Questo computer non è più abbinato. Abbinalo di nuovo nelle Impostazioni."
 };
   const en = Object.fromEntries(Object.keys(it).map(key => [key, key]));
   const messages = {en, it};
