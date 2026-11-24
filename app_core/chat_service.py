@@ -11,6 +11,7 @@ import chat_attachments
 import chat_versions
 from chat_store import _utc_now
 from app_core.model_loading import ModelLoadProgress
+from app_core import shared_ai
 import network_gate
 
 
@@ -20,8 +21,9 @@ log = logging.getLogger(__name__)
 class ChatService:
     """Share the application lock so engine changes and new streams are atomic."""
 
-    def __init__(self, store, engine, lock, emit, *, prepare_colibri, require_vision, context_usage):
+    def __init__(self, store, engine, lock, emit, *, prepare_colibri, require_vision, context_usage, shared_ai=None):
         self._store, self._engine, self._lock, self._emit = store, engine, lock, emit
+        self._shared_ai = shared_ai  # app_core.shared_ai.SharedAI: chats whose backend is peer:<id>
         self._prepare_colibri = prepare_colibri
         self._require_vision = require_vision
         self._context_usage = context_usage
@@ -232,6 +234,11 @@ class ChatService:
                     raise engine.StreamStopped()
                 if not stream.get("vision_checked"):
                     self._require_vision(record["model"], stream["messages"], record.get("backend", record["environment"]["backend"]))
+                peer = shared_ai.peer_of(record.get("backend", record["environment"]["backend"]))
+                if peer is not None:
+                    # Runs on a paired computer, over the TLS connection pinned at pairing (local network only).
+                    return self._shared_ai.chat(peer, deepcopy(stream["messages"]), record["model"], on_chunk=chunk,
+                                                on_metrics=metrics, cancel_event=stream["cancel"])
                 if record.get("backend", record["environment"]["backend"]) == "Colibri":
                     client = self._prepare_colibri(stream["cancel"],
                         lambda text: self._emit("status", text=text, chat_id=record["id"]))
