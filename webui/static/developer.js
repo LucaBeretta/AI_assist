@@ -278,6 +278,7 @@ window.devui = (() => {
     loadCheckpoints();
     loadFiles();
     loadPins();
+    if (event.type === "agent_done" && task.chatId && !window.app?.currentChat()?.incognito) window.feedbackui?.developer(task.chatId, task.id);
   }
 
   function controls() {
