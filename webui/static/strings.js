@@ -680,7 +680,11 @@ window.i18n = (() => {
   "Devices paired with this computer. Tick the ones that may use its AI.": "Dispositivi abbinati a questo computer. Spunta quelli che possono usare la sua IA.",
   "Device {v0} may use this computer's AI": "Il dispositivo {v0} può usare l'IA di questo computer",
   "Only Ollama running on this computer can be shared.": "Si può condividere solo Ollama in esecuzione su questo computer.",
-  "Choose a paired device.": "Scegli un dispositivo abbinato."
+  "Choose a paired device.": "Scegli un dispositivo abbinato.",
+  "Paired computer {v0}": "Computer abbinato {v0}",
+  "Pictures stay on this computer. Choose a model on this computer to send images.": "Le immagini restano su questo computer. Scegli un modello su questo computer per inviare immagini.",
+  "Choose Ollama, Colibri or a paired computer.": "Scegli Ollama, Colibri o un computer abbinato.",
+  "This computer is no longer paired. Pair it again in Settings.": "Questo computer non è più abbinato. Abbinalo di nuovo nelle Impostazioni."
 };
   const en = Object.fromEntries(Object.keys(it).map(key => [key, key]));
   const messages = {en, it};

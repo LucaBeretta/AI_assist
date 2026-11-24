@@ -44,8 +44,8 @@ def _environment(value):
         raise ChatStoreError("Chat environment must contain backend, model, context_length, instructions, pinned_paths and memory_ids.")
     if any(not isinstance(value[key], str) for key in ("backend", "model", "instructions")):
         raise ChatStoreError("Environment backend, model and instructions must be text.")
-    if value["backend"] not in {"Ollama", "Colibri"}:
-        raise ChatStoreError("Environment backend must be Ollama or Colibri.")
+    if value["backend"] not in {"Ollama", "Colibri"} and not re.fullmatch(r"peer:[A-Za-z0-9_-]{1,64}", value["backend"]):
+        raise ChatStoreError("Environment backend must be Ollama, Colibri or a paired computer.")
     context = value["context_length"]
     if context is not None and (type(context) is not int or context <= 0):
         raise ChatStoreError("Environment context_length must be a positive integer or null.")

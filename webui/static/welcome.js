@@ -98,11 +98,17 @@ window.welcomeui = (() => {
     else el("character-status").textContent = event.error || t("Operation stopped.");
     return true;
   }
+  // A computer without its own models can use a paired computer's shared AI instead.
+  async function sharedModelsReady() {
+    if (!window.pywebview.api.shared_ai_models) return false;
+    try { return (await call("shared_ai_models")).computers.some(item => item.state === "ready" && item.models.length); }
+    catch (error) { return false; }
+  }
   async function onReady(value) {
     state = value;
     if (shown || !window.pywebview.api.set_web_preferences) return;
     const available = installed().length + (state?.colibri?.models?.length || 0);
-    if (state?.settings?.first_run_complete && available) return;
+    if (state?.settings?.first_run_complete && (available || await sharedModelsReady())) return;
     shown = true; window.app.showView("welcome"); loadCharacter(); await load();
   }
   async function start() {
