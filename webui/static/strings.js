@@ -686,11 +686,16 @@ window.i18n = (() => {
   "Choose Ollama, Colibri or a paired computer.": "Scegli Ollama, Colibri o un computer abbinato.",
   "This computer is no longer paired. Pair it again in Settings.": "Questo computer non è più abbinato. Abbinalo di nuovo nelle Impostazioni.",
   "3D look": "Aspetto 3D",
-  "Switch between the classic and the 3D look": "Passa dall'aspetto classico a quello 3D",
   "Look": "Aspetto",
   "The cube button at the top switches anywhere.": "Il pulsante a cubo in alto cambia aspetto ovunque.",
   "Classic": "Classico",
-  "3D cockpit": "Cabina 3D"
+  "3D cockpit": "Cabina 3D",
+  "Browser": "Browser",
+  "Back": "Indietro",
+  "Forward": "Avanti",
+  "Ask anything or jump to a section": "Chiedi qualcosa o vai a una sezione",
+  "Search or run a command · Ctrl K": "Cerca o esegui un comando · Ctrl K",
+  "Switch the look: classic, 3D cockpit or browser": "Cambia aspetto: classico, cabina 3D o browser"
 };
   const en = Object.fromEntries(Object.keys(it).map(key => [key, key]));
   const messages = {en, it};

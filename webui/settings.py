@@ -19,8 +19,8 @@ def validate(values):
         raise ValueError("UI zoom must be between 0.7 and 1.5.")
     if values.get("language", "system") not in ("system", "en", "it"):
         raise ValueError("Choose the system language, English or Italian.")
-    if values.get("look", "classic") not in ("classic", "cockpit"):
-        raise ValueError("Choose the classic or the 3D cockpit look.")
+    if values.get("look", "classic") not in ("classic", "cockpit", "browser"):
+        raise ValueError("Choose the classic, the 3D cockpit or the browser look.")
     return {**DEFAULTS, **values}
 
 
