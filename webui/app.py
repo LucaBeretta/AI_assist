@@ -283,8 +283,14 @@ class Api(FeedbackApi, SharingApi, PrivacyApi, ParityApi, CharacterApi):
         return {"ok": True, "fullscreen": self._desktop.toggle_compute_fullscreen()}
 
     @_json_method
+    def web_preferences(self):
+        """The saved web preferences alone, without contacting any engine."""
+        with self._lock:
+            return {"ok": True, "settings": deepcopy(self._settings)}
+
+    @_json_method
     def set_web_preferences(self, values):
-        if not isinstance(values, dict) or not set(values) <= {"first_run_complete", "zoom", "language"}:
+        if not isinstance(values, dict) or not set(values) <= {"first_run_complete", "zoom", "language", "look"}:
             raise ValueError("Choose supported web preferences.")
         with self._lock:
             if self._closed:

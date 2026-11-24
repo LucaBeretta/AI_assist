@@ -674,7 +674,13 @@ window.i18n = (() => {
   "Could not read this sound file.": "Impossibile leggere questo file audio.",
   "This window cannot play 3D sound.": "Questa finestra non può riprodurre suono 3D.",
   "Unknown sound movement.": "Movimento del suono sconosciuto.",
-  "Your character is ready. Its files for Unreal Engine (.glb) and VRM apps (.vrm) are in {v0}": "Il tuo personaggio è pronto. I file per Unreal Engine (.glb) e per le app VRM (.vrm) sono in {v0}"
+  "Your character is ready. Its files for Unreal Engine (.glb) and VRM apps (.vrm) are in {v0}": "Il tuo personaggio è pronto. I file per Unreal Engine (.glb) e per le app VRM (.vrm) sono in {v0}",
+  "3D look": "Aspetto 3D",
+  "Switch between the classic and the 3D look": "Passa dall'aspetto classico a quello 3D",
+  "Look": "Aspetto",
+  "The cube button at the top switches anywhere.": "Il pulsante a cubo in alto cambia aspetto ovunque.",
+  "Classic": "Classico",
+  "3D cockpit": "Cabina 3D"
 };
   const en = Object.fromEntries(Object.keys(it).map(key => [key, key]));
   const messages = {en, it};

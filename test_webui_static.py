@@ -101,6 +101,31 @@ class StaticTests(unittest.TestCase):
         ''')
 
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_the_cube_switches_between_classic_and_cockpit_and_saves_the_choice(self):
+        self.run_scenario(r'''
+        const attributes={};
+        const rootElement={setAttribute(name,value){attributes[name]=value;},getAttribute(name){return attributes[name];}};
+        const saved=[];
+        window.pywebview.api.web_preferences=async()=>({ok:true,settings:{look:'cockpit'}});
+        window.pywebview.api.set_web_preferences=async value=>{saved.push(value);return {ok:true};};
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'cockpit.js'),'utf8'),
+          {document:{...document,documentElement:rootElement,getElementById:document.getElementById.bind(document)},window,String,Error});
+        await new Promise(resolve=>setImmediate(resolve));
+        assert.equal(attributes['data-look'],'cockpit');  // the saved look is applied on start
+        assert.equal(elements.get('setting-look').value,'cockpit');
+        await elements.get('look').listeners.click();
+        assert.equal(attributes['data-look'],'classic');
+        assert.equal(elements.get('look').attributes['aria-pressed'],'false');
+        assert.equal(JSON.stringify(saved.at(-1)),'{"look":"classic"}');
+        elements.get('setting-look').value='cockpit';
+        await elements.get('setting-look').listeners.change();
+        assert.equal(attributes['data-look'],'cockpit');
+        assert.equal(JSON.stringify(saved.at(-1)),'{"look":"cockpit"}');
+        window.lookui.setLook('neon');
+        assert.equal(attributes['data-look'],'classic');  // unknown looks fall back to classic
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
     def test_reading_sharing_settings_never_enables_the_listener(self):
         self.run_scenario(r'''
         vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'sharing.js'),'utf8'),{document,window,Map,Set,Error,String,Number,Boolean,Array,Date,Object});
