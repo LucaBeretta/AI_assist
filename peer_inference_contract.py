@@ -40,7 +40,7 @@ def validate_request(payload):
     for message in messages:
         if not isinstance(message, dict) or set(message) != {"role", "content"}:
             raise InvalidInferenceRequest("Only role and plain text content are supported.")
-        if message["role"] not in _ALLOWED_ROLES:
+        if not isinstance(message["role"], str) or message["role"] not in _ALLOWED_ROLES:
             raise InvalidInferenceRequest("Remote tool or custom roles are not permitted.")
         content = message["content"]
         if not isinstance(content, str) or len(content) > MAX_CONTENT_CHARS:

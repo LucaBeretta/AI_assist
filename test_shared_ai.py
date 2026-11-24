@@ -147,6 +147,23 @@ class SharedAITests(unittest.TestCase):
             open_shared_ai(self.record, "client1", "POST", "/api/show", {"model": "qwen3.5:27b", "verbose": True})
         self.assertEqual(self.ollama.seen, [])
 
+    def test_malformed_requests_get_a_clear_refusal(self):
+        # A client that skips its own check: a non-text role, and JSON nested too deeply to read.
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.check_hostname, context.verify_mode = False, ssl.CERT_NONE
+        headers = {"X-AI-Assist-Client": "client1", "Authorization": "Bearer " + self.record["token"],
+                   "Content-Type": "application/json"}
+        for body, reason in ((json.dumps(dict(self.chat(), messages=[{"role": [], "content": "x"}])).encode(), "roles"),
+                             (b"[" * 200000 + b"]" * 200000, "not valid JSON")):
+            with self.subTest(reason=reason):
+                conn = http.client.HTTPSConnection("127.0.0.1", self.host.port, timeout=5, context=context)
+                conn.request("POST", "/ollama/api/chat", body=body, headers=headers)
+                response = conn.getresponse()
+                self.assertEqual(response.status, 400)
+                self.assertIn(reason, json.loads(response.read())["error"])
+                conn.close()
+        self.assertEqual(self.ollama.seen, [])
+
     def test_a_paired_device_needs_its_own_permission_and_loses_it_when_unpaired(self):
         self.host.store.allow_ai("client1", False)
         with self.assertRaisesRegex(peer_pairing.PairingError, "has not allowed this device"):

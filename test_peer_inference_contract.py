@@ -19,7 +19,8 @@ class InferenceContractTests(unittest.TestCase):
                 validate_request(dict(self.request, **{key: value}))
         for item in ({"role": "tool", "content": "x"},
                      {"role": "user", "content": "x", "tool_calls": []},
-                     {"role": "user", "content": {"type": "image"}}):
+                     {"role": "user", "content": {"type": "image"}},
+                     {"role": ["user"], "content": "x"}, {"role": {"name": "user"}, "content": "x"}):
             with self.subTest(item=item), self.assertRaises(InvalidInferenceRequest):
                 validate_request(dict(self.request, messages=[item]))
 

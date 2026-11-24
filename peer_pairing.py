@@ -482,7 +482,8 @@ class PairingHost:
                         # files, commands or Ollama options. This computer writes Ollama's request itself.
                         request = json.loads(self.rfile.read(size))
                         forward_body = _shared_ai_body(route, request)
-                    except (UnicodeError, ValueError) as error:
+                    except (UnicodeError, ValueError, RecursionError) as error:
+                        # RecursionError: JSON nested too deeply for Python to read.
                         self._json_reply(400, {"error": str(error) if isinstance(error, contract.InvalidInferenceRequest)
                                                else "The request is not valid JSON."})
                         return
