@@ -5,7 +5,7 @@ from pathlib import Path
 from app_core.settings import write_json
 
 
-DEFAULTS = {"idle_unload_minutes": 0, "first_run_complete": False, "zoom": 1.0, "language": "system"}
+DEFAULTS = {"idle_unload_minutes": 0, "first_run_complete": False, "zoom": 1.0, "language": "system", "look": "classic"}
 
 
 def validate(values):
@@ -19,6 +19,8 @@ def validate(values):
         raise ValueError("UI zoom must be between 0.7 and 1.5.")
     if values.get("language", "system") not in ("system", "en", "it"):
         raise ValueError("Choose the system language, English or Italian.")
+    if values.get("look", "classic") not in ("classic", "cockpit"):
+        raise ValueError("Choose the classic or the 3D cockpit look.")
     return {**DEFAULTS, **values}
 
 

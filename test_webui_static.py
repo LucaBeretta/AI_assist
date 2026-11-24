@@ -101,6 +101,31 @@ class StaticTests(unittest.TestCase):
         ''')
 
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_the_cube_switches_between_classic_and_cockpit_and_saves_the_choice(self):
+        self.run_scenario(r'''
+        const attributes={};
+        const rootElement={setAttribute(name,value){attributes[name]=value;},getAttribute(name){return attributes[name];}};
+        const saved=[];
+        window.pywebview.api.web_preferences=async()=>({ok:true,settings:{look:'cockpit'}});
+        window.pywebview.api.set_web_preferences=async value=>{saved.push(value);return {ok:true};};
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'cockpit.js'),'utf8'),
+          {document:{...document,documentElement:rootElement,getElementById:document.getElementById.bind(document)},window,String,Error});
+        await new Promise(resolve=>setImmediate(resolve));
+        assert.equal(attributes['data-look'],'cockpit');  // the saved look is applied on start
+        assert.equal(elements.get('setting-look').value,'cockpit');
+        await elements.get('look').listeners.click();
+        assert.equal(attributes['data-look'],'classic');
+        assert.equal(elements.get('look').attributes['aria-pressed'],'false');
+        assert.equal(JSON.stringify(saved.at(-1)),'{"look":"classic"}');
+        elements.get('setting-look').value='cockpit';
+        await elements.get('setting-look').listeners.change();
+        assert.equal(attributes['data-look'],'cockpit');
+        assert.equal(JSON.stringify(saved.at(-1)),'{"look":"cockpit"}');
+        window.lookui.setLook('neon');
+        assert.equal(attributes['data-look'],'classic');  // unknown looks fall back to classic
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
     def test_models_shared_by_a_paired_computer_appear_in_their_own_group_and_send_there(self):
         self.run_scenario(r'''
         window.pywebview.api.shared_ai_models=async()=>({ok:true,computers:[
@@ -494,6 +519,18 @@ class StaticTests(unittest.TestCase):
         api.shared_ai_models=async()=>({ok:true,computers:[{id:'pc',state:'offline',models:[]}]});
         await window.welcomeui.onReady({engine:'Ollama',models:[],settings:{first_run_complete:true}});
         assert.equal(elements.get('welcome-view').hidden,false);  // nothing to chat with: the welcome page opens
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_welcome_reads_saved_preferences_when_this_computer_has_no_engine(self):
+        self.run_scenario(r'''
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'welcome.js'),'utf8'), {document,window,Map,Set,Error,String,Number,Boolean,Array});
+        const api=window.pywebview.api;
+        api.set_web_preferences=async()=>({ok:true});
+        api.web_preferences=async()=>({ok:true,settings:{first_run_complete:true}});
+        api.shared_ai_models=async()=>({ok:true,computers:[{id:'pc',state:'ready',models:['qwen3:32b']}]});
+        await window.welcomeui.onReady(null);  // the state call failed: no Ollama here
+        assert.notEqual(document.getElementById('welcome-view').hidden,false);
         ''')
 
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")

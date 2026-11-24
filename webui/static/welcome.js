@@ -108,7 +108,12 @@ window.welcomeui = (() => {
     state = value;
     if (shown || !window.pywebview.api.set_web_preferences) return;
     const available = installed().length + (state?.colibri?.models?.length || 0);
-    if (state?.settings?.first_run_complete && (available || await sharedModelsReady())) return;
+    // Without an engine on this computer the app has no state; the saved preferences still say whether the welcome was done.
+    let settings = state?.settings;
+    if (!settings && window.pywebview.api.web_preferences) {
+      try { settings = (await call("web_preferences")).settings; } catch (error) { settings = null; }
+    }
+    if (settings?.first_run_complete && (available || await sharedModelsReady())) return;
     shown = true; window.app.showView("welcome"); loadCharacter(); await load();
   }
   async function start() {

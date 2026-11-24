@@ -684,7 +684,13 @@ window.i18n = (() => {
   "Paired computer {v0}": "Computer abbinato {v0}",
   "Pictures stay on this computer. Choose a model on this computer to send images.": "Le immagini restano su questo computer. Scegli un modello su questo computer per inviare immagini.",
   "Choose Ollama, Colibri or a paired computer.": "Scegli Ollama, Colibri o un computer abbinato.",
-  "This computer is no longer paired. Pair it again in Settings.": "Questo computer non è più abbinato. Abbinalo di nuovo nelle Impostazioni."
+  "This computer is no longer paired. Pair it again in Settings.": "Questo computer non è più abbinato. Abbinalo di nuovo nelle Impostazioni.",
+  "3D look": "Aspetto 3D",
+  "Switch between the classic and the 3D look": "Passa dall'aspetto classico a quello 3D",
+  "Look": "Aspetto",
+  "The cube button at the top switches anywhere.": "Il pulsante a cubo in alto cambia aspetto ovunque.",
+  "Classic": "Classico",
+  "3D cockpit": "Cabina 3D"
 };
   const en = Object.fromEntries(Object.keys(it).map(key => [key, key]));
   const messages = {en, it};
