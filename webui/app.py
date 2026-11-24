@@ -24,6 +24,7 @@ from webui.bridge import Bridge
 from webui.developer import DeveloperTasks
 from app_core import photo_video
 from app_core.chat_service import ChatService
+from app_core import shared_ai
 import developer_tools
 from task_checkpoints import CheckpointStore
 from project_store import ProjectStore, inherited_environment
@@ -99,9 +100,11 @@ class Api(FeedbackApi, SharingApi, PrivacyApi, ParityApi, CharacterApi):
         self._engine = engine if engine is not None else importlib.import_module("app_core.runtime")
         self._lock = threading.RLock()
         self._closed = False
+        self._shared_ai = shared_ai.SharedAI(self._store.directory / "pairing")
         self._chats = ChatService(self._store, self._engine, self._lock, self._bridge.emit,
                                   prepare_colibri=lambda *args: self._colibri.prepare(*args),
-                                  require_vision=self._require_vision, context_usage=self._usage)
+                                  require_vision=self._require_vision, context_usage=self._usage,
+                                  shared_ai=self._shared_ai)
         self._hardware = hardware
         # The online catalog is read once per session: every read is an internet request the gate asks about.
         self._catalog_lock = threading.Lock()
@@ -351,7 +354,13 @@ class Api(FeedbackApi, SharingApi, PrivacyApi, ParityApi, CharacterApi):
             if task:
                 metrics = task["metrics"]
         report = None
-        if backend == "Colibri":
+        peer = shared_ai.peer_of(backend)
+        if peer is not None:
+            # A paired computer answers: its address names it; this computer's Ollama is not involved.
+            paired = self._shared_ai.store.client_record(peer) or {}
+            backend = f"Paired computer {paired.get('address', '?')}"
+            details, connected, host, loaded_context = {}, True, self._engine.ollama_url(), None
+        elif backend == "Colibri":
             colibri = self._colibri.availability()
             details, connected = {}, colibri["running"]
             report = {"server": {"state": colibri["state"], "tokens_per_second": colibri.get("tokens_per_second")}}
@@ -758,8 +767,7 @@ class Api(FeedbackApi, SharingApi, PrivacyApi, ParityApi, CharacterApi):
             self._require_idle(chat_id)
             record = self._chats.load(chat_id)
         target_backend = backend if backend is not None else record.get("backend", record["environment"]["backend"])
-        if target_backend not in {"Ollama", "Colibri"}:
-            raise ValueError("Choose Ollama or Colibri.")
+        self._check_backend(target_backend)
         self._require_vision(model, self._request_messages(record), target_backend)
         with self._lock:
             self._require_idle(chat_id)
@@ -771,7 +779,25 @@ class Api(FeedbackApi, SharingApi, PrivacyApi, ParityApi, CharacterApi):
             record["backend"] = record["environment"]["backend"] = target_backend
             return {"ok": True, "chat": self._chats.save(record)}
 
+    def _backend_known(self, backend):
+        """Ollama, Colibri, or a paired computer's shared AI (peer:<id>)."""
+        peer = shared_ai.peer_of(backend)
+        return backend in {"Ollama", "Colibri"} or (peer is not None and self._shared_ai.paired(peer))
+
+    def _check_backend(self, backend):
+        if not self._backend_known(backend):
+            raise ValueError("Choose Ollama, Colibri or a paired computer.")
+
+    @_json_method
+    def shared_ai_models(self):
+        """Paired computers and the models each shares with this one. Contacts paired computers only."""
+        return {"ok": True, "computers": self._shared_ai.computers()}
+
     def _require_vision(self, model, messages, backend="Ollama"):
+        if shared_ai.peer_of(backend) is not None:
+            if any(message.get("images") for message in messages):
+                raise ValueError("Pictures stay on this computer. Choose a model on this computer to send images.")
+            return
         if backend == "Colibri" and any(message.get("images") for message in messages):
             raise ValueError("Colibri does not report a vision capability. Use a vision model in Ollama for images.")
         if any(item.get("images") for item in messages):
@@ -1265,7 +1291,7 @@ class Api(FeedbackApi, SharingApi, PrivacyApi, ParityApi, CharacterApi):
                 raise ValueError("This model is being unloaded; try again when it finishes.")
             record = self._chats.load(chat_id)
             backend = backend if backend is not None else record.get("backend", record["environment"]["backend"])
-            if backend not in {"Ollama", "Colibri"}:
+            if not self._backend_known(backend):
                 raise ValueError("Choose Ollama or Colibri.")
             if backend == "Colibri" and (self._jobs.busy("colibri") or self._developer.uses_colibri()):
                 raise ValueError("Wait for the Colibri operation or quality review to finish.")

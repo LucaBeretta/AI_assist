@@ -39,16 +39,19 @@ def _save_port(directory, port):
         pass
 
 
-def serve(address, directory, incoming, outgoing, factory=PairingHost, share_usage=False, usage=local_usage):
+def serve(address, directory, incoming, outgoing, factory=PairingHost, share_usage=False, usage=local_usage, share_ai=None):
+    """``share_ai`` is this computer's Ollama URL (loopback only) to share with allowed devices, or None."""
     host = None
     def reply(value):
         outgoing.write(json.dumps(value, ensure_ascii=False) + "\n")
         outgoing.flush()
     try:
+        options = {"port": _saved_port(directory)}
         if share_usage:
-            host = factory(address, directory, usage=usage, port=_saved_port(directory))
-        else:
-            host = factory(address, directory, port=_saved_port(directory))
+            options["usage"] = usage
+        if share_ai:
+            options["ollama"] = share_ai
+        host = factory(address, directory, **options)
         if type(getattr(host, "port", None)) is int:
             _save_port(directory, host.port)
         if share_usage:
@@ -82,4 +85,6 @@ def serve(address, directory, incoming, outgoing, factory=PairingHost, share_usa
 
 
 if __name__ == "__main__":
-    serve(sys.argv[1], sys.argv[2], sys.stdin, sys.stdout, share_usage="--share-usage" in sys.argv[3:])
+    flags = sys.argv[3:]
+    shared = flags[flags.index("--share-ai") + 1] if "--share-ai" in flags[:-1] else None
+    serve(sys.argv[1], sys.argv[2], sys.stdin, sys.stdout, share_usage="--share-usage" in flags, share_ai=shared)

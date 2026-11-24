@@ -532,10 +532,11 @@
   </section>
   <section class="setting-group" data-pane="privacy" aria-labelledby="lan-pairing-title" hidden>
     <h3 id="lan-pairing-title" data-i18n="LAN pairing"></h3>
-    <p class="setting-hint" data-i18n="Manual only. Off on every launch. Pairing shares no chats, files, commands or inference."></p>
+    <p class="setting-hint" data-i18n="Manual only. Off on every launch. Pairing alone shares no chats, files, commands or AI."></p>
     <label class="setting-row"><span class="setting-title" data-i18n="This computer's LAN IPv4 address"></span><input id="sharing-address" class="setting-input mono" type="text" placeholder="192.168.1.10" autocomplete="off"></label>
     <label class="check-row"><input id="sharing-enabled" type="checkbox"><span data-i18n="Enable LAN pairing"></span></label>
     <label class="check-row"><input id="sharing-usage" type="checkbox"><span><span data-i18n="Also share this computer's CPU, RAM and GPU usage with paired devices"></span><span class="setting-hint" data-i18n="Only devices you paired with a PIN can read it, while pairing is on. Off every time AI Assist starts."></span></span></label>
+    <label class="check-row"><input id="sharing-ai" type="checkbox"><span><span data-i18n="Also let devices I allow use this computer's AI"></span><span class="setting-hint" data-i18n="They can see its models and chat with them, encrypted, while pairing is on. No files, commands or downloads. Off every time AI Assist starts."></span></span></label>
     <div id="sharing-details" hidden>
       <p class="setting-hint" data-i18n="Compare this certificate code on the other device before entering the PIN. PIN expires after 120 seconds; three attempts."></p>
       <dl><dt data-i18n="Address"></dt><dd id="sharing-endpoint" class="mono"></dd><dt data-i18n="Certificate code"></dt><dd id="sharing-code" class="mono"></dd><dt>PIN</dt><dd id="sharing-pin" class="mono"></dd></dl>
@@ -551,6 +552,7 @@
         <div class="setting-actions"><button id="pair-submit" class="btn" type="submit" data-i18n="Pair device"></button></div>
       </form>
     </details>
+    <div id="sharing-clients-box" hidden><p class="setting-hint" data-i18n="Devices paired with this computer. Tick the ones that may use its AI."></p><ul id="sharing-clients" class="sharing-clients"></ul></div>
     <ul id="sharing-peers" class="connection-log"></ul><p id="sharing-status" class="setting-hint" role="status"></p>
   </section>
     </div>

@@ -126,6 +126,25 @@ class StaticTests(unittest.TestCase):
         ''')
 
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_models_shared_by_a_paired_computer_appear_in_their_own_group_and_send_there(self):
+        self.run_scenario(r'''
+        window.pywebview.api.shared_ai_models=async()=>({ok:true,computers:[
+          {id:'pc1',backend:'peer:pc1',address:'192.168.1.20',state:'ready',models:['qwen3:32b']},
+          {id:'pc2',backend:'peer:pc2',address:'192.168.1.30',state:'offline',models:[]}]});
+        await window.listeners.pywebviewready();
+        for (let i=0;i<5;i++) await new Promise(resolve=>setImmediate(resolve));
+        const groups=elements.get('model').children;
+        const shared=groups.filter(group=>group.sharedComputer);
+        assert.equal(shared.length,1);
+        assert.equal(shared[0].label,'Paired computer 192.168.1.20');
+        assert.equal(shared[0].children[0].value,JSON.stringify(['peer:pc1','qwen3:32b']));
+        elements.get('model').value=JSON.stringify(['peer:pc1','qwen3:32b']);
+        elements.get('prompt').value='Hi';
+        await elements.get('composer').listeners.submit({preventDefault(){}});
+        assert.deepEqual(calls.at(-1).slice(1),['Hi','qwen3:32b',null,'peer:pc1']);
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
     def test_reading_sharing_settings_never_enables_the_listener(self):
         self.run_scenario(r'''
         vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'sharing.js'),'utf8'),{document,window,Map,Set,Error,String,Number,Boolean,Array,Date,Object});
@@ -137,7 +156,20 @@ class StaticTests(unittest.TestCase):
         elements.get('sharing-usage').checked=false;
         elements.get('sharing-enabled').checked=true;document.getElementById('sharing-address').value='192.168.1.10';
         await elements.get('sharing-enabled').listeners.change();
-        assert.deepEqual(calls.at(-1),['sharing',true,'192.168.1.10',false]);
+        assert.deepEqual(calls.at(-1),['sharing',true,'192.168.1.10',false,false]);
+        // Sharing AI is its own choice, and each paired device needs its own tick.
+        window.pywebview.api.sharing_state=async()=>({ok:true,enabled:true,usage:false,ai:true,host:null,peers:{},clients:[{id:'abcdef0123456789',ai:false}]});
+        window.pywebview.api.allow_shared_ai=async (...args)=>{calls.push(['allow',...args]);return {ok:true,clients:[{id:'abcdef0123456789',ai:true}]};};
+        await window.sharingui.openSettings();
+        assert.equal(elements.get('sharing-ai').checked,true);
+        assert.equal(elements.get('sharing-clients-box').hidden,false);
+        assert.match(elements.get('sharing-clients').textContent,/abcdef01/);
+        const tick=elements.get('sharing-clients').children[0].children[0].children[0];
+        tick.checked=true;
+        await tick.listeners.change();
+        assert.deepEqual(calls.at(-1),['allow','abcdef0123456789',true]);
+        await elements.get('sharing-ai').listeners.change();
+        assert.deepEqual(calls.at(-1),['sharing',true,'192.168.1.10',false,true]);
         let handled = false;
         elements.get('pair-address').listeners.paste({
           clipboardData:{getData:()=> ' 192.168.1.20:49152 '},
@@ -472,6 +504,21 @@ class StaticTests(unittest.TestCase):
         assert(calls.some(item=>item[0]==='select'&&item[2]==='recommended'));
         await elements.get('welcome-skip').listeners.click();
         assert(calls.some(item=>item[0]==='preferences'&&item[1]===true));
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_welcome_stays_closed_when_a_paired_computer_shares_its_models(self):
+        self.run_scenario(r'''
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'welcome.js'),'utf8'), {document,window,Map,Set,Error,String,Number,Boolean,Array});
+        const api=window.pywebview.api;
+        api.set_web_preferences=async()=>({ok:true});
+        api.shared_ai_models=async()=>({ok:true,computers:[{id:'pc',state:'ready',models:['qwen3:32b']}]});
+        // Without the app's own start-up, so only this call can open the welcome page.
+        await window.welcomeui.onReady({engine:'Ollama',models:[],settings:{first_run_complete:true}});
+        assert.notEqual(document.getElementById('welcome-view').hidden,false);
+        api.shared_ai_models=async()=>({ok:true,computers:[{id:'pc',state:'offline',models:[]}]});
+        await window.welcomeui.onReady({engine:'Ollama',models:[],settings:{first_run_complete:true}});
+        assert.equal(elements.get('welcome-view').hidden,false);  // nothing to chat with: the welcome page opens
         ''')
 
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
