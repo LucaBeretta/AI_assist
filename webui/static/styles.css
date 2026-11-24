@@ -962,3 +962,6 @@ html:not([data-platform="windows"]) .windows-only { display: none; }
 }
 .generate-stage p { padding: 8px; text-align: center; }
 .photo-video-preview { width: 100%; max-height: 58vh; object-fit: contain; }
+
+.sharing-clients { list-style: none; margin: 6px 0 10px; padding: 0; }
+.sharing-clients li { padding: 4px 0; }
