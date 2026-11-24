@@ -8,6 +8,7 @@ Nothing here sends a chat: it only decides and explains where one would go.
 """
 
 from concurrent.futures import ThreadPoolExecutor
+import http.client
 import json
 from dataclasses import dataclass, field, replace
 from typing import Optional, Tuple
@@ -84,12 +85,16 @@ def peer_models(record, client_id, timeout=SURVEY_TIMEOUT):
         return (), text[:120]
     try:
         data = json.loads(response.read(1024 * 1024))
-    except ValueError:
+    except (OSError, http.client.HTTPException):
+        # It answered, then stopped sending (timeout or hang-up) before the list was complete.
+        return None, "Offline"
+    except (ValueError, RecursionError):
         return (), "Sent an unreadable model list"
     finally:
         response.close()
-    names = tuple(sorted({item["name"] for item in data.get("models", [])
-                          if isinstance(item, dict) and isinstance(item.get("name"), str)})) if isinstance(data, dict) else ()
+    listed = data.get("models") if isinstance(data, dict) else None
+    names = tuple(sorted({item["name"] for item in listed
+                          if isinstance(item, dict) and isinstance(item.get("name"), str)})) if isinstance(listed, list) else ()
     return names, "Ready" if names else "Shares its AI but has no models"
 
 

@@ -1,8 +1,10 @@
 """The AI network map and the choice of computer, with fake peers and one real TLS peer."""
 
+import http.client
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import ai_network
 import compute_routing as routing
@@ -48,6 +50,27 @@ class MapTests(unittest.TestCase):
         self.assertEqual((studio.gpu, studio.gpu_free_bytes), ("NVIDIA GeForce RTX 4090", 20 * GIB))
         self.assertEqual((nodes["peer-laptop"].status, nodes["peer-laptop"].shares_ai), ("Not sharing its AI", False))
         self.assertEqual((nodes["peer-pi"].online, nodes["peer-pi"].status), (False, "Offline"))
+
+    def test_a_peer_that_stalls_or_sends_an_odd_list_does_not_break_the_map(self):
+        class Reply:
+            def __init__(self, data=None, error=None):
+                self.data, self.error = data, error
+
+            def read(self, _limit):
+                if self.error:
+                    raise self.error
+                return self.data
+
+            def close(self):
+                pass
+
+        cases = ((Reply(error=TimeoutError("timed out")), (None, "Offline")),
+                 (Reply(error=http.client.IncompleteRead(b"{")), (None, "Offline")),
+                 (Reply(b'{"models": 5}'), ((), "Shares its AI but has no models")),
+                 (Reply(b"[" * 200000 + b"]" * 200000), ((), "Sent an unreadable model list")))
+        for reply, expected in cases:
+            with self.subTest(expected=expected), patch("peer_pairing.open_shared_ai", return_value=reply):
+                self.assertEqual(ai_network.peer_models(STUDIO, "mac1"), expected)
 
     def test_unpaired_ai_computers_from_the_scan_are_offered_to_join(self):
         self.assertEqual([device["name"] for device in network().can_join], ["Old desktop"])
