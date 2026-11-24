@@ -27,6 +27,7 @@ import urllib.parse
 import urllib.request
 import uuid
 
+import blender_bridge
 import developer_tools as projects
 import diff_hunks
 from task_checkpoints import CheckpointStore
@@ -81,19 +82,27 @@ def _blender_hint(path):
             "Commands stop after 120 seconds, so keep test renders small.")
 
 
-def _system_prompt():
+def _live_blender_hint(version):
+    if not version:
+        return ""
+    return (f" Blender {version} is open and connected: use blender_scene to look at it and blender_run to change "
+            "it. Each blender_run is reviewed by the user and is one undo step; work in small steps and print results.")
+
+
+def _system_prompt(blender=None):
     """Describe the shell actually selected by run_command without growing small requests."""
     if os.name == "nt":
         shell = "Windows: run_command uses PowerShell 5.1, no && or backslash quote escapes. Prefer script files to long python -c commands."
     else:
         shell = f"OS: {sys.platform}; run_command uses /bin/sh. Prefer script files to long python -c commands."
+    live = blender
     try:
         blender = projects.find_blender()
     except Exception:
         # Looking for Blender must never stop a task; without it the hint is simply left out.
         log.debug("Could not look for Blender", exc_info=True)
         blender = None
-    return _SYSTEM + shell + _blender_hint(blender)
+    return _SYSTEM + shell + _blender_hint(blender) + _live_blender_hint(live)
 
 
 def _schema(name, description, properties, required=()):
@@ -120,6 +129,30 @@ TOOLS = [
 ]
 _READ_TOOL_NAMES = frozenset({"list_files", "read_file"})
 _READ_TOOLS = [tool for tool in TOOLS if tool["function"]["name"] in _READ_TOOL_NAMES]
+# Offered only while a Blender is connected through the AI Assist Bridge add-on.
+BLENDER_TOOLS = [
+    _schema("blender_scene", "Read the open Blender scene: objects with transforms, dimensions and materials, "
+            "selection, frame range and render settings.", {}),
+    _schema("blender_run", "Request approval to run Blender Python (bpy) in the open Blender. Each run is one undo "
+            "step there. print() what you need to check; the output is returned.",
+            {"code": {"type": "string"}, "description": {"type": "string"}}, ("code",)),
+]
+
+
+def _tools(planning=False, blender=None):
+    """The tool list for one request: Blender's tools only while it is connected (planning only reads)."""
+    tools = _READ_TOOLS if planning else TOOLS
+    if blender:
+        tools = tools + (BLENDER_TOOLS[:1] if planning else BLENDER_TOOLS)
+    return tools
+
+
+def _blender_connected():
+    try:
+        return blender_bridge.connected()
+    except Exception:
+        log.debug("Could not check for a connected Blender", exc_info=True)
+        return None
 
 
 _TEXT_CALL = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
@@ -173,7 +206,7 @@ def _retry_message(history, instruction=_MALFORMED_CALL):
 
 def _typed_value(tool, key, text):
     """Convert an XML parameter to the JSON type the tool schema declares."""
-    schema = next((item["function"]["parameters"]["properties"] for item in TOOLS
+    schema = next((item["function"]["parameters"]["properties"] for item in TOOLS + BLENDER_TOOLS
                    if item["function"]["name"] == tool), {})
     kind = schema.get(key, {}).get("type")
     if kind == "integer" and re.fullmatch(r"\s*-?\d+\s*", text):
@@ -578,6 +611,31 @@ def _run_command(project, arguments, approve_action, cancel_event, on_event=None
     return result
 
 
+def _blender_run(arguments, approve_action, cancel_event):
+    """Run reviewed Python in the connected Blender; it becomes one undo step there."""
+    code = arguments.get("code")
+    if (not isinstance(code, str) or not code.strip() or len(code) > blender_bridge.MAX_CODE_CHARS
+            or "\x00" in code):
+        raise ValueError(f"blender_run needs between 1 and {blender_bridge.MAX_CODE_CHARS:,} characters of Python.")
+    description = arguments.get("description") or "Run this Python in the open Blender."
+    if not isinstance(description, str):
+        raise ValueError("The Blender code description must be text.")
+    _check_cancelled(cancel_event)
+    _approved(approve_action, {"kind": "blender_run", "code": code, "description": description[:1000]})
+    _check_cancelled(cancel_event)
+    # Code runs inside Blender's own Python, outside the internet gate.
+    network_gate.note_outside("Blender code", code.strip().splitlines()[0][:200],
+                              "Run the code explicitly approved in the open Blender.")
+    try:
+        result = blender_bridge.run(code)
+    except blender_bridge.BlenderNotConnected as error:
+        raise ValueError(str(error)) from error
+    text = "Blender ran the code." if result["ok"] else "Blender stopped with an error:\n" + str(result["error"])
+    if result["output"]:
+        text += "\nOutput:\n" + result["output"]
+    return _shorten(text, _MAX_OUTPUT_CHARS, "Blender output shortened.")
+
+
 def _execute_tool(project, name, arguments, approve_action, cancel_event, on_event):
     if name == "list_files":
         limit = arguments.get("limit", 250)
@@ -592,6 +650,13 @@ def _execute_tool(project, name, arguments, approve_action, cancel_event, on_eve
         return _write_file(project, arguments, approve_action, cancel_event, on_event)
     if name == "run_command":
         return _run_command(project, arguments, approve_action, cancel_event, on_event)
+    if name == "blender_scene":
+        try:
+            return json.dumps(blender_bridge.scene(), ensure_ascii=False)
+        except blender_bridge.BlenderNotConnected as error:
+            raise ValueError(str(error)) from error
+    if name == "blender_run":
+        return _blender_run(arguments, approve_action, cancel_event)
     raise ValueError(f"Unknown tool '{name}'. Use one of the provided tools.")
 
 
@@ -611,13 +676,13 @@ def _conversation_memory(history, limit):
     return [{"role": "assistant", "content": _shorten(text, limit, "Earlier dialogue shortened.")}]
 
 
-def _request_messages(history, context_length):
+def _request_messages(history, context_length, blender=None):
     """Bound requests; retain the latest user instruction and recent tool work."""
-    system = _system_prompt()
+    system = _system_prompt(blender)
     # A write_file call carries a whole file: allow up to a quarter of the
     # context (8k tokens at 32k) so tool calls are not cut off mid-argument.
     prediction = min(8192, max(256, context_length // 4))
-    budget = max(3000, (context_length - prediction) * 3 - len(json.dumps(TOOLS)) - len(system))
+    budget = max(3000, (context_length - prediction) * 3 - len(json.dumps(_tools(False, blender))) - len(system))
     if len(json.dumps(history, ensure_ascii=False)) <= budget:
         return [{"role": "system", "content": system}] + history, prediction
     latest = max((index for index, message in enumerate(history) if message.get("role") == "user"), default=0)
@@ -663,8 +728,9 @@ def request_context_usage(history, context_length, planning=False):
 
 
 def _chat(host, model, messages, context_length, cancel_event):
-    request_messages, prediction = _request_messages(messages, context_length)
-    payload = {"model": model, "messages": request_messages, "tools": _READ_TOOLS if getattr(_run, "planning", False) else TOOLS, "stream": False,
+    blender = _blender_connected()
+    request_messages, prediction = _request_messages(messages, context_length, blender)
+    payload = {"model": model, "messages": request_messages, "tools": _tools(getattr(_run, "planning", False), blender), "stream": False,
                "keep_alive": getattr(_run, "keep_alive", -1), "options": {"num_ctx": context_length, "num_predict": prediction}}
     request = urllib.request.Request(host.rstrip("/") + "/api/chat", data=json.dumps(payload).encode("utf-8"),
                                      headers={"Content-Type": "application/json"}, method="POST")

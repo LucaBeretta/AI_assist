@@ -74,6 +74,14 @@ Developer commands run with your account's permissions from the chosen project d
 
 When Blender is installed, Developer tells the model where it is, so a task like "render a 512-pixel preview of scene.blend" or "add a ground plane to every .blend file here" can use it. The model writes a Blender Python script in the project and asks to run Blender in the background (`--background --factory-startup --python script.py`). The file write and the command each need your approval, as usual, and commands stop after 120 seconds. AI Assist looks for Blender on `PATH`, in `Program Files\Blender Foundation` on Windows (the newest version) and in `Applications` on macOS. Set `AI_ASSIST_BLENDER` to choose a specific copy. This does not connect to a Blender window that is already open.
 
+### Blender, live
+
+To let Developer work on the scene you have open, install the add-on once. In Blender, choose **Edit → Preferences → Add-ons → Install…** and pick `blender_addon/ai_assist_bridge.py` from the AI Assist folder, then enable **AI Assist Bridge**. Open the 3D Viewport sidebar (N), choose the **AI Assist** tab and click **Connect**.
+
+While Blender is connected, Developer gets two more tools. **blender_scene** reads the scene: objects, transforms, materials, selection, frames and render settings. **blender_run** runs Blender Python. It shows you the code first, and runs only when you click **Run**. Each run is one undo step in Blender, so Ctrl+Z takes it back.
+
+The add-on is off until you click Connect, and off again when you click Disconnect or quit Blender. It listens only on this computer (127.0.0.1) and answers only AI Assist, which reads a secret from its private data folder (`blender-bridge.json`). Code running in Blender is not sandboxed, and AI Assist's internet gate cannot see inside Blender, so read it before you approve. To check the add-on with a real Blender, run `blender --background --factory-startup --python tools/blender_bridge_smoke.py`.
+
 ### Shared memory across chats
 
 Use **Settings → Shared memory** to enable/disable notes, add, edit or forget them. A chat's right-click menu selects its memories. Replies show the memories used for that request. Incognito requests do not read or write shared memory. Changing notes affects future requests and does not remove text already in a conversation.

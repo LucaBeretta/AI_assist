@@ -419,6 +419,8 @@ window.i18n = (() => {
   "Colibri quality review": "Revisione qualità con Colibri",
   "Offer quality review by default": "Proponi la revisione qualità per impostazione predefinita",
   "Reviewer model": "Modello revisore",
+  "Run in the open Blender": "Esegui nel Blender aperto",
+  "Runs inside Blender, not sandboxed. Ctrl+Z in Blender undoes it.": "Viene eseguito dentro Blender, senza isolamento. Ctrl+Z in Blender lo annulla.",
   "Choose a Colibri model": "Scegli un modello Colibri",
   "No Colibri model available": "Nessun modello Colibri disponibile",
   "Choose one of the models Colibri is serving now.": "Scegli uno dei modelli che Colibri sta servendo ora.",
