@@ -1211,6 +1211,7 @@ window.app = (() => {
     [t("Developer"), "", () => showView("dev")],
     [t("Models"), "", () => showView("models")],
     [t("Generate"), "", () => showView("generate")],
+    [t("Browser"), "", () => showView("browser")],
     [t("Mission Control"), "", () => openMissionControl()],
     [t("Settings"), t("Ctrl+,"), () => openSettings()],
     [t("Switch theme"), t("Ctrl+Shift+L"), () => toggleTheme()],
@@ -1274,6 +1275,7 @@ window.app = (() => {
     welcome: ["welcome-view", null],
     capabilities: ["capabilities-view", "nav-capabilities"],
     generate: ["generate-view", "nav-generate"],
+    browser: ["browser-view", "nav-browser"],
   };
   function showView(name) {
     for (const [key, [view, nav]] of Object.entries(views)) {
@@ -1287,12 +1289,14 @@ window.app = (() => {
     if (name === "dev") window.devui?.onShow?.();
     if (name === "models") window.modelsui?.onShow?.();
     if (name === "capabilities") window.parityui?.capabilities();
+    if (name === "browser") window.browserui?.onShow?.();
   }
   element("nav-chats").addEventListener("click", () => showView("chat"));
   element("nav-dev").addEventListener("click", () => showView("dev"));
   element("nav-models").addEventListener("click", () => showView("models"));
   element("nav-capabilities").addEventListener("click", () => showView("capabilities"));
   element("nav-generate").addEventListener("click", () => showView("generate"));
+  element("nav-browser").addEventListener("click", () => showView("browser"));
   // Mission Control opens the live Compute window (for a second screen); it is not a view in this window.
   const openMissionControl = () => call("open_compute_window").catch(showError);
   element("open-mission-control").addEventListener("click", openMissionControl);
@@ -1309,7 +1313,7 @@ window.app = (() => {
 
   function setPrompt(text) { element("prompt").value = text; fitPrompt(); scheduleDraft(); element("prompt").focus?.(); }
   window.addEventListener("languagechange", () => { renderMessages(); renderChats(); renderProjectBar(); });
-  return {onEvent, openSettings, showView, syncContext, selectModel, modelChoice, setPrompt,
+  return {onEvent, openSettings, showView, syncContext, selectModel, modelChoice, setPrompt, newChat, attachFiles,
           currentChat, refreshChat: async id => {
             if (selected !== id) return;
             await reloadChat(id);
