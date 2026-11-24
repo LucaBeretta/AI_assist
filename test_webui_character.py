@@ -46,6 +46,7 @@ class CharacterApiTests(unittest.TestCase):
         done = self.events.wait("job_done")
         self.assertEqual(done["operation"], "character")
         self.assertTrue(done["result"]["portrait"].startswith("data:image/png;base64,"))
+        self.assertTrue(done["result"]["folder"].endswith("character"))
         choices, blender, thread = self.builds[0]
         self.assertEqual(blender, "/opt/blender/blender")
         self.assertNotEqual(thread, threading.current_thread().name)

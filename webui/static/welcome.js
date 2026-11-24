@@ -89,7 +89,12 @@ window.welcomeui = (() => {
   function onCharacterEvent(event) {
     if (event.operation !== "character" || !["job_done", "job_error", "job_stopped"].includes(event.type)) return false;
     characterBuilding = false; el("character-create").disabled = false;
-    if (event.type === "job_done") { showPortrait(event.result?.portrait); el("character-status").textContent = t("Your character is ready."); }
+    if (event.type === "job_done") {
+      showPortrait(event.result?.portrait);
+      el("character-status").textContent = event.result?.files?.avatar
+        ? t("Your character is ready. Its files for Unreal Engine (.glb) and VRM apps (.vrm) are in {v0}", {v0: event.result.folder})
+        : t("Your character is ready.");
+    }
     else el("character-status").textContent = event.error || t("Operation stopped.");
     return true;
   }
