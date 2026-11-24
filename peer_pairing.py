@@ -24,6 +24,9 @@ import ssl
 import tempfile
 import threading
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 DISCOVERY_PORT = 49381
@@ -306,6 +309,12 @@ def discover(timeout=1.5):
 
 
 USAGE_MIN_INTERVAL = 1.0
+# Shared AI: what a paired device may ask this computer's Ollama, and nothing else.
+# Downloading, deleting or creating models, and Ollama's cloud models, are never offered.
+AI_ROUTES = {("GET", "/api/tags"), ("GET", "/api/version"), ("POST", "/api/show"), ("POST", "/api/chat")}
+MAX_AI_REQUEST = 16 * 1024 * 1024
+AI_TIMEOUT = 600
+AI_CONCURRENT = 2
 MAX_USAGE_BYTES = 8192
 
 
@@ -348,12 +357,20 @@ def sanitize_usage(value):
             "ram": {"total_bytes": total, "available_bytes": available}, "gpus": gpus, "loaded": loaded}
 
 
-class PairingHost:
-    """HTTPS pairing endpoint, plus an opt-in usage report for paired clients.
+def _cloud_model(name):
+    lowered = name.lower()
+    return lowered.endswith("-cloud") or lowered.endswith(":cloud")
 
-    No inference, chat, file or command endpoints exist. ``usage`` is a callable
-    returning this computer's load; when it is None, /usage does not exist."""
-    def __init__(self, bind_ip, data_directory, *, name="AI Assist", usage=None, port=0):
+
+class PairingHost:
+    """HTTPS pairing endpoint, plus opt-in services for paired clients.
+
+    ``usage`` is a callable returning this computer's load; when it is None, /usage
+    does not exist. ``ollama`` is this computer's Ollama URL (loopback only); when it
+    is None, /ollama/... does not exist. When set, paired clients may list models
+    and chat (AI_ROUTES) through the pinned TLS connection, and nothing else: no
+    files, commands, downloads or model changes."""
+    def __init__(self, bind_ip, data_directory, *, name="AI Assist", usage=None, port=0, ollama=None):
         if not permitted_ipv4(bind_ip, loopback=True):
             raise PairingError("Bind to one explicit private LAN IPv4 address.")
         self.bind_ip = bind_ip
@@ -363,6 +380,14 @@ class PairingHost:
         self.node_id = hashlib.sha256(self.fingerprint.encode()).hexdigest()[:24]
         self.name = name[:64]
         self.usage = usage
+        if ollama is not None:
+            parsed = urllib.parse.urlsplit(ollama)
+            if parsed.scheme != "http" or not permitted_ipv4(parsed.hostname or "", loopback=True) \
+                    or not ipaddress.IPv4Address(parsed.hostname).is_loopback:
+                raise PairingError("Shared AI forwards only to Ollama on this computer (http://127.0.0.1:port).")
+            ollama = f"http://{parsed.hostname}:{parsed.port or 11434}"
+        self.ollama = ollama
+        self._ai_slots = threading.BoundedSemaphore(AI_CONCURRENT)
         self._usage_lock = threading.Lock()
         self._usage_seen = {}
         host = self
@@ -375,18 +400,103 @@ class PairingHost:
             def log_message(self, *_args):
                 pass  # Never log secret request bodies.
 
+            def _paired_client(self):
+                """The paired client's ID when this request carries its secret token, else None."""
+                if self.headers.get("Origin") or not permitted_ipv4(self.client_address[0], loopback=True):
+                    return None
+                client = self.headers.get("X-AI-Assist-Client", "")
+                auth = self.headers.get("Authorization", "")
+                token = auth[7:] if auth.startswith("Bearer ") else ""
+                return client if host.store.authenticate_client(client, token) else None
+
+            def _json_reply(self, status, data):
+                payload = _json_packet(data)
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+            def _shared_ai(self, method):
+                route = self.path[len("/ollama"):]
+                if host.ollama is None or (method, route) not in AI_ROUTES:
+                    self.send_error(404)
+                    return
+                if self._paired_client() is None:
+                    self.send_error(403)
+                    return
+                body = None
+                if method == "POST":
+                    try:
+                        size = int(self.headers.get("Content-Length", "-1"))
+                    except ValueError:
+                        size = -1
+                    if size < 2 or size > MAX_AI_REQUEST:
+                        self.send_error(413)
+                        return
+                    body = self.rfile.read(size)
+                    try:
+                        request = json.loads(body)
+                    except (UnicodeError, ValueError):
+                        self.send_error(400)
+                        return
+                    model = request.get("model") if isinstance(request, dict) else None
+                    if not isinstance(model, str) or not model.strip():
+                        self.send_error(400)
+                        return
+                    if _cloud_model(model):
+                        self._json_reply(403, {"error": "Cloud models are not shared. Choose a model on this computer."})
+                        return
+                if not host._ai_slots.acquire(blocking=False):
+                    self._json_reply(429, {"error": "This computer is already answering other devices. Try again shortly."})
+                    return
+                try:
+                    # Answers can take minutes; the pairing handler's short timeout is for pairing only.
+                    self.connection.settimeout(AI_TIMEOUT)
+                    forward = urllib.request.Request(host.ollama + route, data=body, method=method,
+                                                     headers={"Content-Type": "application/json"} if body else {})
+                    try:
+                        upstream = urllib.request.urlopen(forward, timeout=AI_TIMEOUT)
+                    except urllib.error.HTTPError as error:
+                        detail = error.read(4096)
+                        error.close()
+                        self.send_response(error.code)
+                        self.send_header("Content-Type", "application/json")
+                        self.send_header("Content-Length", str(len(detail)))
+                        self.end_headers()
+                        self.wfile.write(detail)
+                        return
+                    except (OSError, urllib.error.URLError):
+                        self._json_reply(502, {"error": "Ollama is not running on the shared computer."})
+                        return
+                    with upstream:
+                        self.send_response(200)
+                        self.send_header("Content-Type", upstream.headers.get("Content-Type", "application/json"))
+                        self.send_header("Cache-Control", "no-store")
+                        self.end_headers()
+                        # Stream as Ollama writes, so the reply appears word by word on the other device.
+                        while True:
+                            chunk = upstream.read1(65536) if hasattr(upstream, "read1") else upstream.read(65536)
+                            if not chunk:
+                                break
+                            self.wfile.write(chunk)
+                            self.wfile.flush()
+                except (OSError, ssl.SSLError):
+                    pass  # The other device hung up or stopped the answer.
+                finally:
+                    host._ai_slots.release()
+
             def do_GET(self):
+                if self.path.startswith("/ollama/"):
+                    self._shared_ai("GET")
+                    return
                 # Live usage for paired clients only: TLS, a paired ID and its secret token.
                 if self.path != "/usage" or host.usage is None:
                     self.send_error(404)
                     return
-                if self.headers.get("Origin") or not permitted_ipv4(self.client_address[0], loopback=True):
-                    self.send_error(403)
-                    return
-                client = self.headers.get("X-AI-Assist-Client", "")
-                auth = self.headers.get("Authorization", "")
-                token = auth[7:] if auth.startswith("Bearer ") else ""
-                if not host.store.authenticate_client(client, token):
+                client = self._paired_client()
+                if client is None:
                     self.send_error(403)
                     return
                 now = time.monotonic()
@@ -408,6 +518,9 @@ class PairingHost:
                 self.wfile.write(payload)
 
             def do_POST(self):
+                if self.path.startswith("/ollama/"):
+                    self._shared_ai("POST")
+                    return
                 if (self.path != "/pair" or self.headers.get("Origin") or
                         self.headers.get("Content-Type", "").split(";")[0].strip() != "application/json"):
                     self.send_error(403)
@@ -558,6 +671,62 @@ def fetch_usage(record, client_id, timeout=2.0):
         raise PeerOffline(f"Could not reach this device: {exc}") from exc
     finally:
         conn.close()
+
+
+def open_shared_ai(record, client_id, method, path, body=None, timeout=AI_TIMEOUT):
+    """Send one request to a paired computer's shared Ollama and return the open response.
+
+    The TLS certificate must match the one pinned at pairing time before the token
+    is sent. The caller reads the response (it streams for /api/chat) and closes it.
+    """
+    if (method, path) not in AI_ROUTES:
+        raise PairingError("Only listing models and chatting are shared.")
+    if not isinstance(record, dict):
+        raise PairingError("Invalid paired peer record.")
+    address, port, token, pinned = (record.get(key) for key in ("address", "port", "token", "fingerprint"))
+    if not permitted_ipv4(address, loopback=True) or type(port) is not int or not 1 <= port <= 65535:
+        raise PairingError("Refusing a non-LAN address or invalid port.")
+    if not _safe_id(client_id) or not isinstance(token, str) or not isinstance(pinned, str) or len(pinned) != 64:
+        raise PairingError("Invalid paired peer record.")
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE  # Pinned explicitly below, before any credential is sent.
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    conn = http.client.HTTPSConnection(address, port, timeout=timeout, context=context)
+    try:
+        conn.connect()
+        fingerprint = hashlib.sha256(conn.sock.getpeercert(binary_form=True)).hexdigest()
+        if not hmac.compare_digest(fingerprint, pinned):
+            raise PairingError("This device's certificate changed. Pair it again.")
+        headers = {"X-AI-Assist-Client": client_id, "Authorization": "Bearer " + token, "Accept": "application/json"}
+        payload = None
+        if body is not None:
+            payload = json.dumps(body).encode("utf-8")
+            headers["Content-Type"] = "application/json"
+        conn.request(method, "/ollama" + path, body=payload, headers=headers)
+        response = conn.getresponse()
+    except (OSError, ssl.SSLError, http.client.HTTPException) as exc:
+        conn.close()
+        raise PeerOffline(f"Could not reach this device: {exc}") from exc
+    except PairingError:
+        conn.close()
+        raise
+    if response.status == 200:
+        return response
+    detail = response.read(4096)
+    conn.close()
+    try:
+        message = json.loads(detail).get("error")
+    except (ValueError, AttributeError):
+        message = None
+    # Ollama's own errors (such as an unknown model) carry a JSON message; a plain 404 means sharing is off.
+    if response.status == 404 and not message:
+        raise AIUnavailable("This device is not sharing its AI right now.")
+    raise PairingError(message or f"The shared computer refused the request (HTTP {response.status}).")
+
+
+class AIUnavailable(PairingError):
+    pass
 
 
 class UsageUnavailable(PairingError):
