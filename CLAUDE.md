@@ -29,7 +29,7 @@ This repository is public: keep secrets and personal details out of this file.
 - `gh` is not installed. `git push` works. Read pull requests and check runs through the public REST API with `curl`. The owner opens a new pull request from a link like `https://github.com/LucaBeretta/AI_assist/compare/main...BRANCH?expand=1`.
 - Keep the owner's checkout on `main` and work on pull request branches in separate worktrees.
 
-## State on 2026-11-24
+## State on 2026-11-24 (evening)
 
 - Merged on 21 November:
   - LucaBeretta/AI_assist#11 (Luigi): chat streaming moved into `app_core/chat_service.py`; settings reorganised.
@@ -47,12 +47,15 @@ This repository is public: keep secrets and personal details out of this file.
   - LucaBeretta/AI_assist#31: Developer works on the scene open in Blender through an add-on (`blender_addon/ai_assist_bridge.py`, `blender_bridge.py`). It is off until Connect is clicked, listens on 127.0.0.1 only, and every change is approved.
   - LucaBeretta/AI_assist#28: pairing and approval prompts in Mission Control, NVIDIA GPU temperature and power draw, and the tap-to-join NFC sticker artwork. A live check with two computers is still outstanding.
   - LucaBeretta/AI_assist#33: chat reads also retry briefly on Windows (`app_core.paths.read_bytes_retrying`).
-  - LucaBeretta/AI_assist#34: `character_builder.py` and `blender_character.py` build the person's own 3D character with the Blender on this computer. There is no screen for it yet.
+  - LucaBeretta/AI_assist#34, #38 and #40: the person's own 3D character, built by the Blender on this computer (`character_builder.py`, `blender_character.py`) and offered on the first-run page (`webui/character.py`, `welcome.js`). It has a 17-bone humanoid skeleton named as in VRM 1.0, rests in a T-pose and is saved as `character.glb` (for Unreal Engine) and `character.vrm` (`character_builder.vrm_from_glb`; VRM terms start at the most careful settings).
   - LucaBeretta/AI_assist#36 and #37: model download sizes in decimal GB, as ollama.com shows them (RAM and VRAM stay binary); sharper Quick animation photos, with a Node test of `photo-shader.js`.
   - LucaBeretta/AI_assist#24: a non-modal "Was this useful?" prompt after a saved answer or a finished Developer task. Answers go to a local journal, incognito chats are left out, and shared memory changes only with an explicit opt-in.
-  - LucaBeretta/AI_assist#26, #32 and #35: the first part of the network's **use** layer (see below).
+  - LucaBeretta/AI_assist#26, #32, #35, #41 and #42: the network's **use** layer (see below).
+  - LucaBeretta/AI_assist#39: optional 3D sound for Quick animation clips (`spatial-sound.js`: Web Audio HRTF, recorded as a stereo track).
+  - LucaBeretta/AI_assist#43: a master switch between the classic look and a 3D "cockpit" (`cockpit.css`, `cockpit.js`, the cube button, Settings > Look), saved as `look` in `webui.settings` and read through `web_preferences()`. It is direction B of the owner's design canvas https://claude.ai/artifact/EoqVDsFwyNNjE8pZbunhCH.
 - Waiting on the owner:
-  - Delete the leftover branch `live-check-huggingface` on GitHub; cloud sessions cannot delete branches.
+  - Delete leftover branches on GitHub (cloud sessions cannot): `live-check-huggingface`, `ai-network-use` (an earlier copy of #42), and any merged branch.
+  - Try the AI network on the real PC and Mac (steps in #41 and #42); nothing has been checked between two real computers yet.
 - Five old branches that were never merged are archived as tags under `archive/`: `modernization/web-workstation`, `integration/compute-dashboard-web`, `code-quality-pass`, `feature/continuous-user-feedback` (closed: no feedback prompt after replies and tasks; #24 later restored the idea on current `main`) and `mac-mission-control` (split into #11 and `mac-mission-control-only`). Each tag's message says why. Restore one with `git push origin "archive/NAME^{commit}:refs/heads/NAME"`.
 - `docs/modernization-backlog.md` is marked historical. The other milestone documents (`architecture-audit.md`, `architecture-decision.md`) also predate the removal of Tk.
 
@@ -69,15 +72,18 @@ There are three layers:
 
 1. **See**: built. The Mission Control network scan in `lan_devices.py` runs only when the person clicks Scan.
 2. **Monitor**: built. Paired devices can share live CPU, RAM and GPU load over TLS after PIN pairing (`peer_pairing.py`, `webui/sharing.py`). `share_usage.py` does the same for computers without a screen.
-3. **Use**: started, with no screen yet. A paired computer runs AI for another one, for example a Windows PC with a powerful graphics card serving a Mac.
+3. **Use**: built. A paired computer runs AI for another one, for example a Windows PC with a powerful graphics card serving a Mac.
    - `PairingHost(ollama="http://127.0.0.1:11434")` lets a paired device list models and chat with this computer's Ollama through the pinned-TLS pairing channel (#32). `open_shared_ai` is the client side.
    - Only `/api/tags`, `/api/version`, `/api/show` and `/api/chat` are forwarded. Chat requests are data only (`peer_inference_contract.validate_request`, #26), and this computer writes Ollama's request itself. Cloud models are refused.
    - Pairing alone is not enough: each device needs its own permission (`TrustStore.allow_ai`), which unpairing removes.
    - `ai_network.py` (#35) maps this computer and the paired ones, with each one's models, load and status in plain words. It picks a computer with `compute_routing.choose_route`: this computer by default, never a silent fallback.
-   - Nothing turns sharing on yet. Next come the switch on the sharing computer and the "Compute location" control (This device / Auto / Choose device) planned in `docs/compute-routing.md`.
+   - The sharing computer ticks "Also let devices I allow use this computer's AI" in LAN pairing (#41: `set_sharing(share_ai=...)`, `pairing_worker.py --share-ai`, off on every launch) and one tick per paired device (`allow_shared_ai`).
+   - The other computer sees the shared models in the chat's model list under "Paired computer ..." (#42). A chat's backend is then `peer:<id>`: `app_core/shared_ai.py` sends text-only messages over the pinned TLS channel and streams the answer; pictures stay local. It works on a computer without its own Ollama.
+   - Not built yet: the automatic "Compute location" choice (Auto) planned in `docs/compute-routing.md`; `ai_network.py` and `compute_routing.py` are still unused by the screens.
+   - Keeping sharing on across restarts would break the rule that LAN listeners never start at startup; it needs the owner's and Luigi's decision.
    - An early Mac -> Windows prototype, built on the removed Tk interface, is in the `archive/integration/compute-dashboard-web` tag (`lan_inference.py`, `lan_client.py`, `docs/mac-windows-lan-inference.md`): a reference, not code to merge.
 
-Pointing AI Assist at another computer's Ollama URL also works, but that connection is unencrypted and unauthenticated. The paired route replaces it once it has a screen.
+Pointing AI Assist at another computer's Ollama URL also works, but that connection is unencrypted and unauthenticated. The paired route is the safe way.
 
 The design is local-network only: no cloud relay and no router port-forwarding. Reaching a home machine from outside would be a separate decision for the owner.
 
@@ -96,7 +102,7 @@ The design is local-network only: no cloud relay and no router port-forwarding. 
   - a `src/` and `tests/` layout;
   - splitting `webui/app.py` and `app.js`;
   - branch protection that requires the **Tests** and **macOS desktop checks** workflows to pass before merging into `main`.
-- A plain-language explainer page made for the owner: https://claude.ai/artifact/1UxAFvr1TBtcK1K6YjB6Q6. Last updated early on 24 November (Hugging Face, Blender, Generate, Mission Control, and the network's see / monitor / use steps). It does not yet cover #24, #28 or #31 to #37.
+- A plain-language explainer page made for the owner: https://claude.ai/artifact/1UxAFvr1TBtcK1K6YjB6Q6. Last updated early on 24 November (Hugging Face, Blender, Generate, Mission Control, and the network's see / monitor / use steps). It does not yet cover #24, #28 or #31 to #43.
 
 ## Running the app in a cloud Linux container
 
