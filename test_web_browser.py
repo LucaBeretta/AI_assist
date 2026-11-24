@@ -12,8 +12,8 @@ import unittest
 import urllib.request
 
 import network_gate
-from webui import browser
-from webui.browser import BrowserError, BrowserSession, _Page, address_url, checked_url, plain_text
+from webui import web_browser as browser
+from webui.web_browser import BrowserError, BrowserSession, _Page, address_url, checked_url, plain_text
 
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
@@ -318,7 +318,7 @@ class SessionTests(unittest.TestCase):
 class ApiTests(unittest.TestCase):
     def test_errors_come_back_as_plain_json(self):
         with tempfile.TemporaryDirectory() as folder:
-            api = browser.BrowserApi()
+            api = browser.WebBrowserApi()
             api._store = SimpleNamespace(directory=Path(folder))
             api._browser_session = BrowserSession(fetch=FakeWeb({
                 "https://example.com/": response("https://example.com/", "<title>Hi</title><p>hello</p>")}))
@@ -377,11 +377,11 @@ const window = {addEventListener() {}, i18n: {t: (text, vars = {}) => text.repla
   }}};
 vm.runInNewContext(fs.readFileSync(process.argv[2], 'utf8'), {window, document, URL, FormData: class {}, File: class {}, Map, Set, Number, String, Array, Object, Boolean, Error});
 (async () => {
-  await window.browserui.open('example.com');
+  await window.webbrowser.open('example.com');
   assert.equal(JSON.stringify(calls[0]), JSON.stringify(['example.com', {typed: true, reading: true, referrer: null, language: 'it'}]));
-  const page = nodes.get('browser-page').shadow;
+  const page = nodes.get('web-page').shadow;
   const [sheet, ...all] = [...page.walk()].slice(1);
-  assert.equal(sheet.localName + ' ' + sheet.href, 'link browser-page.css');
+  assert.equal(sheet.localName + ' ' + sheet.href, 'link web-page.css');
   assert.equal(all.filter(node => ['script', 'iframe'].includes(node.localName)).length, 0);
   assert.ok(!all.some(node => 'href' in node || 'onclick' in node || node.attributes.style || node.attributes.onmouseover));
   const links = all.filter(node => node.localName === 'a');
@@ -389,8 +389,8 @@ vm.runInNewContext(fs.readFileSync(process.argv[2], 'utf8'), {window, document, 
   assert.ok(!all.some(node => node.localName === 'img'));  // neither image is data the window may show
   assert.deepEqual(all.filter(node => node.className === 'image-placeholder').map(node => node.textContent), ['pic', 'svg']);
   assert.equal(all.find(node => node.localName === 'p').id, 'para');
-  assert.equal(nodes.get('browser-address').value, 'https://example.com/');
-  assert.equal(nodes.get('browser-lock').hidden, false);
+  assert.equal(nodes.get('web-address').value, 'https://example.com/');
+  assert.equal(nodes.get('web-lock').hidden, false);
   process.stdout.write('browser frontend ok\n');
 })().catch(error => { console.error(error); process.exitCode = 1; });
 '''
@@ -402,7 +402,7 @@ class FrontendTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             harness = Path(folder) / "harness.js"
             harness.write_text(FRONTEND, encoding="utf-8")
-            script = Path(__file__).parent / "webui" / "static" / "browser.js"
+            script = Path(__file__).parent / "webui" / "static" / "web-browser.js"
             result = subprocess.run(["node", str(harness), str(script)], capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("browser frontend ok", result.stdout)

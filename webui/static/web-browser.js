@@ -1,10 +1,10 @@
-/* Browser view: tabs, history and a reading view of web pages.
+/* The Web section: tabs, history and a reading view of web pages.
    Python fetches every page through the internet gate and sends back a tree of allowlisted elements.
    This file never gives the window a web address to load: links keep theirs in data-href, images
    arrive as data, and forms are read here and opened as addresses. */
 "use strict";
 
-window.browserui = (() => {
+window.webbrowser = (() => {
   const el = id => document.getElementById(id);
   const t = (message, vars) => window.i18n?.t?.(message, vars) ?? message;
   const gate = text => window.i18n?.gate?.(text) || text;
@@ -37,7 +37,7 @@ window.browserui = (() => {
   const entryOf = tab => tab?.entries[tab.index] || null;
   function remember() {
     const entry = entryOf(active);
-    if (entry && !el("browser-page").hidden) entry.scroll = el("browser-viewport").scrollTop;
+    if (entry && !el("web-page").hidden) entry.scroll = el("web-viewport").scrollTop;
   }
   function select(tab) {
     if (tab !== active) remember();
@@ -221,12 +221,12 @@ window.browserui = (() => {
 
   function setupPage() {
     if (shadow) return;
-    const host = el("browser-page");
+    const host = el("web-page");
     scoped = Boolean(host.attachShadow);
     shadow = scoped ? host.attachShadow({mode: "open"}) : host;
     const sheet = document.createElement("link");
     sheet.rel = "stylesheet";
-    sheet.href = "browser-page.css";
+    sheet.href = "web-page.css";
     page = document.createElement("article");
     page.className = "page";
     shadow.append(sheet, page);
@@ -277,28 +277,28 @@ window.browserui = (() => {
     target?.scrollIntoView?.({block: "start"});
   }
   function hover(href) {
-    el("browser-hover").textContent = href;
-    el("browser-hover").hidden = !href;
+    el("web-hover").textContent = href;
+    el("web-hover").hidden = !href;
   }
 
   // ---------- rendering ----------
   function renderTabs() {
-    const strip = el("browser-tabs");
+    const strip = el("web-tabs");
     strip.replaceChildren(...tabs.map(tab => {
       const item = document.createElement("div");
-      item.className = "browser-tab" + (tab.loading ? " loading" : "");
+      item.className = "web-tab" + (tab.loading ? " loading" : "");
       item.setAttribute("role", "tab");
       item.setAttribute("aria-selected", tab === active ? "true" : "false");
       const title = document.createElement("button");
       title.type = "button";
-      title.className = "browser-tab-title";
+      title.className = "web-tab-title";
       const entry = entryOf(tab);
       title.textContent = tab.loading && !entry ? t("Loading…") : entry?.title || t("New tab");
       title.title = entry?.url || "";
       title.addEventListener("click", () => select(tab));
       const close = document.createElement("button");
       close.type = "button";
-      close.className = "browser-tab-close";
+      close.className = "web-tab-close";
       close.textContent = "×";
       close.setAttribute("aria-label", t("Close tab"));
       close.title = t("Close tab");
@@ -324,40 +324,40 @@ window.browserui = (() => {
         images = true;
       }
     }
-    el("browser-bar-text").textContent = messages.join(" ");
-    el("browser-show-images").hidden = !images;
-    el("browser-bar").hidden = !messages.length;
+    el("web-bar-text").textContent = messages.join(" ");
+    el("web-show-images").hidden = !images;
+    el("web-bar").hidden = !messages.length;
   }
   function render(showPage = false) {
     if (!active) return;
     const entry = entryOf(active);
     const info = entry?.page;
     renderTabs();
-    el("browser-back").disabled = active.index <= 0;
-    el("browser-forward").disabled = active.index >= active.entries.length - 1;
+    el("web-back").disabled = active.index <= 0;
+    el("web-forward").disabled = active.index >= active.entries.length - 1;
     const loading = active.loading;
-    el("browser-reload").setAttribute("aria-label", loading ? t("Stop") : t("Reload"));
-    el("browser-reload").title = loading ? t("Stop") : t("Reload");
-    el("browser-reload").classList?.toggle?.("is-stop", loading);
-    el("browser-progress").hidden = !loading;
-    const address = el("browser-address");
+    el("web-reload").setAttribute("aria-label", loading ? t("Stop") : t("Reload"));
+    el("web-reload").title = loading ? t("Stop") : t("Reload");
+    el("web-reload").classList?.toggle?.("is-stop", loading);
+    el("web-progress").hidden = !loading;
+    const address = el("web-address");
     if (document.activeElement !== address || showPage) {
       address.value = loading ? active.pending : active.error ? active.failed?.address || ""
         : info ? info.url + (entry.fragment ? "#" + entry.fragment : "") : "";
     }
-    const lock = el("browser-lock");
+    const lock = el("web-lock");
     lock.hidden = !info;
     lock.classList?.toggle?.("insecure", Boolean(info && !info.secure));
     lock.title = info ? (info.secure ? t("Encrypted connection (https)") : t("Not encrypted (http): the network can read this page")) : "";
-    el("browser-reading").disabled = !info?.can_read;
-    el("browser-reading").setAttribute("aria-pressed", info?.reading ? "true" : "false");
-    el("browser-ask").disabled = !info;
+    el("web-reading").disabled = !info?.can_read;
+    el("web-reading").setAttribute("aria-pressed", info?.reading ? "true" : "false");
+    el("web-ask").disabled = !info;
     renderBar();
     if (!showPage) return;
-    el("browser-home").hidden = Boolean(info || active.error || active.loading);
-    el("browser-error").hidden = !active.error;
-    el("browser-error-text").textContent = active.error;
-    el("browser-page").hidden = !info || Boolean(active.error);
+    el("web-home").hidden = Boolean(info || active.error || active.loading);
+    el("web-error").hidden = !active.error;
+    el("web-error-text").textContent = active.error;
+    el("web-page").hidden = !info || Boolean(active.error);
     hover("");
     if (!info || active.error) return;
     setupPage();
@@ -366,7 +366,7 @@ window.browserui = (() => {
     const fragment = document.createDocumentFragment();
     for (const child of children) fragment.append(build(child, entry));
     page.replaceChildren(fragment);
-    const viewport = el("browser-viewport");
+    const viewport = el("web-viewport");
     if (entry.scroll) viewport.scrollTop = entry.scroll;
     else if (entry.fragment) scrollTo(entry.fragment);
     else viewport.scrollTop = 0;
@@ -374,7 +374,7 @@ window.browserui = (() => {
 
   // ---------- toolbar ----------
   function focusAddress() {
-    const address = el("browser-address");
+    const address = el("web-address");
     address.focus?.();
     address.select?.();
   }
@@ -396,7 +396,7 @@ window.browserui = (() => {
   async function ask() {
     const entry = entryOf(active);
     if (!entry?.page || !window.app?.newChat || !window.app?.attachFiles) return;
-    const button = el("browser-ask");
+    const button = el("web-ask");
     button.disabled = true;
     try {
       const result = await call("browser_text", entry.page.id);
@@ -410,30 +410,30 @@ window.browserui = (() => {
     } finally { button.disabled = !entryOf(active)?.page; }
   }
 
-  el("browser-toolbar").addEventListener("submit", event => {
+  el("web-toolbar").addEventListener("submit", event => {
     event.preventDefault();
-    const value = el("browser-address").value.trim();
+    const value = el("web-address").value.trim();
     if (!value) return;
     if (!active) newTab(value); else go(active, value);
-    el("browser-address").blur?.();
+    el("web-address").blur?.();
   });
-  el("browser-address").addEventListener("focus", () => el("browser-address").select?.());
-  el("browser-address").addEventListener("keydown", event => {
-    if (event.key === "Escape") { event.preventDefault(); render(); el("browser-address").blur?.(); }
+  el("web-address").addEventListener("focus", () => el("web-address").select?.());
+  el("web-address").addEventListener("keydown", event => {
+    if (event.key === "Escape") { event.preventDefault(); render(); el("web-address").blur?.(); }
   });
-  el("browser-back").addEventListener("click", () => move(active, -1));
-  el("browser-forward").addEventListener("click", () => move(active, 1));
-  el("browser-reload").addEventListener("click", () => active?.loading ? stop(active) : reload(active));
-  el("browser-retry").addEventListener("click", () => reload(active));
-  el("browser-new-tab").addEventListener("click", () => newTab());
-  el("browser-reading").addEventListener("click", () => toggleReading());
-  el("browser-ask").addEventListener("click", () => ask());
-  el("browser-show-images").addEventListener("click", () => {
+  el("web-back").addEventListener("click", () => move(active, -1));
+  el("web-forward").addEventListener("click", () => move(active, 1));
+  el("web-reload").addEventListener("click", () => active?.loading ? stop(active) : reload(active));
+  el("web-retry").addEventListener("click", () => reload(active));
+  el("web-new-tab").addEventListener("click", () => newTab());
+  el("web-reading").addEventListener("click", () => toggleReading());
+  el("web-ask").addEventListener("click", () => ask());
+  el("web-show-images").addEventListener("click", () => {
     const entry = entryOf(active);
     if (entry) loadImages(active, entry, "other");
   });
   document.addEventListener("keydown", event => {
-    if (el("browser-view").hidden || event.defaultPrevented) return;
+    if (el("web-view").hidden || event.defaultPrevented) return;
     const ctrl = event.ctrlKey || event.metaKey;
     const key = String(event.key || "").toLowerCase();
     const typing = /^(input|textarea|select)$/i.test(document.activeElement?.tagName || "");

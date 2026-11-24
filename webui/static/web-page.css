@@ -1,4 +1,4 @@
-/* A web page in the Browser view. Loaded inside the page's shadow root, so none of it reaches the app,
+/* A web page in the Web section. Loaded inside the page's shadow root, so none of it reaches the app,
    and the app's colours (CSS variables) carry over into it. */
 
 :host { display: block; }

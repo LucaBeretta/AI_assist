@@ -1211,7 +1211,7 @@ window.app = (() => {
     [t("Developer"), "", () => showView("dev")],
     [t("Models"), "", () => showView("models")],
     [t("Generate"), "", () => showView("generate")],
-    [t("Browser"), "", () => showView("browser")],
+    [t("Web"), "", () => showView("web")],
     [t("Mission Control"), "", () => openMissionControl()],
     [t("Settings"), t("Ctrl+,"), () => openSettings()],
     [t("Switch theme"), t("Ctrl+Shift+L"), () => toggleTheme()],
@@ -1275,7 +1275,7 @@ window.app = (() => {
     welcome: ["welcome-view", null],
     capabilities: ["capabilities-view", "nav-capabilities"],
     generate: ["generate-view", "nav-generate"],
-    browser: ["browser-view", "nav-browser"],
+    web: ["web-view", "nav-web"],
   };
   function showView(name) {
     for (const [key, [view, nav]] of Object.entries(views)) {
@@ -1289,14 +1289,14 @@ window.app = (() => {
     if (name === "dev") window.devui?.onShow?.();
     if (name === "models") window.modelsui?.onShow?.();
     if (name === "capabilities") window.parityui?.capabilities();
-    if (name === "browser") window.browserui?.onShow?.();
+    if (name === "web") window.webbrowser?.onShow?.();
   }
   element("nav-chats").addEventListener("click", () => showView("chat"));
   element("nav-dev").addEventListener("click", () => showView("dev"));
   element("nav-models").addEventListener("click", () => showView("models"));
   element("nav-capabilities").addEventListener("click", () => showView("capabilities"));
   element("nav-generate").addEventListener("click", () => showView("generate"));
-  element("nav-browser").addEventListener("click", () => showView("browser"));
+  element("nav-web").addEventListener("click", () => showView("web"));
   // Mission Control opens the live Compute window (for a second screen); it is not a view in this window.
   const openMissionControl = () => call("open_compute_window").catch(showError);
   element("open-mission-control").addEventListener("click", openMissionControl);

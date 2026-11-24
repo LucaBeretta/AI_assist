@@ -830,8 +830,8 @@ class BrowserSession:
 _session_lock = threading.Lock()
 
 
-class BrowserApi:
-    """Mixed into the desktop API: the Browser section of the sidebar."""
+class WebBrowserApi:
+    """Mixed into the desktop API: the Web section of the sidebar."""
 
     def _browser(self):
         with _session_lock:
