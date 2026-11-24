@@ -90,7 +90,10 @@
       const source = document.createElement("canvas");
       source.width = canvas.width;
       source.height = canvas.height;
-      source.getContext("2d").drawImage(image, 0, 0, source.width, source.height);
+      const context = source.getContext("2d");
+      context.imageSmoothingEnabled = true;
+      context.imageSmoothingQuality = "high";  // a sharper shrink for large photos
+      context.drawImage(image, 0, 0, source.width, source.height);
       renderer ??= window.photoShader.create(canvas);
       renderer.setImage(source);
       drawFrame(0);

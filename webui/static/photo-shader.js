@@ -41,7 +41,8 @@ void main() {
   }
 
   vec4 pixel = texture(photo, uv + 0.5);
-  color = vec4(mix(vec3(0.06), pixel.rgb, pixel.a), 1.0);
+  // The texture is premultiplied, so filtering never pulls hidden colour out of see-through edges.
+  color = vec4(pixel.rgb + vec3(0.06) * (1.0 - pixel.a), 1.0);
 }`;
 
   function compile(gl, type, source) {
@@ -114,6 +115,7 @@ void main() {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
 
     function requireContext() {
       if (disposed || gl.isContextLost()) {
