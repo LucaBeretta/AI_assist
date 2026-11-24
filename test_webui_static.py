@@ -149,17 +149,21 @@ class StaticTests(unittest.TestCase):
         self.run_scenario(r'''
         const api=window.pywebview.api;
         api.opencode_state=async()=>({ok:true,installed:false});
-        api.open_opencode=async folder=>{calls.push(['opencode',folder]);return {ok:true};};
+        api.open_opencode=async (folder,model)=>{calls.push(['opencode',folder,model]);return {ok:true};};
         vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'opencode.js'),'utf8'),{document,window,String,Error});
         await new Promise(resolve=>setImmediate(resolve));
-        assert.equal(elements.get('opencode-open').disabled,true);
+        assert.notEqual(elements.get('opencode-open').disabled,true);  // stays clickable: a click checks again
         assert.match(elements.get('opencode-status').textContent,/opencode\.ai/);
         api.opencode_state=async()=>({ok:true,installed:true});
         await window.opencodeui.refresh();
-        assert.equal(elements.get('opencode-open').disabled,false);
+        assert.equal(elements.get('opencode-status').textContent,'');
         document.getElementById('dev-project').value='  /home/luca/site  ';
+        document.getElementById('model').value='qwen3:8b';
         await elements.get('opencode-open').listeners.click();
-        assert.equal(JSON.stringify(calls.at(-1)),'["opencode","/home/luca/site"]');
+        assert.equal(JSON.stringify(calls.at(-1)),'["opencode","/home/luca/site","qwen3:8b"]');
+        document.getElementById('model').value=JSON.stringify(['peer:pc','qwen3:32b']);
+        await elements.get('opencode-open').listeners.click();
+        assert.equal(JSON.stringify(calls.at(-1)),'["opencode","/home/luca/site",null]');  // only models on this computer
         assert.equal(elements.get('opencode-status').textContent,'OpenCode opened in a new window.');
         api.open_opencode=async()=>({ok:false,error:'Choose a project folder first.'});
         await elements.get('opencode-open').listeners.click();
