@@ -131,7 +131,20 @@ class StaticTests(unittest.TestCase):
         elements.get('sharing-usage').checked=false;
         elements.get('sharing-enabled').checked=true;document.getElementById('sharing-address').value='192.168.1.10';
         await elements.get('sharing-enabled').listeners.change();
-        assert.deepEqual(calls.at(-1),['sharing',true,'192.168.1.10',false]);
+        assert.deepEqual(calls.at(-1),['sharing',true,'192.168.1.10',false,false]);
+        // Sharing AI is its own choice, and each paired device needs its own tick.
+        window.pywebview.api.sharing_state=async()=>({ok:true,enabled:true,usage:false,ai:true,host:null,peers:{},clients:[{id:'abcdef0123456789',ai:false}]});
+        window.pywebview.api.allow_shared_ai=async (...args)=>{calls.push(['allow',...args]);return {ok:true,clients:[{id:'abcdef0123456789',ai:true}]};};
+        await window.sharingui.openSettings();
+        assert.equal(elements.get('sharing-ai').checked,true);
+        assert.equal(elements.get('sharing-clients-box').hidden,false);
+        assert.match(elements.get('sharing-clients').textContent,/abcdef01/);
+        const tick=elements.get('sharing-clients').children[0].children[0].children[0];
+        tick.checked=true;
+        await tick.listeners.change();
+        assert.deepEqual(calls.at(-1),['allow','abcdef0123456789',true]);
+        await elements.get('sharing-ai').listeners.change();
+        assert.deepEqual(calls.at(-1),['sharing',true,'192.168.1.10',false,true]);
         let handled = false;
         elements.get('pair-address').listeners.paste({
           clipboardData:{getData:()=> ' 192.168.1.20:49152 '},

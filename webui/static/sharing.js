@@ -2,7 +2,7 @@
 "use strict";
 window.sharingui = (() => {
   const el = id => document.getElementById(id);
-  const t = (key, vars = {}) => window.i18n ? window.i18n.t(key, vars) : key;
+  const t = (key, vars = {}) => window.i18n ? window.i18n.t(key, vars) : key.replace(/\{(\w+)\}/g, (_, name) => String(vars[name] ?? ""));
   let host = null, timer = null;
   const source = document.documentElement?.dataset?.computeSource === "window" ? ["compute"] : [];
   const pairedMessage = source.length ? "Device paired securely. Look for Live under Paired computers." :
@@ -15,6 +15,8 @@ window.sharingui = (() => {
   function render(state) {
     el("sharing-enabled").checked = Boolean(state.enabled);
     if (state.enabled) el("sharing-usage").checked = Boolean(state.usage);
+    if (state.enabled) el("sharing-ai").checked = Boolean(state.ai);
+    renderClients(state.clients || []);
     el("sharing-details").hidden = !state.enabled;
     el("sharing-new-pin").disabled = !state.enabled;
     host = state.host;
@@ -29,6 +31,27 @@ window.sharingui = (() => {
       const item = document.createElement("li"); item.textContent = `${id} · ${peer.address}:${peer.port}`; return item;
     }));
   }
+  function renderClients(clients) {
+    el("sharing-clients-box").hidden = !clients.length;
+    el("sharing-clients").replaceChildren(...clients.map(client => {
+      const item = document.createElement("li");
+      const label = document.createElement("label");
+      label.className = "check-row";
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.checked = Boolean(client.ai);
+      box.addEventListener("change", async () => {
+        box.disabled = true;
+        try { renderClients((await call("allow_shared_ai", client.id, box.checked)).clients || []); }
+        catch (error) { box.checked = !box.checked; box.disabled = false; el("sharing-status").textContent = error.message; }
+      });
+      const text = document.createElement("span");
+      text.textContent = t("Device {v0} may use this computer's AI", {v0: client.id.slice(0, 8)});
+      label.append(box, text);
+      item.append(label);
+      return item;
+    }));
+  }
   async function openSettings() {
     try { render(await call("sharing_state")); }
     catch (error) { el("sharing-status").textContent = error.message; }
@@ -36,13 +59,15 @@ window.sharingui = (() => {
   async function run(name, ...args) {
     el("sharing-enabled").disabled = true;
     el("sharing-usage").disabled = true;
+    el("sharing-ai").disabled = true;
     el("sharing-new-pin").disabled = true;
     el("pair-submit").disabled = true;
     el("sharing-status").textContent = t("Working…");
     try { await call(name, ...args, ...source); }
     catch (error) { el("sharing-status").textContent = error.message; await openSettings(); unlock(); }
   }
-  function unlock() { el("sharing-enabled").disabled = false; el("sharing-usage").disabled = false; el("pair-submit").disabled = false; }
+  function unlock() { el("sharing-enabled").disabled = false; el("sharing-usage").disabled = false; el("sharing-ai").disabled = false; el("pair-submit").disabled = false; }
+  const choices = () => [el("sharing-address").value.trim(), Boolean(el("sharing-usage").checked), Boolean(el("sharing-ai").checked)];
   function onEvent(event) {
     if (event.operation !== "sharing" || !event.type.startsWith("job_")) return false;
     if (event.type !== "job_progress") {
@@ -53,9 +78,10 @@ window.sharingui = (() => {
     }
     return true;
   }
-  el("sharing-enabled").addEventListener("change", () => run("set_sharing", el("sharing-enabled").checked, el("sharing-address").value.trim(), el("sharing-usage").checked));
-  // Changing the usage choice while pairing is on restarts the service with the new choice.
-  el("sharing-usage").addEventListener("change", () => { if (el("sharing-enabled").checked) run("set_sharing", true, el("sharing-address").value.trim(), el("sharing-usage").checked); });
+  el("sharing-enabled").addEventListener("change", () => run("set_sharing", el("sharing-enabled").checked, ...choices()));
+  // Changing the usage or AI choice while pairing is on restarts the service with the new choice.
+  el("sharing-usage").addEventListener("change", () => { if (el("sharing-enabled").checked) run("set_sharing", true, ...choices()); });
+  el("sharing-ai").addEventListener("change", () => { if (el("sharing-enabled").checked) run("set_sharing", true, ...choices()); });
   el("sharing-new-pin").addEventListener("click", () => run("new_pairing_pin"));
   el("pair-address").addEventListener("paste", event => {
     const endpoint = event.clipboardData?.getData("text").trim();
