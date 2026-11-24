@@ -21,6 +21,7 @@ from model_advisor import detect_hardware
 import model_advisor
 import model_library
 from webui.bridge import Bridge
+from webui.browser import BrowserApi
 from webui.developer import DeveloperTasks
 from app_core import photo_video
 from app_core.chat_service import ChatService
@@ -51,7 +52,6 @@ import lan_devices
 from app_core.hourly_status import HourlyStatusReport
 from webui.sharing import SharingApi
 from webui.character import CharacterApi
-from webui.browser import BrowserApi
 import network_gate
 
 
