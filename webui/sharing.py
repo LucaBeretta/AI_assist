@@ -201,7 +201,7 @@ class SharingApi:
                     "host": deepcopy(service.details) if enabled else None, "peers": self._paired_records()}
 
     @json_method
-    def set_sharing(self, enabled, address=None, share_usage=False):
+    def set_sharing(self, enabled, address=None, share_usage=False, window="main"):
         if type(enabled) is not bool or type(share_usage) is not bool:
             raise ValueError("Sharing must be true or false.")
         if enabled and (not isinstance(address, str) or not permitted_ipv4(address)):
@@ -231,20 +231,20 @@ class SharingApi:
         with self._lock:
             if self._closed or self._sharing_closed:
                 raise ValueError("The app is closing.")
-            return self._jobs.start("sharing", work, key="sharing")
+            return self._jobs.start("sharing", work, key="sharing", window="compute" if window == "compute" else "main")
 
     @json_method
-    def new_pairing_pin(self):
+    def new_pairing_pin(self, window="main"):
         def work(progress, cancel):
             with self._sharing_lock:
                 if not self._sharing.enabled or self._sharing_closed:
                     raise ValueError("Enable LAN sharing first.")
                 self._sharing_service.new_pin()
                 return self.sharing_state()
-        return self._jobs.start("sharing", work, key="sharing")
+        return self._jobs.start("sharing", work, key="sharing", window="compute" if window == "compute" else "main")
 
     @json_method
-    def pair_device(self, address, port, verification_code, pin):
+    def pair_device(self, address, port, verification_code, pin, window="main"):
         # The core validates the address, port, certificate code and PIN before connecting.
         def work(progress, cancel):
             if not network_gate.allow_external("Pair LAN device", str(address),
@@ -263,7 +263,7 @@ class SharingApi:
         with self._lock:
             if self._closed or self._sharing_closed:
                 raise ValueError("The app is closing.")
-            return self._jobs.start("sharing", work, key="sharing")
+            return self._jobs.start("sharing", work, key="sharing", window="compute" if window == "compute" else "main")
 
     def _close_sharing(self):
         self._sharing_closed = True

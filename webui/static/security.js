@@ -87,11 +87,11 @@ window.securityui = (() => {
   el("internet-dialog").addEventListener("keydown", event => {
     if (["Enter", "Escape"].includes(event.key)) { event.preventDefault(); event.stopPropagation?.(); respond("block"); }
   });
-  el("privacy-refresh").addEventListener("click", openSettings);
-  el("firewall-on").addEventListener("click", () => changeFirewall("on"));
-  el("firewall-off").addEventListener("click", () => changeFirewall("off"));
-  el("firewall-relock").addEventListener("click", () => changeFirewall("relock"));
-  el("firewall-lift").addEventListener("click", () => changeFirewall("lift", Number(el("firewall-minutes").value)));
+  el("privacy-refresh")?.addEventListener("click", openSettings);
+  el("firewall-on")?.addEventListener("click", () => changeFirewall("on"));
+  el("firewall-off")?.addEventListener("click", () => changeFirewall("off"));
+  el("firewall-relock")?.addEventListener("click", () => changeFirewall("relock"));
+  el("firewall-lift")?.addEventListener("click", () => changeFirewall("lift", Number(el("firewall-minutes").value)));
   window.addEventListener("languagechange", () => { if (approval) show({...approval, remaining_seconds: Math.max(0, (deadline - Date.now()) / 1000)}); });
   return {onEvent, openSettings, privacyText};
 })();

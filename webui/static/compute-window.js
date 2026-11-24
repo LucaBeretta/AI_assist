@@ -29,17 +29,25 @@ window.computewindow = (() => {
   }
   // Cube faces repeat the headline readings; unknown values stay a dash rather than a guess.
   const percent = value => typeof value === "number" && Number.isFinite(value) ? Math.round(value) + "%" : "–";
-  window.computeFaces = data => {
+  function renderFaces(data) {
     const raw = data?.snapshot || {}, values = data?.values || {};
     el("cube-cpu").textContent = percent(raw.cpu?.percent);
     const total = raw.ram?.total_bytes, free = raw.ram?.available_bytes;
     const known = typeof total === "number" && total > 0 && typeof free === "number";
     el("cube-ram").textContent = known ? percent(100 * (total - free) / total) : "–";
     el("cube-ram-detail").textContent = known ? ((total - free) / 2 ** 30).toFixed(1) + " / " + (total / 2 ** 30).toFixed(0) + " GiB" : "";
-    el("cube-gpu").textContent = percent(raw.gpus?.[0]?.percent);
-    el("cube-gpu-detail").textContent = String(values.gpus?.[0]?.name || "").replace(/\s*\(.*\)\s*$/, "");
+    const gpu = raw.gpus?.[0];
+    const temperature = Number.isFinite(gpu?.temperature_c) ? Math.round(gpu.temperature_c) + " °C" : "";
+    const power = Number.isFinite(gpu?.power_w) ? gpu.power_w.toFixed(1) + " W" : "";
+    const sensors = el("compute-gpu-sensors");
+    sensors.textContent = [temperature, power].filter(Boolean).join(" · ");
+    sensors.hidden = !sensors.textContent;
+    el("cube-gpu").textContent = percent(gpu?.percent);
+    const gpuDetail = el("cube-gpu-detail");
+    gpuDetail.title = values.gpus?.[0]?.name || "";
+    gpuDetail.textContent = temperature || gpuDetail.title.replace(/\s*\(.*\)\s*$/, "");
     el("cube-model").textContent = values.loaded?.[0] || t("No loaded models");
-  };
+  }
   // ---------- Network: devices on the local network, found only when Scan is clicked ----------
   const ICONS = {
     computer: "M4 5h16v10H4zM2 19h20", phone: "M8 2h8a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1zM11 18h2",
@@ -132,9 +140,22 @@ window.computewindow = (() => {
     const box = el("net-paired");
     box.replaceChildren(...(paired.length ? [node("p", "net-group", t("Paired computers")), ...paired.map(peerCard)] : []));
   }
+  const pairing = el("net-pairing");
+  pairing.addEventListener("toggle", () => { if (pairing.open) window.sharingui.openSettings(); });
+  window.app = {
+    onEvent(events) {
+      for (const event of events) {
+        if (event.type === "internet_approval" || event.type === "internet_closed") window.securityui.onEvent(event);
+        else window.sharingui.onEvent(event);
+      }
+    }
+  };
   el("net-scan").addEventListener("click", scanNetwork);
-  const facesBefore = window.computeFaces;
-  window.computeFaces = data => { paired = Array.isArray(data?.peers) ? data.peers : []; renderPaired(); facesBefore(data); };
+  window.computeFaces = data => {
+    paired = Array.isArray(data?.peers) ? data.peers : [];
+    renderPaired();
+    renderFaces(data);
+  };
   el("compute-fullscreen").addEventListener("click", toggleFullscreen);
   document.addEventListener?.("keydown", event => {
     if (event.key === "F11" || (event.key === "Escape" && fullscreen)) { event.preventDefault?.(); toggleFullscreen(); }

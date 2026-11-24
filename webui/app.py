@@ -256,6 +256,7 @@ class Api(SharingApi, PrivacyApi, ParityApi):
             self._settings = settings.save(self._store.directory, {**self._settings, "compute_window": value})
 
     def _compute_window_closed(self):
+        self._internet.block_pending(window="compute")
         try:
             self._compute_source(False, "window")
         except ValueError:
@@ -1355,7 +1356,8 @@ def main():
         # An absolute file URI does not enable pywebview's internal HTTP server.
         page = Path(__file__).resolve().parent / "static" / "index.html"
         desktop = Desktop()
-        bridge = Bridge(desktop.evaluate, autostart=False, on_flush=desktop.flush)
+        bridge = Bridge(desktop.evaluate, autostart=False, on_flush=desktop.flush, evaluate_compute=desktop.evaluate_compute,
+                        on_compute_failure=lambda: api._internet.block_pending(window="compute"))
         api = Api(bridge, store=store, desktop=desktop)
         preferences = settings.load(store.directory)
         screens = getattr(webview, "screens", [])

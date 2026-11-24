@@ -1,10 +1,7 @@
 """Inference providers: one interface over Ollama and Colibri.
 
-A provider answers four questions for any interface: which engine and server
-is this, which models does it serve, what does a model support, and stream an
-answer. The desktop window still drives engine lifecycles (start/stop, model
-loading) through its own mixins; these classes are what headless clients such
-as the web workspace use, and what the window can adopt piece by piece.
+Providers expose engine information, installed and running models, model
+capabilities, and streaming inference.
 """
 
 import dataclasses

@@ -9,6 +9,19 @@ import compute_telemetry
 from app_core.compute_values import display_bytes, format_snapshot, normalize_peer_rows, usage_percent
 
 
+class NvidiaTelemetryTests(unittest.TestCase):
+    @patch("compute_telemetry.subprocess.run")
+    @patch("compute_telemetry.shutil.which", return_value="nvidia-smi")
+    def test_reads_temperature_and_power_with_partial_sensor_support(self, which, run):
+        run.return_value.returncode = 0
+        run.return_value.stdout = "RTX 4090, 8, 17608, 24564, 31, 19.12\nGPU 2, 0, [N/A], [N/A], 25, [N/A]\n"
+        first, second = compute_telemetry._gpu_usage()
+        self.assertEqual(first["used_bytes"], 17608 * 1024 ** 2)
+        self.assertEqual((first["percent"], first["temperature_c"], first["power_w"]), (8, 31, 19.12))
+        self.assertEqual((second["percent"], second["temperature_c"], second["power_w"]), (0, 25, None))
+        self.assertIsNone(second["used_bytes"])
+
+
 class DashboardFormattingTests(unittest.TestCase):
     def test_missing_metrics_never_show_zero(self):
         snapshot = format_snapshot({"cpu": {"name": "CPU"}, "ram": {}, "models": {}})

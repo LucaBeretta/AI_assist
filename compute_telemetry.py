@@ -98,6 +98,14 @@ def _memory():
     return None, None
 
 
+def _nvidia_number(value):
+    try:
+        number = float(value)
+    except ValueError:
+        return None
+    return number if 0 <= number < float("inf") else None
+
+
 def _gpu_usage():
     executable = shutil.which("nvidia-smi")
     if not executable and platform.system() == "Windows":
@@ -108,7 +116,7 @@ def _gpu_usage():
         return []
     try:
         process = subprocess.run(
-            [executable, "--query-gpu=name,utilization.gpu,memory.used,memory.total",
+            [executable, "--query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw",
              "--format=csv,noheader,nounits"],
             capture_output=True, text=True, timeout=3, check=False,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -116,18 +124,15 @@ def _gpu_usage():
             return []
         result = []
         for row in csv.reader(io.StringIO(process.stdout)):
-            if len(row) != 4 or len(result) >= MAX_GPU:
+            if len(row) != 6 or len(result) >= MAX_GPU:
                 continue
-            name, percent, used, total = (item.strip() for item in row)
-            try:
-                used_bytes = round(float(used) * 1024 ** 2)
-                total_bytes = round(float(total) * 1024 ** 2)
-            except ValueError:
-                continue
-            if not (0 <= used_bytes <= total_bytes and total_bytes > 0):
-                continue
+            name, percent, used, total, temperature, power = (item.strip() for item in row)
+            used, total = _nvidia_number(used), _nvidia_number(total)
+            used_bytes = round(used * 1024 ** 2) if used is not None and total and used <= total else None
+            total_bytes = round(total * 1024 ** 2) if total else None
             result.append({"name": name[:96], "percent": _finite_percent(percent),
-                           "used_bytes": used_bytes, "total_bytes": total_bytes})
+                           "used_bytes": used_bytes, "total_bytes": total_bytes,
+                           "temperature_c": _nvidia_number(temperature), "power_w": _nvidia_number(power)})
         return result
     except (OSError, subprocess.TimeoutExpired):
         return []
