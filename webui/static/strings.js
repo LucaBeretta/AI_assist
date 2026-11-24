@@ -663,7 +663,17 @@ window.i18n = (() => {
   "Tall": "Alta",
   "Slim": "Snella",
   "Average": "Normale",
-  "Broad": "Robusta"
+  "Broad": "Robusta",
+  "3D sound (optional)": "Suono 3D (facoltativo)",
+  "Sound movement": "Movimento del suono",
+  "Circles around you": "Ti gira intorno",
+  "Left to right": "Da sinistra a destra",
+  "Over your head": "Sopra la testa",
+  "3D sound ready. Use headphones to hear it move.": "Suono 3D pronto. Usa le cuffie per sentirlo muoversi.",
+  "Choose an audio file (MP3, WAV, OGG, M4A or FLAC) up to 20 MB.": "Scegli un file audio (MP3, WAV, OGG, M4A o FLAC) fino a 20 MB.",
+  "Could not read this sound file.": "Impossibile leggere questo file audio.",
+  "This window cannot play 3D sound.": "Questa finestra non può riprodurre suono 3D.",
+  "Unknown sound movement.": "Movimento del suono sconosciuto."
 };
   const en = Object.fromEntries(Object.keys(it).map(key => [key, key]));
   const messages = {en, it};

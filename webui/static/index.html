@@ -21,6 +21,7 @@
   <script defer src="sharing.js"></script>
   <script defer src="photo-video.js"></script>
   <script defer src="photo-shader.js"></script>
+  <script defer src="spatial-sound.js"></script>
   <script defer src="quick-animation.js"></script>
   <script defer src="feedback-loop.js"></script>
 </head>
@@ -358,6 +359,16 @@
                   <option value="zoom" data-i18n="Slow zoom"></option>
                   <option value="pan" data-i18n="Side-to-side pan"></option>
                   <option value="ripple" data-i18n="Ripple"></option>
+                </select>
+              </label>
+              <label class="field"><span data-i18n="3D sound (optional)"></span>
+                <input id="quick-animation-sound" type="file" accept="audio/*">
+              </label>
+              <label id="quick-animation-movement-field" class="field" hidden><span data-i18n="Sound movement"></span>
+                <select id="quick-animation-movement">
+                  <option value="around" data-i18n="Circles around you"></option>
+                  <option value="sideways" data-i18n="Left to right"></option>
+                  <option value="overhead" data-i18n="Over your head"></option>
                 </select>
               </label>
               <div class="model-actions">
