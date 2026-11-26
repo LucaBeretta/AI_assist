@@ -8,7 +8,8 @@ window.menusui = (() => {
   let opener = null;
 
   const isOpen = () => Boolean(menu && !menu.hidden);
-  function entries() { return [...(menu?.children || [])].filter(child => child.getAttribute?.("role")?.startsWith("menuitem") && !child.disabled); }
+  const flat = nodes => nodes.flatMap(child => child.getAttribute?.("role") === "group" ? flat([...(child.children || [])]) : [child]);
+  function entries() { return flat([...(menu?.children || [])]).filter(child => child.getAttribute?.("role")?.startsWith("menuitem") && !child.disabled); }
   function close(refocus = true) {
     if (!isOpen()) return;
     menu.hidden = true;
@@ -18,14 +19,30 @@ window.menusui = (() => {
   }
   function entry(item) {
     if (item.separator) { const line = document.createElement("hr"); line.className = "quick-menu-line"; return line; }
-    if (item.heading) { const head = document.createElement("div"); head.className = "quick-menu-head"; head.textContent = item.heading; return head; }
+    if (item.group) {
+      // A named group, so screen readers say "Look" or "Theme" with its choices.
+      const group = document.createElement("div");
+      group.setAttribute("role", "group");
+      group.setAttribute("aria-label", item.group);
+      const head = document.createElement("div");
+      head.className = "quick-menu-head"; head.textContent = item.group; head.setAttribute("aria-hidden", "true");
+      group.append(head, ...item.items.map(entry));
+      return group;
+    }
     const button = document.createElement("button");
     button.type = "button";
     button.className = "popup-item" + (item.kind ? " " + item.kind : "");
     const choice = typeof item.checked === "boolean";
     button.setAttribute("role", choice ? "menuitemradio" : "menuitem");
-    if (choice) button.setAttribute("aria-checked", String(item.checked));
-    button.textContent = (choice ? (item.checked ? "✓ " : "   ") : "") + item.label;
+    if (choice) {
+      // The tick is drawn, not read out: aria-checked already says which one is chosen.
+      button.setAttribute("aria-checked", String(item.checked));
+      const tick = document.createElement("span");
+      tick.className = "quick-menu-check"; tick.textContent = item.checked ? "✓" : ""; tick.setAttribute("aria-hidden", "true");
+      const label = document.createElement("span");
+      label.textContent = item.label;
+      button.append(tick, label);
+    } else button.textContent = item.label;
     button.disabled = Boolean(item.disabled);
     button.addEventListener("click", () => { close(); item.run(); });
     return button;
@@ -78,9 +95,9 @@ window.menusui = (() => {
       run: () => window.lookui?.setLook?.(option.value)}));
     // Read the theme when clicked: Ctrl+Shift+L may have changed it while the menu was open.
     const pick = name => () => { if (theme() !== name) el("theme")?.click(); };
-    return [{heading: t("Look")}, ...looks, {separator: true}, {heading: t("Theme")},
-            {label: t("Night"), checked: theme() === "night", run: pick("night")},
-            {label: t("Day"), checked: theme() === "day", run: pick("day")}];
+    return [{group: t("Look"), items: looks}, {separator: true},
+            {group: t("Theme"), items: [{label: t("Night"), checked: theme() === "night", run: pick("night")},
+                                        {label: t("Day"), checked: theme() === "day", run: pick("day")}]}];
   }
 
   el("chat-more")?.addEventListener("click", () => open(el("chat-more"), chatItems()));

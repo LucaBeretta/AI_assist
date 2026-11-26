@@ -13,7 +13,10 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const pressed = [], calls = [];
 class Node {
-  constructor(id, tag = 'div') { this.id = id; this.tagName = tag; this.attrs = {}; this.listeners = {}; this.children = []; this.hidden = false; this.style = {}; this.textContent = ''; }
+  constructor(id, tag = 'div') { this.id = id; this.tagName = tag; this.attrs = {}; this.listeners = {}; this.children = []; this.hidden = false; this.style = {}; this._text = ''; }
+  get textContent() { return this._text + this.children.map(child => child.textContent).join(''); }
+  set textContent(text) { this._text = String(text); this.children = []; }
+  append(...nodes) { this.children.push(...nodes); }
   getAttribute(name) { return this.attrs[name] ?? null; }
   setAttribute(name, value) { this.attrs[name] = String(value); }
   addEventListener(type, fn) { this.listeners[type] = fn; }
@@ -38,14 +41,16 @@ const window = {innerWidth: 1280, innerHeight: 800,
   workspaceui: {openInstructions: id => calls.push(['instructions', id]), openMemories: id => calls.push(['memories', id])}};
 vm.runInNewContext(fs.readFileSync(process.argv.at(-1), 'utf8'), {window, document, String, Math});
 const menu = nodes.get('quick-menu');
-const items = () => menu.children.filter(node => (node.getAttribute('role') || '').startsWith('menuitem'));
-const labelled = text => items().find(node => node.textContent.trim().replace(/^✓\s*/, '') === text);
+const flat = nodes => nodes.flatMap(node => node.getAttribute('role') === 'group' ? flat(node.children) : [node]);
+const items = () => flat(menu.children).filter(node => (node.getAttribute('role') || '').startsWith('menuitem'));
+const label = node => node.children.length ? node.children.at(-1).textContent : node.textContent;   // without the drawn tick
+const labelled = text => items().find(node => label(node) === text);
 
 // "⋯" for this chat
 nodes.get('chat-more').listeners.click();
 assert.equal(menu.hidden, false);
 assert.equal(nodes.get('chat-more').getAttribute('aria-expanded'), 'true');
-assert.deepEqual(items().map(node => node.textContent), ['Rename…', 'Chat instructions…', 'Memories for this chat…', 'Delete chat']);
+assert.deepEqual(items().map(label), ['Rename…', 'Chat instructions…', 'Memories for this chat…', 'Delete chat']);
 labelled('Rename…').listeners.click();
 assert.equal(pressed.at(-1), 'rename-chat');
 assert.equal(menu.hidden, true);
@@ -63,8 +68,14 @@ assert.equal(menu.hidden, true);
 
 // Appearance: the looks from Settings > Look, then Night / Day, with the current ones ticked
 nodes.get('open-appearance').listeners.click();
-const ticked = items().filter(node => node.getAttribute('aria-checked') === 'true').map(node => node.textContent.replace(/^✓\s*/, ''));
+const ticked = items().filter(node => node.getAttribute('aria-checked') === 'true').map(label);
 assert.deepEqual(ticked, ['3D cockpit', 'Night']);
+// "Look" and "Theme" name their groups for screen readers; the tick is drawn but not read out
+const groups = menu.children.filter(node => node.getAttribute('role') === 'group');
+assert.deepEqual(groups.map(node => node.getAttribute('aria-label')), ['Look', 'Theme']);
+const tick = labelled('3D cockpit').children[0];
+assert.equal(tick.textContent, '✓');
+assert.equal(tick.getAttribute('aria-hidden'), 'true');
 labelled('Browser').listeners.click();
 assert.deepEqual(calls.at(-1), ['look', 'browser']);
 nodes.get('open-appearance').listeners.click();
