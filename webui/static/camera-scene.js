@@ -173,47 +173,18 @@ void main() {
     return vertices;
   }
 
-  function compile(gl, type, source) {
-    const shader = gl.createShader(type);
-    if (!shader) throw new Error("Could not create a 3D camera shader.");
-    gl.shaderSource(shader, source);
-    gl.compileShader(shader);
-    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-      gl.deleteShader(shader);
-      throw new Error("Could not compile a 3D camera shader.");
-    }
-    return shader;
-  }
-
-  function makeProgram(gl) {
-    const program = gl.createProgram();
-    if (!program) throw new Error("Could not create the 3D camera renderer.");
-    let vertex;
-    let fragment;
-    try {
-      vertex = compile(gl, gl.VERTEX_SHADER, vertexSource);
-      fragment = compile(gl, gl.FRAGMENT_SHADER, fragmentSource);
-      gl.attachShader(program, vertex);
-      gl.attachShader(program, fragment);
-      gl.linkProgram(program);
-      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-        throw new Error("Could not link the 3D camera shaders.");
-      }
-      return program;
-    } catch (error) {
-      gl.deleteProgram(program);
-      throw error;
-    } finally {
-      if (vertex) gl.deleteShader(vertex);
-      if (fragment) gl.deleteShader(fragment);
-    }
-  }
+  const programErrors = {
+    shader: "Could not create a 3D camera shader.",
+    compile: "Could not compile a 3D camera shader.",
+    program: "Could not create the 3D camera renderer.",
+    link: "Could not link the 3D camera shaders.",
+  };
 
   function create(canvas) {
     const gl = canvas.getContext("webgl2", {alpha: false, depth: true, preserveDrawingBuffer: true});
     if (!gl) throw new Error("WebGL 2 is required for 3D Camera.");
 
-    const program = makeProgram(gl);
+    const program = window.webglProgram.create(gl, vertexSource, fragmentSource, programErrors);
     const meshes = [];
     let disposed = false;
 

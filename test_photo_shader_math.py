@@ -10,7 +10,8 @@ import subprocess
 import unittest
 
 
-SCRIPT = Path(__file__).parent / "webui" / "static" / "photo-shader.js"
+STATIC = Path(__file__).parent / "webui" / "static"
+SCRIPTS = [STATIC / "webgl-program.js", STATIC / "photo-shader.js"]
 
 CHECK = r'''
 const assert = require('node:assert/strict');
@@ -35,7 +36,9 @@ const gl = {
   texImage2D() {}, getError: () => 0, viewport() {}, drawArrays() {},
 };
 const window = {};
-vm.runInNewContext(fs.readFileSync(process.argv.at(-1), 'utf8'), {window, Map, Math, Error});
+for (const script of process.argv.slice(-2)) {
+  vm.runInNewContext(fs.readFileSync(script, 'utf8'), {window, Map, Math, Error});
+}
 const renderer = window.photoShader.create({getContext: () => gl});
 const fragment = sources[1];
 const number = pattern => { const match = fragment.match(pattern); assert(match, 'shader constant not found: ' + pattern); return Number(match[1]); };
@@ -103,7 +106,7 @@ process.stdout.write(`checked ${samples} samples\n`);
 class PhotoShaderMathTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the shader maths test")
     def test_every_frame_stays_inside_the_photo_and_loops_seamlessly(self):
-        result = subprocess.run(["node", "-e", CHECK, "--", str(SCRIPT)],
+        result = subprocess.run(["node", "-e", CHECK, "--", *map(str, SCRIPTS)],
                                 capture_output=True, text=True, timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         self.assertIn("checked", result.stdout)
