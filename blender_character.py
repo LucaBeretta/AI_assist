@@ -205,34 +205,31 @@ def rig(root, size):
     return skeleton
 
 
-def build(spec):
-    bpy.ops.wm.read_factory_settings(use_empty=True)
-    scene = bpy.context.scene
-    tall = {"short": 0.9, "medium": 1.0, "tall": 1.12}[spec["height"]]
-    wide = {"slim": 0.85, "average": 1.0, "broad": 1.2}[spec["build"]]
+def _part_materials(spec):
+    """The character's materials, by part."""
+    return {
+        "skin": material("Skin", spec["skin"], roughness=0.55),
+        "top": material("Top", spec["top_color"], roughness=0.7),
+        "bottom": material("Bottom", spec["bottom_color"], roughness=0.75),
+        "shoes": material("Shoes", spec["shoe_color"], roughness=0.4),
+        "hair": material("Hair", spec["hair_color"], roughness=0.45),
+        "white": material("Eye white", "#f7f7f2", roughness=0.2),
+        "iris": material("Iris", spec["eye_color"], roughness=0.15),
+        "dark": material("Pupil", "#0b0b10", roughness=0.1),
+        "mouth": material("Mouth", "#7a2e35", roughness=0.4),
+        "cheek": material("Cheeks", "#f08a8a", roughness=0.6),
+    }
 
-    bpy.ops.object.empty_add(location=(0, 0, 0))
-    root = bpy.context.active_object
-    root.name = spec["name"] or "Character"
 
-    skin = material("Skin", spec["skin"], roughness=0.55)
-    top = material("Top", spec["top_color"], roughness=0.7)
-    bottom = material("Bottom", spec["bottom_color"], roughness=0.75)
-    shoes = material("Shoes", spec["shoe_color"], roughness=0.4)
-    hair = material("Hair", spec["hair_color"], roughness=0.45)
-    white = material("Eye white", "#f7f7f2", roughness=0.2)
-    iris = material("Iris", spec["eye_color"], roughness=0.15)
-    dark = material("Pupil", "#0b0b10", roughness=0.1)
-    mouth = material("Mouth", "#7a2e35", roughness=0.4)
-    cheek = material("Cheeks", "#f08a8a", roughness=0.6)
-
-    # Legs, shoes, body, arms, hands (the camera looks along +Y, so the front is -Y).
+def _body(root, mats, tall, wide):
+    """Legs, shoes, body, arms, hands and neck. Returns the measurements the skeleton follows."""
+    # The camera looks along +Y, so the front is -Y.
     leg_height = 0.32 * tall
     for side in (-1, 1):
-        cylinder("Leg", (side * 0.085 * wide, 0, leg_height / 2 + 0.04), 0.07 * wide, leg_height, bottom, root)
-        sphere("Shoe", (side * 0.085 * wide, -0.025, 0.045), (0.075 * wide, 0.115, 0.05), shoes, root)
+        cylinder("Leg", (side * 0.085 * wide, 0, leg_height / 2 + 0.04), 0.07 * wide, leg_height, mats["bottom"], root)
+        sphere("Shoe", (side * 0.085 * wide, -0.025, 0.045), (0.075 * wide, 0.115, 0.05), mats["shoes"], root)
     body_z = leg_height + 0.17 * tall
-    sphere("Body", (0, 0, body_z), (0.17 * wide, 0.13 * wide, 0.21 * tall), top, root)
+    sphere("Body", (0, 0, body_z), (0.17 * wide, 0.13 * wide, 0.21 * tall), mats["top"], root)
     arm_length = 0.27 * tall
     shoulder_z = body_z + 0.13 * tall
     shoulder_x = 0.15 * wide
@@ -240,50 +237,60 @@ def build(spec):
         # Built in a T-pose, the rest pose game engines expect; the skeleton lowers them for the portrait.
         shoulder = Vector((side * shoulder_x, 0, shoulder_z))
         hand = shoulder + Vector((side * arm_length, 0, 0))
-        cylinder("Arm", (shoulder + hand) / 2, 0.048 * wide, arm_length, top, root, rotation=(0, math.radians(90), 0))
-        sphere("Hand", hand + Vector((side * 0.02, 0, 0)), (0.055, 0.05, 0.055), skin, root)
-    cylinder("Neck", (0, 0, body_z + 0.21 * tall), 0.05, 0.06, skin, root)
+        cylinder("Arm", (shoulder + hand) / 2, 0.048 * wide, arm_length, mats["top"], root,
+                 rotation=(0, math.radians(90), 0))
+        sphere("Hand", hand + Vector((side * 0.02, 0, 0)), (0.055, 0.05, 0.055), mats["skin"], root)
+    cylinder("Neck", (0, 0, body_z + 0.21 * tall), 0.05, 0.06, mats["skin"], root)
+    return {"hip_z": leg_height + 0.04, "leg_x": 0.085 * wide, "knee_z": leg_height / 2 + 0.06,
+            "body_z": body_z, "tall": tall, "shoulder_x": shoulder_x, "shoulder_z": shoulder_z,
+            "arm_length": arm_length, "neck_z": body_z + 0.18 * tall}
 
-    # Head and face.
-    radius = 0.23
-    head = Vector((0, 0, body_z + 0.21 * tall + radius * 0.92))
-    sphere("Head", head, (radius, radius * 0.95, radius * 0.98), skin, root, segments=48)
+
+def _face(root, mats, head, radius):
+    """Head, eyes, cheeks, ears and smile."""
+    sphere("Head", head, (radius, radius * 0.95, radius * 0.98), mats["skin"], root, segments=48)
     for side in (-1, 1):
         eye = head + Vector((side * 0.08, -radius * 0.83, 0.015))
-        sphere("Eye", eye, (0.048, 0.024, 0.055), white, root)
-        sphere("Iris", eye + Vector((0, -0.016, -0.004)), (0.031, 0.012, 0.036), iris, root)
-        sphere("Pupil", eye + Vector((0, -0.024, -0.004)), (0.014, 0.006, 0.017), dark, root)
-        sphere("Sparkle", eye + Vector((side * -0.012, -0.029, 0.014)), (0.007, 0.003, 0.007), white, root)
-        sphere("Cheek", head + Vector((side * 0.13, -radius * 0.78, -0.065)), (0.03, 0.01, 0.018), cheek, root)
-        sphere("Ear", head + Vector((side * radius * 0.97, 0.01, 0)), (0.035, 0.045, 0.06), skin, root)
-    torus("Smile", head + Vector((0, -radius * 0.9, -0.07)), 0.032, 0.0075, mouth, root,
+        sphere("Eye", eye, (0.048, 0.024, 0.055), mats["white"], root)
+        sphere("Iris", eye + Vector((0, -0.016, -0.004)), (0.031, 0.012, 0.036), mats["iris"], root)
+        sphere("Pupil", eye + Vector((0, -0.024, -0.004)), (0.014, 0.006, 0.017), mats["dark"], root)
+        sphere("Sparkle", eye + Vector((side * -0.012, -0.029, 0.014)), (0.007, 0.003, 0.007), mats["white"], root)
+        sphere("Cheek", head + Vector((side * 0.13, -radius * 0.78, -0.065)), (0.03, 0.01, 0.018), mats["cheek"], root)
+        sphere("Ear", head + Vector((side * radius * 0.97, 0.01, 0)), (0.035, 0.045, 0.06), mats["skin"], root)
+    torus("Smile", head + Vector((0, -radius * 0.9, -0.07)), 0.032, 0.0075, mats["mouth"], root,
           rotation=(math.radians(90), 0, 0)).scale = (1, 1, 0.55)
 
-    style = spec["hair_style"]
-    if style != "none":
-        cap = hair_cap(head, radius, hair, root, fringe=0.42 if style != "spiky" else 0.5)
-        if style == "long":
-            sphere("Long hair", head + Vector((0, radius * 0.45, -radius * 0.75)),
-                   (radius * 0.95, radius * 0.45, radius * 1.05), hair, root)
-        elif style == "bun":
-            sphere("Bun", head + Vector((0, radius * 0.45, radius * 0.95)), (0.09, 0.09, 0.09), hair, root)
-        elif style == "curly":
-            for index in range(26):
-                angle = index * 2.399963  # golden angle: even spread over the cap
-                height = 1 - (index + 0.5) / 26 * 1.1
-                ring = math.sqrt(max(0.0, 1 - height * height))
-                offset = Vector((math.cos(angle) * ring, abs(math.sin(angle) * ring) * 0.6 + 0.15, height))
-                if offset.z > -0.1:
-                    sphere("Curl", head + offset * radius * 1.07, (0.065, 0.065, 0.065), hair, root, segments=16)
-        elif style == "spiky":
-            for index, (x, z, tilt) in enumerate(((-0.12, 0.2, -30), (0, 0.24, 0), (0.12, 0.2, 30),
-                                                  (-0.06, 0.16, -60), (0.06, 0.16, 60))):
-                bpy.ops.mesh.primitive_cone_add(radius1=0.06, depth=0.16,
-                                                location=head + Vector((x, 0.03, z)),
-                                                rotation=(math.radians(-15), math.radians(tilt), 0))
-                finish(bpy.context.active_object, hair, root).name = f"Spike {index + 1}"
-        cap.name = "Hair"
 
+def _hair(style, hair, root, head, radius):
+    """The chosen hair style on the head; "none" adds nothing."""
+    if style == "none":
+        return
+    cap = hair_cap(head, radius, hair, root, fringe=0.42 if style != "spiky" else 0.5)
+    if style == "long":
+        sphere("Long hair", head + Vector((0, radius * 0.45, -radius * 0.75)),
+               (radius * 0.95, radius * 0.45, radius * 1.05), hair, root)
+    elif style == "bun":
+        sphere("Bun", head + Vector((0, radius * 0.45, radius * 0.95)), (0.09, 0.09, 0.09), hair, root)
+    elif style == "curly":
+        for index in range(26):
+            angle = index * 2.399963  # golden angle: even spread over the cap
+            height = 1 - (index + 0.5) / 26 * 1.1
+            ring = math.sqrt(max(0.0, 1 - height * height))
+            offset = Vector((math.cos(angle) * ring, abs(math.sin(angle) * ring) * 0.6 + 0.15, height))
+            if offset.z > -0.1:
+                sphere("Curl", head + offset * radius * 1.07, (0.065, 0.065, 0.065), hair, root, segments=16)
+    elif style == "spiky":
+        for index, (x, z, tilt) in enumerate(((-0.12, 0.2, -30), (0, 0.24, 0), (0.12, 0.2, 30),
+                                              (-0.06, 0.16, -60), (0.06, 0.16, 60))):
+            bpy.ops.mesh.primitive_cone_add(radius1=0.06, depth=0.16,
+                                            location=head + Vector((x, 0.03, z)),
+                                            rotation=(math.radians(-15), math.radians(tilt), 0))
+            finish(bpy.context.active_object, hair, root).name = f"Spike {index + 1}"
+    cap.name = "Hair"
+
+
+def _accessory(spec, root, head, radius):
+    """Glasses, a hat or headphones, when chosen."""
     accessory = spec["accessory"]
     if accessory == "glasses":
         frame = material("Glasses", "#1d1f24", roughness=0.3, metallic=0.6)
@@ -311,11 +318,9 @@ def build(spec):
             cylinder("Ear cup", head + Vector((side * radius * 1.08, 0.01, 0)), 0.075, 0.05, phones, root,
                      rotation=(0, math.radians(90), 0))
 
-    rig(root, {"hip_z": leg_height + 0.04, "leg_x": 0.085 * wide, "knee_z": leg_height / 2 + 0.06,
-               "body_z": body_z, "tall": tall, "shoulder_x": shoulder_x, "shoulder_z": shoulder_z,
-               "arm_length": arm_length, "neck_z": body_z + 0.18 * tall, "head_z": head.z, "radius": radius})
 
-    # Light and camera for a friendly 3/4 portrait.
+def _portrait_stage(scene, backdrop, head, radius):
+    """Camera, three area lights, the backdrop and a floor for a friendly 3/4 portrait."""
     total_height = head.z + radius
     focus = Vector((0, 0, total_height * 0.64))
     bpy.ops.object.empty_add(location=focus)
@@ -336,11 +341,32 @@ def build(spec):
         aim.target, aim.track_axis, aim.up_axis = target, "TRACK_NEGATIVE_Z", "UP_Y"
     world = bpy.data.worlds.new("Backdrop")
     world.use_nodes = True
-    world.node_tree.nodes["Background"].inputs["Color"].default_value = colour(spec["backdrop"])
+    world.node_tree.nodes["Background"].inputs["Color"].default_value = colour(backdrop)
     world.node_tree.nodes["Background"].inputs["Strength"].default_value = 0.9
     scene.world = world
     bpy.ops.mesh.primitive_circle_add(vertices=64, radius=0.6, fill_type="NGON", location=(0, 0, 0.001))
-    finish(bpy.context.active_object, material("Floor", spec["backdrop"], roughness=0.9), None, smooth=False).name = "Floor"
+    finish(bpy.context.active_object, material("Floor", backdrop, roughness=0.9), None, smooth=False).name = "Floor"
+
+
+def build(spec):
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    scene = bpy.context.scene
+    tall = {"short": 0.9, "medium": 1.0, "tall": 1.12}[spec["height"]]
+    wide = {"slim": 0.85, "average": 1.0, "broad": 1.2}[spec["build"]]
+
+    bpy.ops.object.empty_add(location=(0, 0, 0))
+    root = bpy.context.active_object
+    root.name = spec["name"] or "Character"
+
+    mats = _part_materials(spec)
+    size = _body(root, mats, tall, wide)
+    radius = 0.23
+    head = Vector((0, 0, size["body_z"] + 0.21 * tall + radius * 0.92))
+    _face(root, mats, head, radius)
+    _hair(spec["hair_style"], mats["hair"], root, head, radius)
+    _accessory(spec, root, head, radius)
+    rig(root, dict(size, head_z=head.z, radius=radius))
+    _portrait_stage(scene, spec["backdrop"], head, radius)
     return scene
 
 
