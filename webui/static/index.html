@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="feedback-loop.css">
   <link rel="stylesheet" href="cockpit.css">
+  <link rel="stylesheet" href="viewport3d.css">
   <script defer src="strings.js"></script>
   <script defer src="markdown.js"></script>
   <script defer src="workspace.js"></script>
@@ -26,6 +27,7 @@
   <script defer src="quick-animation.js"></script>
   <script defer src="feedback-loop.js"></script>
   <script defer src="cockpit.js"></script>
+  <script defer src="viewport3d.js"></script>
 </head>
 <body>
 <div class="app">
@@ -136,7 +138,7 @@
           <button id="delete-chat" class="icon-btn" type="button" aria-label="Delete chat" title="Delete chat" data-i18n-aria-label="Delete chat" data-i18n-title="Delete chat">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"></path></svg>
           </button>
-          <button id="look" class="icon-btn" type="button" aria-pressed="false" aria-label="3D look" title="Switch between the classic and the 3D look" data-i18n-aria-label="3D look" data-i18n-title="Switch between the classic and the 3D look">
+          <button id="look" class="icon-btn" type="button" aria-pressed="false" aria-label="3D look" title="Switch the look: classic, 3D cockpit or 3D viewport" data-i18n-aria-label="3D look" data-i18n-title="Switch the look: classic, 3D cockpit or 3D viewport">
             <svg class="icon-cube-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"></path><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"></path></svg>
             <svg class="icon-cube-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z" fill="currentColor" fill-opacity=".25"></path><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"></path></svg>
           </button>
@@ -455,7 +457,7 @@
     <label class="setting-row"><span><span class="setting-title"><span data-i18n="Theme"></span></span><span class="setting-hint"><span data-i18n="Ctrl+Shift+L switches anywhere."></span></span></span>
       <select id="setting-theme"><option value="night" data-i18n="Night"></option><option value="day" data-i18n="Day"></option></select></label>
     <label class="setting-row"><span><span class="setting-title"><span data-i18n="Look"></span></span><span class="setting-hint"><span data-i18n="The cube button at the top switches anywhere."></span></span></span>
-      <select id="setting-look"><option value="classic" data-i18n="Classic"></option><option value="cockpit" data-i18n="3D cockpit"></option></select></label>
+      <select id="setting-look"><option value="classic" data-i18n="Classic"></option><option value="cockpit" data-i18n="3D cockpit"></option><option value="viewport" data-i18n="3D viewport"></option></select></label>
   </section>
   <section class="setting-group" data-pane="general"><h3 data-i18n="Updates"></h3>
     <div class="setting-row"><span><span class="setting-title"><span data-i18n="Check for updates"></span></span><span class="setting-hint" data-i18n="Checks upstream source files. Local changes can also appear as differences."></span></span>
