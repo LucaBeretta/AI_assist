@@ -26,6 +26,7 @@
   <script defer src="quick-animation.js"></script>
   <script defer src="feedback-loop.js"></script>
   <script defer src="cockpit.js"></script>
+  <script defer src="menus.js"></script>
 </head>
 <body>
 <div class="app">
@@ -35,16 +36,16 @@
         <span class="brand-name"><svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 9-8 9-8-9z"></path></svg>AI Assist</span>
         <span class="brand-actions">
           <button id="new-incognito" class="icon-btn" type="button" aria-label="New incognito chat" title="Incognito chat · Ctrl+Shift+N" data-i18n-aria-label="New incognito chat" data-i18n-title="Incognito chat · Ctrl+Shift+N">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3l18 18"></path><path d="M10.6 10.6a2 2 0 0 0 2.8 2.8"></path><path d="M9.9 5.1A9.8 9.8 0 0 1 12 5c5 0 9 4.5 10 7a12.7 12.7 0 0 1-2.4 3.4M6.6 6.6C4.4 8 2.8 10.2 2 12c1 2.5 5 7 10 7a9.6 9.6 0 0 0 5.4-1.6"></path></svg>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11h18"></path><path d="M5.5 11l2-6h9l2 6"></path><circle cx="7.5" cy="16" r="2.5"></circle><circle cx="16.5" cy="16" r="2.5"></circle><path d="M10 16h4"></path></svg>
           </button>
           <button id="new-chat" class="icon-btn bordered" type="button" aria-label="New chat" title="New chat · Ctrl+N" data-i18n-aria-label="New chat" data-i18n-title="New chat · Ctrl+N">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"></path></svg>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
           </button>
         </span>
       </div>
 
       <button id="open-palette" class="search-btn" type="button">
-        <span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.5-3.5"></path></svg><span data-i18n="Search or run a command"></span></span>
+        <span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.5-3.5"></path></svg><span data-i18n="Search chats"></span></span>
         <kbd>Ctrl K</kbd>
       </button>
       <nav class="nav" aria-label="Sections" data-i18n-aria-label="Sections">
@@ -80,10 +81,13 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"></path></svg><span data-i18n="Refresh models"></span>
       </button>
       <button id="open-mission-control" class="btn ghost" type="button" title="Live CPU, memory and models in their own window, for a second screen" data-i18n-title="Live CPU, memory and models in their own window, for a second screen">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"></path><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"></path></svg><span data-i18n="Mission Control"></span>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18a8 8 0 1 1 16 0"></path><path d="M12 18l4-6"></path></svg><span data-i18n="Mission Control"></span>
+      </button>
+      <button id="open-appearance" class="btn ghost" type="button" aria-haspopup="menu" aria-expanded="false" title="Look and Night/Day" data-i18n-title="Look and Night/Day">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor" stroke="none"></path></svg><span data-i18n="Appearance"></span>
       </button>
       <button id="open-settings" class="btn ghost" type="button" title="Settings · Ctrl+," data-i18n-title="Settings · Ctrl+,">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"></path></svg><span data-i18n="Settings"></span>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"></path></svg><span data-i18n="Settings"></span>
       </button>
     </aside>
 
@@ -130,17 +134,20 @@
         <h1 id="chat-title"><span data-i18n="Conversation"></span></h1>
         <div class="header-actions">
           <span id="incognito-badge" class="badge" hidden><span data-i18n="Incognito · not saved"></span></span>
-          <button id="rename-chat" class="icon-btn" type="button" aria-label="Rename chat" title="Rename chat" data-i18n-aria-label="Rename chat" data-i18n-title="Rename chat">
+          <button id="chat-more" class="icon-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="More for this chat" title="Rename, instructions, memories, delete" data-i18n-aria-label="More for this chat" data-i18n-title="Rename, instructions, memories, delete">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none"></circle><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"></circle><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none"></circle></svg>
+          </button>
+          <button id="rename-chat" class="icon-btn" type="button" hidden aria-label="Rename chat" title="Rename chat" data-i18n-aria-label="Rename chat" data-i18n-title="Rename chat">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"></path></svg>
           </button>
-          <button id="delete-chat" class="icon-btn" type="button" aria-label="Delete chat" title="Delete chat" data-i18n-aria-label="Delete chat" data-i18n-title="Delete chat">
+          <button id="delete-chat" class="icon-btn" type="button" hidden aria-label="Delete chat" title="Delete chat" data-i18n-aria-label="Delete chat" data-i18n-title="Delete chat">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"></path></svg>
           </button>
-          <button id="look" class="icon-btn" type="button" aria-pressed="false" aria-label="3D look" title="Switch between the classic and the 3D look" data-i18n-aria-label="3D look" data-i18n-title="Switch between the classic and the 3D look">
+          <button id="look" class="icon-btn" type="button" hidden aria-pressed="false" aria-label="3D look" title="Switch between the classic and the 3D look" data-i18n-aria-label="3D look" data-i18n-title="Switch between the classic and the 3D look">
             <svg class="icon-cube-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"></path><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"></path></svg>
             <svg class="icon-cube-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z" fill="currentColor" fill-opacity=".25"></path><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"></path></svg>
           </button>
-          <button id="theme" class="icon-btn" type="button" aria-label="Switch theme" title="Switch theme · Ctrl+Shift+L" data-i18n-aria-label="Switch theme" data-i18n-title="Switch theme · Ctrl+Shift+L">
+          <button id="theme" class="icon-btn" type="button" hidden aria-label="Switch theme" title="Switch theme · Ctrl+Shift+L" data-i18n-aria-label="Switch theme" data-i18n-title="Switch theme · Ctrl+Shift+L">
             <svg class="icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg>
             <svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"></path></svg>
           </button>
@@ -262,15 +269,6 @@
               <p class="dev-hint" data-i18n="Uploads the selected web folder to Vercel, after confirmation."></p>
               <button id="deploy-open" class="btn" type="button" data-i18n="Deploy…"></button></section>
             <section class="side-group">
-              <h3><span data-i18n="Step limit"></span></h3>
-              <div class="segmented" role="radiogroup" aria-label="Step limit" data-i18n-aria-label="Step limit">
-                <label><input type="radio" name="dev-steps" value="12"><span>12</span></label>
-                <label><input type="radio" name="dev-steps" value="20" checked><span>20</span></label>
-                <label><input type="radio" name="dev-steps" value="30"><span>30</span></label>
-              </div>
-              <p class="dev-hint"><span data-i18n="The agent stops and reports after this many steps."></span></p>
-            </section>
-            <section class="side-group">
               <h3><span data-i18n="Pinned · sent with every request"></span></h3>
               <div id="dev-pins" class="chips"></div>
             </section>
@@ -286,6 +284,17 @@
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"></path></svg></button></div>
               <div id="dev-checkpoints" class="checkpoints"></div>
             </section>
+            <details class="side-group dev-more"><summary data-i18n="More options"></summary>
+              <div class="dev-more-body">
+                <h3><span data-i18n="Step limit"></span></h3>
+                <div class="segmented" role="radiogroup" aria-label="Step limit" data-i18n-aria-label="Step limit">
+                  <label><input type="radio" name="dev-steps" value="12"><span>12</span></label>
+                  <label><input type="radio" name="dev-steps" value="20" checked><span>20</span></label>
+                  <label><input type="radio" name="dev-steps" value="30"><span>30</span></label>
+                </div>
+                <p class="dev-hint"><span data-i18n="The agent stops and reports after this many steps."></span></p>
+              </div>
+            </details>
           </aside>
         </div>
       </div>
@@ -441,7 +450,7 @@
   </div>
   <div class="settings-layout">
     <nav class="settings-tabs" role="tablist" aria-label="Settings sections" data-i18n-aria-label="Settings sections">
-      <button class="settings-tab" type="button" role="tab" data-pane="general" aria-selected="true"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"></path></svg><span data-i18n="General"></span></button>
+      <button class="settings-tab" type="button" role="tab" data-pane="general" aria-selected="true"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"></path></svg><span data-i18n="General"></span></button>
       <button class="settings-tab" type="button" role="tab" data-pane="models" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"></rect><path d="M9 9h6v6H9z"></path></svg><span data-i18n="Models"></span></button>
       <button class="settings-tab" type="button" role="tab" data-pane="chats" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.4A8 8 0 1 1 21 12z"></path></svg><span data-i18n="Chats &amp; memory"></span></button>
       <button class="settings-tab" type="button" role="tab" data-pane="privacy" aria-selected="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"></path></svg><span data-i18n="Privacy &amp; network"></span></button>
@@ -454,11 +463,11 @@
     </select></label>
     <label class="setting-row"><span><span class="setting-title"><span data-i18n="Theme"></span></span><span class="setting-hint"><span data-i18n="Ctrl+Shift+L switches anywhere."></span></span></span>
       <select id="setting-theme"><option value="night" data-i18n="Night"></option><option value="day" data-i18n="Day"></option></select></label>
-    <label class="setting-row"><span><span class="setting-title"><span data-i18n="Look"></span></span><span class="setting-hint"><span data-i18n="The cube button at the top switches anywhere."></span></span></span>
+    <label class="setting-row"><span><span class="setting-title"><span data-i18n="Look"></span></span><span class="setting-hint"><span data-i18n="The Appearance button in the sidebar switches anywhere."></span></span></span>
       <select id="setting-look"><option value="classic" data-i18n="Classic"></option><option value="cockpit" data-i18n="3D cockpit"></option></select></label>
   </section>
   <section class="setting-group" data-pane="general"><h3 data-i18n="Updates"></h3>
-    <div class="setting-row"><span><span class="setting-title"><span data-i18n="Check for updates"></span></span><span class="setting-hint" data-i18n="Checks upstream source files. Local changes can also appear as differences."></span></span>
+    <div class="setting-row"><span><span class="setting-title"><span data-i18n="Check for updates"></span></span><span class="setting-hint" data-i18n="Looks on GitHub for a newer AI Assist. Nothing about your chats is sent."></span></span>
       <button id="check-updates" class="btn" type="button" data-i18n="Check now"></button></div>
     <div class="setting-row">
       <button id="install-update" class="btn" type="button" data-i18n="Update now" hidden></button>
@@ -577,6 +586,7 @@
   </form>
 </dialog>
 <div id="popup-menu" class="popup-menu" role="menu" hidden></div>
+<div id="quick-menu" class="popup-menu quick-menu" role="menu" hidden></div>
 <dialog id="shortcuts-dialog" class="dialog" aria-labelledby="shortcuts-title">
   <div class="dialog-head"><h2 id="shortcuts-title"><span data-i18n="Keyboard shortcuts"></span></h2><button id="shortcuts-close" class="icon-btn" type="button" aria-label="Close" data-i18n-aria-label="Close">×</button></div>
   <dl class="shortcuts-list">
@@ -624,10 +634,10 @@
   </form>
 </dialog>
 <dialog id="feedback-dialog" class="dialog" aria-labelledby="feedback-title"><form id="feedback-form">
-  <div class="dialog-head"><h2 id="feedback-title" data-i18n="Give feedback"></h2></div>
+  <div class="dialog-head"><h2 id="feedback-title" data-i18n="Ask for a better answer"></h2></div>
   <label class="field"><span data-i18n="What should improve?"></span><textarea id="feedback-text" rows="4" required></textarea></label>
   <label class="field"><span data-i18n="Success criteria (optional)"></span><textarea id="feedback-criteria" rows="2"></textarea></label><p id="feedback-error" class="setting-hint" role="alert"></p>
-  <div class="dialog-actions"><button id="feedback-cancel" class="btn ghost" type="button" data-i18n="Cancel"></button><button class="btn primary" type="submit" data-i18n="Prepare follow-up"></button></div>
+  <div class="dialog-actions"><button id="feedback-cancel" class="btn ghost" type="button" data-i18n="Cancel"></button><button class="btn primary" type="submit" data-i18n="Put in message box"></button></div>
 </form></dialog>
 <dialog id="deploy-dialog" class="dialog" aria-labelledby="deploy-title"><form id="deploy-form">
   <div class="dialog-head"><h2 id="deploy-title" data-i18n="Deploy to Vercel"></h2></div>
