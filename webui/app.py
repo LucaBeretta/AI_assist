@@ -599,6 +599,7 @@ class Api(FeedbackApi, SharingApi, PrivacyApi, ParityApi, CharacterApi):
         with self._lock:
             if self._closed:
                 raise RuntimeError("The web UI is closing.")
+            # Written under the lock on purpose: closing the window (_close) waits for a save in progress.
             write_bytes(path, data)
         return {"ok": True, "path": str(path)}
 
