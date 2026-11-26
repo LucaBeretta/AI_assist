@@ -87,6 +87,109 @@ def _validate_json(value):
     raise ChatStoreError("Native agent history must contain only finite JSON values and text object keys.")
 
 
+def _check_attachments(attachments):
+    try:
+        chat_attachments.validate(attachments)
+    except ValueError as error:
+        raise ChatStoreError(str(error)) from error
+
+
+def _check_activity(activity):
+    if not isinstance(activity, list):
+        raise ChatStoreError("Chat activity must be a list.")
+    for event in activity:
+        if (not isinstance(event, dict)
+                or not isinstance(event.get("type"), str)
+                or not isinstance(event.get("text"), str)
+                or not set(event).issubset({"type", "text", "path", "command", "diff", "destination"})
+                or any(not isinstance(value, str) for value in event.values())):
+            raise ChatStoreError("Each chat activity entry needs text type/text fields and optional text path/command/diff/destination fields.")
+
+
+def _check_agent_history(agent_history):
+    """The Developer agent's native messages, including its tool calls."""
+    if not isinstance(agent_history, list):
+        raise ChatStoreError("Chat agent_history must be a list.")
+    try:
+        _validate_json(agent_history)
+    except RecursionError as error:
+        raise ChatStoreError("Native agent history is nested too deeply or contains a circular value.") from error
+    for message in agent_history:
+        if (not isinstance(message, dict)
+                or not isinstance(message.get("role"), str)
+                or message["role"] not in _ROLES | {"tool"}
+                or not isinstance(message.get("content", "" if message.get("role") == "assistant" else None), str)):
+            raise ChatStoreError("Each native agent message needs a user, assistant, system, or tool role and text content.")
+        for field in ("thinking", "tool_name"):
+            if field in message and not isinstance(message[field], str):
+                raise ChatStoreError(f"Native agent message {field} must be text.")
+        if "tool_calls" in message:
+            if not isinstance(message["tool_calls"], list):
+                raise ChatStoreError("Native agent tool_calls must be a list.")
+            for call in message["tool_calls"]:
+                function = call.get("function") if isinstance(call, dict) else None
+                if (not isinstance(function, dict) or not isinstance(function.get("name"), str)
+                        or not isinstance(function.get("arguments", {}), dict)):
+                    raise ChatStoreError("Each native tool call needs a function name and JSON object arguments.")
+
+
+def _check_messages(messages):
+    if not isinstance(messages, list):
+        raise ChatStoreError("Chat messages must be a list.")
+    for message in messages:
+        if (not isinstance(message, dict)
+                or not isinstance(message.get("role"), str)
+                or message["role"] not in _ROLES
+                or not isinstance(message.get("content"), str)):
+            raise ChatStoreError("Each chat message needs a user, assistant, or system role and text content.")
+        if "partial" in message and (type(message["partial"]) is not bool or message["role"] != "assistant"):
+            raise ChatStoreError("Only assistant messages can have a boolean partial flag.")
+        _check_attachments(message.get("attachments", []))
+
+
+def _check_branches(record):
+    """Alternative message tails and which one is shown; adds an empty "branches" object when missing."""
+    branches = record.setdefault("branches", {})
+    if not isinstance(branches, dict):
+        raise ChatStoreError("Chat branches must be an object of message tails.")
+    for key, tails in branches.items():
+        if not isinstance(key, str) or not re.fullmatch(r"-1|0|[1-9][0-9]*", key):
+            raise ChatStoreError("Branch anchors must be message indices or -1.")
+        if not isinstance(tails, list) or not tails:
+            raise ChatStoreError("A branch must contain at least one alternative tail.")
+        for tail in tails:
+            if not isinstance(tail, list) or any(not isinstance(item, dict)
+                    or not isinstance(item.get("role"), str) or item["role"] not in _ROLES
+                    or not isinstance(item.get("content"), str) for item in tail):
+                raise ChatStoreError("Branch tails must contain valid chat messages.")
+            for message in tail:
+                _check_attachments(message.get("attachments", []))
+    prefixes = record.get("_branch_prefixes", {})
+    active = record.get("_branch_active", {})
+    if not isinstance(prefixes, dict) or not isinstance(active, dict):
+        raise ChatStoreError("Branch metadata must be objects.")
+    for key, hashes in prefixes.items():
+        if key not in branches or not isinstance(hashes, list) or len(hashes) != len(branches[key]) or any(
+                not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value) for value in hashes):
+            raise ChatStoreError("Branch prefix metadata must match its tails.")
+    for key, choice in active.items():
+        if key not in branches or type(choice) is not int or not 0 <= choice < len(branches[key]):
+            raise ChatStoreError("Invalid active branch choice.")
+
+
+def _check_summary(summary, message_count):
+    """The optional summary of the first ``upto`` messages."""
+    if summary is None:
+        return
+    if not isinstance(summary, dict) or set(summary) != {"text", "upto", "created_at"}:
+        raise ChatStoreError("Chat summary must contain text, upto and created_at.")
+    if not isinstance(summary["text"], str) or not summary["text"].strip():
+        raise ChatStoreError("Summary text must be nonempty text.")
+    if type(summary["upto"]) is not int or not 0 <= summary["upto"] <= message_count:
+        raise ChatStoreError("Summary upto must be a valid message count.")
+    _timestamp(summary["created_at"], "summary created_at")
+
+
 class ChatStore:
     """Read and write saved chats without an index shared by all conversations.
 
@@ -139,58 +242,13 @@ class ChatStore:
         project_files = chat.get("project_files", [])
         if not isinstance(project_files, list) or not all(isinstance(path, str) for path in project_files):
             raise ChatStoreError("Chat project_files must be a list of text paths.")
-        activity = chat.get("activity", [])
-        if not isinstance(activity, list):
-            raise ChatStoreError("Chat activity must be a list.")
-        for event in activity:
-            if (not isinstance(event, dict)
-                    or not isinstance(event.get("type"), str)
-                    or not isinstance(event.get("text"), str)
-                    or not set(event).issubset({"type", "text", "path", "command", "diff", "destination"})
-                    or any(not isinstance(value, str) for value in event.values())):
-                raise ChatStoreError("Each chat activity entry needs text type/text fields and optional text path/command/diff/destination fields.")
-        agent_history = chat.get("agent_history", [])
-        if not isinstance(agent_history, list):
-            raise ChatStoreError("Chat agent_history must be a list.")
-        try:
-            _validate_json(agent_history)
-        except RecursionError as error:
-            raise ChatStoreError("Native agent history is nested too deeply or contains a circular value.") from error
-        for message in agent_history:
-            if (not isinstance(message, dict)
-                    or not isinstance(message.get("role"), str)
-                    or message["role"] not in _ROLES | {"tool"}
-                    or not isinstance(message.get("content", "" if message.get("role") == "assistant" else None), str)):
-                raise ChatStoreError("Each native agent message needs a user, assistant, system, or tool role and text content.")
-            for field in ("thinking", "tool_name"):
-                if field in message and not isinstance(message[field], str):
-                    raise ChatStoreError(f"Native agent message {field} must be text.")
-            if "tool_calls" in message:
-                if not isinstance(message["tool_calls"], list):
-                    raise ChatStoreError("Native agent tool_calls must be a list.")
-                for call in message["tool_calls"]:
-                    function = call.get("function") if isinstance(call, dict) else None
-                    if (not isinstance(function, dict) or not isinstance(function.get("name"), str)
-                            or not isinstance(function.get("arguments", {}), dict)):
-                        raise ChatStoreError("Each native tool call needs a function name and JSON object arguments.")
+        _check_activity(chat.get("activity", []))
+        _check_agent_history(chat.get("agent_history", []))
         if not chat["title"].strip():
             raise ChatStoreError("A chat title cannot be empty.")
         if not isinstance(chat.get("mode"), str) or chat["mode"] not in _MODES:
             raise ChatStoreError("Chat mode must be 'chat' or 'dev'.")
-        if not isinstance(chat.get("messages"), list):
-            raise ChatStoreError("Chat messages must be a list.")
-        for message in chat["messages"]:
-            if (not isinstance(message, dict)
-                    or not isinstance(message.get("role"), str)
-                    or message["role"] not in _ROLES
-                    or not isinstance(message.get("content"), str)):
-                raise ChatStoreError("Each chat message needs a user, assistant, or system role and text content.")
-            if "partial" in message and (type(message["partial"]) is not bool or message["role"] != "assistant"):
-                raise ChatStoreError("Only assistant messages can have a boolean partial flag.")
-            try:
-                chat_attachments.validate(message.get("attachments", []))
-            except ValueError as error:
-                raise ChatStoreError(str(error)) from error
+        _check_messages(chat.get("messages"))
         context_length = chat.get("context_length")
         if context_length is not None and (type(context_length) is not int or context_length < 1):
             raise ChatStoreError("Chat context_length must be a positive integer or null.")
@@ -201,39 +259,8 @@ class ChatStore:
         record = deepcopy(chat)
         if record.get("project_id") is not None and (not isinstance(record["project_id"], str) or not _CHAT_ID.fullmatch(record["project_id"])):
             raise ChatStoreError("Chat project_id must be a canonical UUID or null.")
-        try:
-            chat_attachments.validate(record.get("attachments", []))
-        except ValueError as error:
-            raise ChatStoreError(str(error)) from error
-        branches = record.setdefault("branches", {})
-        if not isinstance(branches, dict):
-            raise ChatStoreError("Chat branches must be an object of message tails.")
-        for key, tails in branches.items():
-            if not isinstance(key, str) or not re.fullmatch(r"-1|0|[1-9][0-9]*", key):
-                raise ChatStoreError("Branch anchors must be message indices or -1.")
-            if not isinstance(tails, list) or not tails:
-                raise ChatStoreError("A branch must contain at least one alternative tail.")
-            for tail in tails:
-                if not isinstance(tail, list) or any(not isinstance(item, dict)
-                        or not isinstance(item.get("role"), str) or item["role"] not in _ROLES
-                        or not isinstance(item.get("content"), str) for item in tail):
-                    raise ChatStoreError("Branch tails must contain valid chat messages.")
-                for message in tail:
-                    try:
-                        chat_attachments.validate(message.get("attachments", []))
-                    except ValueError as error:
-                        raise ChatStoreError(str(error)) from error
-        prefixes = record.get("_branch_prefixes", {})
-        active = record.get("_branch_active", {})
-        if not isinstance(prefixes, dict) or not isinstance(active, dict):
-            raise ChatStoreError("Branch metadata must be objects.")
-        for key, hashes in prefixes.items():
-            if key not in branches or not isinstance(hashes, list) or len(hashes) != len(branches[key]) or any(
-                    not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value) for value in hashes):
-                raise ChatStoreError("Branch prefix metadata must match its tails.")
-        for key, choice in active.items():
-            if key not in branches or type(choice) is not int or not 0 <= choice < len(branches[key]):
-                raise ChatStoreError("Invalid active branch choice.")
+        _check_attachments(record.get("attachments", []))
+        _check_branches(record)
         if "incognito" in record and type(record["incognito"]) is not bool:
             raise ChatStoreError("Chat incognito must be true or false.")
         record.setdefault("project_files", [])
@@ -246,15 +273,7 @@ class ChatStore:
         record.setdefault("environment", default_environment(record))
         _environment(record["environment"])
         record.setdefault("summary", None)
-        summary = record["summary"]
-        if summary is not None:
-            if not isinstance(summary, dict) or set(summary) != {"text", "upto", "created_at"}:
-                raise ChatStoreError("Chat summary must contain text, upto and created_at.")
-            if not isinstance(summary["text"], str) or not summary["text"].strip():
-                raise ChatStoreError("Summary text must be nonempty text.")
-            if type(summary["upto"]) is not int or not 0 <= summary["upto"] <= len(record["messages"]):
-                raise ChatStoreError("Summary upto must be a valid message count.")
-            _timestamp(summary["created_at"], "summary created_at")
+        _check_summary(record["summary"], len(record["messages"]))
         return record
 
     @staticmethod
