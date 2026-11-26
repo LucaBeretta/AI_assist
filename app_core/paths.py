@@ -29,6 +29,23 @@ def replace_retrying(source, target):
             time.sleep(delay)
 
 
+def read_bytes_retrying(path, limit):
+    """Read up to ``limit`` bytes, retried briefly when Windows reports the file as in use.
+
+    While another thread or program replaces a file, Windows can refuse to open
+    it for a moment (Permission denied). The same short waits as
+    ``replace_retrying`` apply; a missing file is reported at once.
+    """
+    for delay in (*_REPLACE_DELAYS, None):
+        try:
+            with open(path, "rb") as source:
+                return source.read(limit)
+        except PermissionError:
+            if not _RETRY_REPLACE or delay is None:
+                raise
+            time.sleep(delay)
+
+
 def data_directory(environ=None):
     """``AI_ASSIST_DATA_DIR``, else ``%LOCALAPPDATA%\\AI Assist\\chats`` on Windows,
     else ``~/.aiassist/chats``. Not resolved or created here."""

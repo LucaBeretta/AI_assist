@@ -101,6 +101,50 @@ class StaticTests(unittest.TestCase):
         ''')
 
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_the_cube_switches_between_classic_and_cockpit_and_saves_the_choice(self):
+        self.run_scenario(r'''
+        const attributes={};
+        const rootElement={setAttribute(name,value){attributes[name]=value;},getAttribute(name){return attributes[name];}};
+        const saved=[];
+        window.pywebview.api.web_preferences=async()=>({ok:true,settings:{look:'cockpit'}});
+        window.pywebview.api.set_web_preferences=async value=>{saved.push(value);return {ok:true};};
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'cockpit.js'),'utf8'),
+          {document:{...document,documentElement:rootElement,getElementById:document.getElementById.bind(document)},window,String,Error});
+        await new Promise(resolve=>setImmediate(resolve));
+        assert.equal(attributes['data-look'],'cockpit');  // the saved look is applied on start
+        assert.equal(elements.get('setting-look').value,'cockpit');
+        await elements.get('look').listeners.click();
+        assert.equal(attributes['data-look'],'classic');
+        assert.equal(elements.get('look').attributes['aria-pressed'],'false');
+        assert.equal(JSON.stringify(saved.at(-1)),'{"look":"classic"}');
+        elements.get('setting-look').value='cockpit';
+        await elements.get('setting-look').listeners.change();
+        assert.equal(attributes['data-look'],'cockpit');
+        assert.equal(JSON.stringify(saved.at(-1)),'{"look":"cockpit"}');
+        window.lookui.setLook('neon');
+        assert.equal(attributes['data-look'],'classic');  // unknown looks fall back to classic
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_models_shared_by_a_paired_computer_appear_in_their_own_group_and_send_there(self):
+        self.run_scenario(r'''
+        window.pywebview.api.shared_ai_models=async()=>({ok:true,computers:[
+          {id:'pc1',backend:'peer:pc1',address:'192.168.1.20',state:'ready',models:['qwen3:32b']},
+          {id:'pc2',backend:'peer:pc2',address:'192.168.1.30',state:'offline',models:[]}]});
+        await window.listeners.pywebviewready();
+        for (let i=0;i<5;i++) await new Promise(resolve=>setImmediate(resolve));
+        const groups=elements.get('model').children;
+        const shared=groups.filter(group=>group.sharedComputer);
+        assert.equal(shared.length,1);
+        assert.equal(shared[0].label,'Paired computer 192.168.1.20');
+        assert.equal(shared[0].children[0].value,JSON.stringify(['peer:pc1','qwen3:32b']));
+        elements.get('model').value=JSON.stringify(['peer:pc1','qwen3:32b']);
+        elements.get('prompt').value='Hi';
+        await elements.get('composer').listeners.submit({preventDefault(){}});
+        assert.deepEqual(calls.at(-1).slice(1),['Hi','qwen3:32b',null,'peer:pc1']);
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
     def test_reading_sharing_settings_never_enables_the_listener(self):
         self.run_scenario(r'''
         vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'sharing.js'),'utf8'),{document,window,Map,Set,Error,String,Number,Boolean,Array,Date,Object});
@@ -112,7 +156,30 @@ class StaticTests(unittest.TestCase):
         elements.get('sharing-usage').checked=false;
         elements.get('sharing-enabled').checked=true;document.getElementById('sharing-address').value='192.168.1.10';
         await elements.get('sharing-enabled').listeners.change();
-        assert.deepEqual(calls.at(-1),['sharing',true,'192.168.1.10',false]);
+        assert.deepEqual(calls.at(-1),['sharing',true,'192.168.1.10',false,false]);
+        // Sharing AI is its own choice, and each paired device needs its own tick.
+        window.pywebview.api.sharing_state=async()=>({ok:true,enabled:true,usage:false,ai:true,host:null,peers:{},clients:[{id:'abcdef0123456789',ai:false}]});
+        window.pywebview.api.allow_shared_ai=async (...args)=>{calls.push(['allow',...args]);return {ok:true,clients:[{id:'abcdef0123456789',ai:true}]};};
+        await window.sharingui.openSettings();
+        assert.equal(elements.get('sharing-ai').checked,true);
+        assert.equal(elements.get('sharing-clients-box').hidden,false);
+        assert.match(elements.get('sharing-clients').textContent,/abcdef01/);
+        const tick=elements.get('sharing-clients').children[0].children[0].children[0];
+        tick.checked=true;
+        await tick.listeners.change();
+        assert.deepEqual(calls.at(-1),['allow','abcdef0123456789',true]);
+        await elements.get('sharing-ai').listeners.change();
+        assert.deepEqual(calls.at(-1),['sharing',true,'192.168.1.10',false,true]);
+        let handled = false;
+        elements.get('pair-address').listeners.paste({
+          clipboardData:{getData:()=> ' 192.168.1.20:49152 '},
+          preventDefault(){handled = true;}
+        });
+        assert(handled);
+        assert.equal(elements.get('pair-address').value,'192.168.1.20');
+        assert.equal(elements.get('pair-port').value,'49152');
+        window.sharingui.onEvent({type:'job_done',operation:'sharing',result:{peer_id:'peer'}});
+        assert.equal(elements.get('sharing-status').textContent,'Device paired securely. Open Compute to check live usage.');
         ''')
 
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
@@ -150,6 +217,8 @@ class StaticTests(unittest.TestCase):
         const timers=[];
         const context={document,window,Map,Set,Error,String,Number,Boolean,Array,Date,setInterval:(fn,ms)=>{timers.push([fn,ms]);return 1;}};
         vm.runInNewContext(fs.readFileSync(require('node:path').join(dir,'compute.js'),'utf8'),context);
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(dir,'security.js'),'utf8'),context);
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(dir,'sharing.js'),'utf8'),context);
         vm.runInNewContext(fs.readFileSync(require('node:path').join(dir,'compute-window.js'),'utf8'),context);
         const api=window.pywebview.api;
         api.set_compute_active=async (...args)=>{calls.push(['compute',...args]);return {ok:true,data:null};};
@@ -165,7 +234,34 @@ class StaticTests(unittest.TestCase):
         assert.equal(elements.get('compute-cpu-meter').value,40);
         assert.equal(elements.get('cube-cpu').textContent,'40%');
         assert.equal(elements.get('cube-gpu').textContent,'–');
+        assert.equal(elements.get('compute-gpu-sensors').hidden,true);
+        data.snapshot.gpus=[{percent:8,temperature_c:31,power_w:19.12}];
+        data.values.gpus=[{name:'NVIDIA GeForce RTX 4090',percent:'8.0%',memory:'17.2 GiB / 24.0 GiB'}];
+        await window.computewindow.refresh();
+        assert.equal(elements.get('compute-gpu-meter').value,8);
+        assert.equal(elements.get('compute-gpu-sensors').hidden,false);
+        assert.equal(elements.get('compute-gpu-sensors').textContent,'31 °C · 19.1 W');
+        assert.equal(elements.get('cube-gpu-detail').textContent,'31 °C');
         assert.equal(elements.get('cube-model').textContent,'qwen3.5:9b');
+        api.sharing_state=async()=>{calls.push(['sharing_state']);return {ok:true,enabled:false};};
+        api.pair_device=async (...args)=>{calls.push(['pair',...args]);return {ok:true,job_id:'pair'};};
+        api.respond_internet=async (...args)=>{calls.push(['respond',...args]);return {ok:true};};
+        const pairing=elements.get('net-pairing');
+        pairing.open=true;
+        pairing.listeners.toggle();
+        assert.deepEqual(calls.at(-1),['sharing_state']);
+        for (const [id,value] of [['address','192.168.1.20'],['port','49152'],['code','0123456789abcdef'],['pin','012345']]) {
+          document.getElementById('pair-'+id).value=value;
+        }
+        elements.get('pair-form').listeners.submit({preventDefault(){}});
+        assert.deepEqual(calls.at(-1),['pair','192.168.1.20',49152,'0123456789abcdef','012345','compute']);
+        window.app.onEvent([{type:'internet_approval',approval_id:'pair-approval',stage:1,remaining_seconds:3,request:{target:'192.168.1.20'}}]);
+        assert.equal(elements.get('internet-dialog').open,true);
+        await elements.get('internet-allow').listeners.click();
+        assert.deepEqual(calls.at(-1),['respond','pair-approval','continue']);
+        window.app.onEvent([{type:'internet_closed',approval_id:'pair-approval'},{type:'job_done',operation:'sharing',result:{peer_id:'peer'}}]);
+        assert.equal(elements.get('internet-dialog').open,false);
+        assert.equal(elements.get('sharing-status').textContent,'Device paired securely. Look for Live under Paired computers.');
         await elements.get('compute-fullscreen').listeners.click();
         assert.equal(elements.get('compute-fullscreen').textContent,'Exit full screen');
         await window.computewindow.toggleFullscreen();
@@ -386,7 +482,7 @@ class StaticTests(unittest.TestCase):
         vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'welcome.js'),'utf8'), {document,window,Map,Set,Error,String,Number,Boolean,Array});
         const api=window.pywebview.api;
         api.set_web_preferences=async value=>{calls.push(['preferences',value.first_run_complete]); return {ok:true};};
-        api.recommend_models=async()=>({ok:true,hardware:{cpu:'CPU',ram_total_bytes:32*1024**3,gpus:[]},recommendations:[{name:'recommended',fit:'fits GPU'}]});
+        api.recommend_models=async()=>({ok:true,hardware:{cpu:'CPU',ram_total_bytes:32*1024**3,gpus:[]},recommendations:[{name:'recommended',fit:'fits GPU',size_bytes:5.2e9}]});
         api.pull_model=async name=>{
           window.app.onEvent([{type:'pull_progress',pull_id:'p1',model:name,completed:5,total:10,status:'downloading'},
                               {type:'pull_done',pull_id:'p1',model:name}]);
@@ -398,6 +494,7 @@ class StaticTests(unittest.TestCase):
         await window.welcomeui.onReady({engine:'Ollama',models:[],settings:{first_run_complete:false}});
         assert.equal(elements.get('welcome-view').hidden,false);
         assert.match(elements.get('welcome-hardware').textContent,/32.0 GB RAM/);
+        assert.match(elements.get('welcome-reason').textContent,/5\.2 GB download/);
         await elements.get('welcome-start').listeners.click();
         assert.equal(elements.get('welcome-progress').value,5);
         assert.equal(elements.get('welcome-open').hidden,false);
@@ -407,6 +504,73 @@ class StaticTests(unittest.TestCase):
         assert(calls.some(item=>item[0]==='select'&&item[2]==='recommended'));
         await elements.get('welcome-skip').listeners.click();
         assert(calls.some(item=>item[0]==='preferences'&&item[1]===true));
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_welcome_stays_closed_when_a_paired_computer_shares_its_models(self):
+        self.run_scenario(r'''
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'welcome.js'),'utf8'), {document,window,Map,Set,Error,String,Number,Boolean,Array});
+        const api=window.pywebview.api;
+        api.set_web_preferences=async()=>({ok:true});
+        api.shared_ai_models=async()=>({ok:true,computers:[{id:'pc',state:'ready',models:['qwen3:32b']}]});
+        // Without the app's own start-up, so only this call can open the welcome page.
+        await window.welcomeui.onReady({engine:'Ollama',models:[],settings:{first_run_complete:true}});
+        assert.notEqual(document.getElementById('welcome-view').hidden,false);
+        api.shared_ai_models=async()=>({ok:true,computers:[{id:'pc',state:'offline',models:[]}]});
+        await window.welcomeui.onReady({engine:'Ollama',models:[],settings:{first_run_complete:true}});
+        assert.equal(elements.get('welcome-view').hidden,false);  // nothing to chat with: the welcome page opens
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_welcome_reads_saved_preferences_when_this_computer_has_no_engine(self):
+        self.run_scenario(r'''
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'welcome.js'),'utf8'), {document,window,Map,Set,Error,String,Number,Boolean,Array});
+        const api=window.pywebview.api;
+        api.set_web_preferences=async()=>({ok:true});
+        api.web_preferences=async()=>({ok:true,settings:{first_run_complete:true}});
+        api.shared_ai_models=async()=>({ok:true,computers:[{id:'pc',state:'ready',models:['qwen3:32b']}]});
+        await window.welcomeui.onReady(null);  // the state call failed: no Ollama here
+        assert.notEqual(document.getElementById('welcome-view').hidden,false);
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_welcome_character_builds_with_blender_and_explains_when_missing(self):
+        self.run_scenario(r'''
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'welcome.js'),'utf8'), {document,window,Map,Set,Error,String,Number,Boolean,Array});
+        const api=window.pywebview.api;
+        const options={height:['short','medium','tall'],build:['slim','average','broad'],hair_style:['none','short','bun'],accessory:['none','headphones'],skin:['light','medium']};
+        api.set_web_preferences=async()=>({ok:true});
+        api.recommend_models=async()=>({ok:true,hardware:{cpu:'CPU',gpus:[]},recommendations:[]});
+        api.character_state=async()=>({ok:true,blender:false,choices:null,portrait:null,building:false,options});
+        await window.listeners.pywebviewready();
+        await window.welcomeui.onReady({engine:'Ollama',models:[],settings:{first_run_complete:false}});
+        await new Promise(resolve=>setImmediate(resolve));
+        assert.equal(elements.get('welcome-character').hidden,false);
+        assert.equal(elements.get('character-create').hidden,true);
+        assert.match(elements.get('character-status').textContent,/blender\.org/);
+        api.character_state=async()=>({ok:true,blender:true,choices:null,portrait:null,building:false,options});
+        api.build_character=async choices=>{calls.push(['character',choices]);return {ok:true,job_id:'c1'};};
+        await window.welcomeui.loadCharacter();
+        assert.equal(elements.get('character-create').hidden,false);
+        assert.equal(elements.get('character-form').hidden,false);
+        assert.equal(elements.get('character-skin').value,'light');
+        assert.equal(elements.get('character-hair_style').children.at(-1).textContent,'Bun');
+        elements.get('character-name').value='Luca';
+        elements.get('character-accessory').value='headphones';
+        await elements.get('character-create').listeners.click();
+        const [, choices]=calls.find(item=>item[0]==='character');
+        assert.equal(choices.name,'Luca');
+        assert.equal(choices.accessory,'headphones');
+        assert.equal(elements.get('character-create').disabled,true);
+        window.app.onEvent([{type:'job_done',operation:'character',result:{portrait:'data:image/png;base64,AAAA'}}]);
+        assert.equal(elements.get('character-portrait').hidden,false);
+        assert.equal(elements.get('character-portrait').src,'data:image/png;base64,AAAA');
+        assert.equal(elements.get('character-status').textContent,'Your character is ready.');
+        assert.equal(elements.get('character-create').disabled,false);
+        window.app.onEvent([{type:'job_done',operation:'character',result:{portrait:'data:image/png;base64,AAAA',files:{avatar:'/x/character.vrm'},folder:'/data/character'}}]);
+        assert.match(elements.get('character-status').textContent,/Unreal Engine.*\/data\/character/);
+        window.app.onEvent([{type:'job_error',operation:'character',error:'Blender could not finish the character.'}]);
+        assert.equal(elements.get('character-status').textContent,'Blender could not finish the character.');
         ''')
 
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
@@ -670,6 +834,94 @@ class StaticTests(unittest.TestCase):
         assert.equal(tracksStopped, true);
         assert.equal(save.disabled, false);
         assert.deepEqual(calls, [['Y2xpcA==', 'video/mp4']]);
+        assert.equal(el('quick-animation-status').textContent, 'Clip saved.');
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_quick_animation_records_its_3d_sound_with_the_clip(self):
+        self.run_scenario(r'''
+        await window.listeners.pywebviewready();
+        const el = id => document.getElementById(id);
+        const canvas = el('quick-animation-canvas');
+        const added = [];
+        const stopped = [];
+        let options = null;
+        canvas.captureStream = () => ({
+          addTrack: track => added.push(track),
+          getTracks: () => [{stop() { stopped.push('picture'); }}, ...added],
+        });
+        const makeCanvas = document.createElement;
+        document.createElement = tag => {
+          const node = makeCanvas(tag);
+          if (tag === 'canvas') node.getContext = () => ({drawImage() {}});
+          return node;
+        };
+        class Reader {
+          readAsDataURL(file) {
+            this.result = `data:${file.type};base64,Y2xpcA==`;
+            this.onload();
+          }
+        }
+        class Picture {
+          naturalWidth = 640;
+          naturalHeight = 480;
+          async decode() {}
+        }
+        class Recorder {
+          static isTypeSupported(type) { return type === 'video/mp4'; }
+          constructor(stream, settings) {
+            options = settings;
+            this.mimeType = settings.mimeType;
+            this.state = 'inactive';
+          }
+          start() { this.state = 'recording'; }
+          stop() {
+            this.state = 'inactive';
+            this.ondataavailable({data: new Blob(['clip'], {type: this.mimeType})});
+            this.onstop();
+          }
+        }
+        const starts = [];
+        window.i18n = {t: message => message};
+        window.MediaRecorder = Recorder;
+        window.photoShader = {duration: 3, create: () => ({setImage() {}, draw() {}})};
+        window.spatialSound = {
+          checkFile: file => file,
+          decode: async () => 'decoded sound',
+          start: (...args) => {
+            starts.push(args);
+            return {tracks: [{stop() { stopped.push('sound track'); }}], stop() { stopped.push('sound'); }};
+          },
+        };
+        const frames = new Map();
+        let nextFrame = 0;
+        const root = require('node:path').dirname(process.argv[1]);
+        const globals = {
+          document, window, FileReader: Reader, Image: Picture, Blob,
+          performance: {now: () => 0},
+          requestAnimationFrame: callback => { frames.set(++nextFrame, callback); return nextFrame; },
+          cancelAnimationFrame: id => frames.delete(id),
+        };
+        for (const script of ['canvas-clip.js', 'quick-animation.js']) {
+          vm.runInNewContext(fs.readFileSync(require('node:path').join(root, script), 'utf8'), globals);
+        }
+        el('quick-animation-image').files = [{size: 20, type: 'image/png'}];
+        await el('quick-animation-image').listeners.change();
+        el('quick-animation-sound').files = [{size: 20, type: 'audio/wav'}];
+        el('quick-animation-movement').value = 'overhead';
+        await el('quick-animation-sound').listeners.change();
+        assert.equal(el('quick-animation-movement-field').hidden, false);
+        window.pywebview.api.save_quick_animation = async () => ({ok: true, path: '/video.mp4'});
+
+        const recording = el('quick-animation-save').listeners.click();
+        assert.deepEqual(JSON.parse(JSON.stringify(starts)), [['decoded sound', 'overhead', 3, {record: true}]]);
+        assert.equal(added.length, 1);
+        assert.equal(options.audioBitsPerSecond, 192000);
+        const [id, tick] = frames.entries().next().value;
+        frames.delete(id);
+        tick(3000);
+        await recording;
+        assert.deepEqual(stopped, ['picture', 'sound track', 'sound']);
         assert.equal(el('quick-animation-status').textContent, 'Clip saved.');
         ''')
 

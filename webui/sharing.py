@@ -14,7 +14,10 @@ from app_core.paths import ensure_private_directory
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from peer_pairing import PairingError, PeerOffline, TrustStore, UsageUnavailable, fetch_usage, permitted_ipv4, pair_with_host
+import ipaddress
+import urllib.parse
+
+from peer_pairing import PairingError, PeerOffline, TrustStore, UsageUnavailable, _safe_id, fetch_usage, permitted_ipv4, pair_with_host
 from sharing_control import ManualSharingController
 from webui.api_utils import json_method
 
@@ -23,9 +26,21 @@ USAGE_REFRESH = 5.0
 REDISCOVER_AFTER = 60.0
 
 
+def local_ollama(url):
+    """This computer's Ollama as http://127.0.0.1:port, or None when the app uses Ollama elsewhere."""
+    parsed = urllib.parse.urlsplit(url or "")
+    try:
+        loopback = parsed.scheme == "http" and ipaddress.ip_address(
+            "127.0.0.1" if parsed.hostname == "localhost" else parsed.hostname or "").is_loopback
+        port = parsed.port or 11434
+    except ValueError:
+        return None
+    return f"http://127.0.0.1:{port}" if loopback else None
+
+
 class PairingProcess:
-    def __init__(self, address, directory, share_usage=False):
-        self.address, self.directory, self.share_usage = address, directory, share_usage
+    def __init__(self, address, directory, share_usage=False, share_ai=None):
+        self.address, self.directory, self.share_usage, self.share_ai = address, directory, share_usage, share_ai
         self.process = None
         self.answers = queue.Queue()
         self.lock = threading.RLock()
@@ -63,7 +78,8 @@ class PairingProcess:
         ensure_private_directory(self.directory)
         with self.lock:
             self.process = subprocess.Popen([sys.executable, "-u", str(Path(__file__).with_name("pairing_worker.py")),
-                self.address, str(self.directory), *(["--share-usage"] if self.share_usage else [])], env=environment, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                self.address, str(self.directory), *(["--share-usage"] if self.share_usage else []),
+                *(["--share-ai", self.share_ai] if self.share_ai else [])], env=environment, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL, text=True, encoding="utf-8",
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             threading.Thread(target=self._read, daemon=True, name="pairing-control").start()
@@ -111,6 +127,7 @@ class SharingApi:
         self._sharing_directory = self._store.directory / "pairing"
         self._sharing_address = None
         self._sharing_usage = False
+        self._sharing_ai = None  # this computer's Ollama URL while shared AI is on; off on every launch
         self._sharing = ManualSharingController(self._create_pairing_service)
         self._peer_usage_cache = {}
         self._peer_usage_time = 0.0
@@ -118,7 +135,8 @@ class SharingApi:
         self._peer_usage_lock = threading.Lock()
 
     def _create_pairing_service(self):
-        self._sharing_service = PairingProcess(self._sharing_address, self._sharing_directory, self._sharing_usage)
+        self._sharing_service = PairingProcess(self._sharing_address, self._sharing_directory, self._sharing_usage,
+                                               self._sharing_ai)
         return self._sharing_service
 
     def _client_id(self):
@@ -183,6 +201,11 @@ class SharingApi:
                     rows[key].update(deepcopy(value))
         return rows
 
+    def _ai_clients(self):
+        """Devices that paired with this computer, and whether each may use its AI. IDs only, never tokens."""
+        store = TrustStore(self._sharing_directory)
+        return [{"id": key, "ai": store.ai_allowed(key)} for key in sorted(store._read("paired_clients.json"))]
+
     def _paired_records(self):
         # TrustStore owns the format; expose metadata only, without contacting peers.
         records = TrustStore(self._sharing_directory)._read("paired_servers.json")
@@ -198,19 +221,26 @@ class SharingApi:
                 self._sharing.disable()
                 enabled = False
             return {"ok": True, "enabled": enabled, "state": self._sharing.state, "usage": bool(enabled and self._sharing_usage),
-                    "host": deepcopy(service.details) if enabled else None, "peers": self._paired_records()}
+                    "ai": bool(enabled and self._sharing_ai), "host": deepcopy(service.details) if enabled else None,
+                    "peers": self._paired_records(), "clients": self._ai_clients()}
 
     @json_method
-    def set_sharing(self, enabled, address=None, share_usage=False):
-        if type(enabled) is not bool or type(share_usage) is not bool:
+    def set_sharing(self, enabled, address=None, share_usage=False, share_ai=False, window="main"):
+        if type(enabled) is not bool or type(share_usage) is not bool or type(share_ai) is not bool:
             raise ValueError("Sharing must be true or false.")
         if enabled and (not isinstance(address, str) or not permitted_ipv4(address)):
             raise ValueError("Enter this computer's explicit private LAN IPv4 address.")
+        ollama = local_ollama(self._engine.ollama_url()) if enabled and share_ai else None
+        if enabled and share_ai and ollama is None:
+            raise ValueError("Only Ollama running on this computer can be shared.")
+        sends = "Discovery metadata and pairing credentials over verified TLS"
+        if share_usage:
+            sends += "; for paired devices, this computer's CPU, RAM, GPU and loaded model names"
+        if ollama:
+            sends += ("; for devices you allowed, this computer's model list and AI answers to the chat "
+                      "messages they send (no files, commands or downloads)")
         def work(progress, cancel):
-            if enabled and not network_gate.allow_external("LAN pairing listener", address,
-                    ("Discovery metadata, pairing credentials and, for paired devices, this computer's CPU, RAM, GPU "
-                     "and loaded model names over verified TLS; no chats, files or commands.") if share_usage else
-                    "Discovery metadata and pairing credentials over verified TLS; no chats, files or commands.",
+            if enabled and not network_gate.allow_external("LAN pairing listener", address, sends + ".",
                     "Enable manual LAN pairing until you turn it off or close AI Assist."):
                 raise RuntimeError("LAN sharing was blocked.")
             with self._sharing_lock:
@@ -218,9 +248,11 @@ class SharingApi:
                     return {"ok": True, "enabled": False}
                 self._sharing_address = address
                 self._sharing_usage = share_usage if enabled else False
+                self._sharing_ai = ollama
                 service = self._sharing_service
-                if enabled and self._sharing.enabled and service is not None and service.share_usage != share_usage:
-                    self._sharing.disable()  # restart so the usage choice takes effect
+                if enabled and self._sharing.enabled and service is not None and (
+                        service.share_usage != share_usage or service.share_ai != ollama):
+                    self._sharing.disable()  # restart so the usage and AI choices take effect
                 if enabled:
                     self._sharing.enable(user_initiated=True)
                     if cancel.is_set() or self._sharing_closed:
@@ -231,20 +263,29 @@ class SharingApi:
         with self._lock:
             if self._closed or self._sharing_closed:
                 raise ValueError("The app is closing.")
-            return self._jobs.start("sharing", work, key="sharing")
+            return self._jobs.start("sharing", work, key="sharing", window="compute" if window == "compute" else "main")
 
     @json_method
-    def new_pairing_pin(self):
+    def allow_shared_ai(self, peer_id, allowed):
+        """Let one paired device use this computer's AI, or stop it. Takes effect on its next request."""
+        if type(allowed) is not bool or not isinstance(peer_id, str) or not _safe_id(peer_id):
+            raise ValueError("Choose a paired device.")
+        with self._sharing_lock:
+            TrustStore(self._sharing_directory).allow_ai(peer_id, allowed)
+        return {"ok": True, "clients": self._ai_clients()}
+
+    @json_method
+    def new_pairing_pin(self, window="main"):
         def work(progress, cancel):
             with self._sharing_lock:
                 if not self._sharing.enabled or self._sharing_closed:
                     raise ValueError("Enable LAN sharing first.")
                 self._sharing_service.new_pin()
                 return self.sharing_state()
-        return self._jobs.start("sharing", work, key="sharing")
+        return self._jobs.start("sharing", work, key="sharing", window="compute" if window == "compute" else "main")
 
     @json_method
-    def pair_device(self, address, port, verification_code, pin):
+    def pair_device(self, address, port, verification_code, pin, window="main"):
         # The core validates the address, port, certificate code and PIN before connecting.
         def work(progress, cancel):
             if not network_gate.allow_external("Pair LAN device", str(address),
@@ -263,7 +304,7 @@ class SharingApi:
         with self._lock:
             if self._closed or self._sharing_closed:
                 raise ValueError("The app is closing.")
-            return self._jobs.start("sharing", work, key="sharing")
+            return self._jobs.start("sharing", work, key="sharing", window="compute" if window == "compute" else "main")
 
     def _close_sharing(self):
         self._sharing_closed = True

@@ -64,6 +64,25 @@ Ollama executes the approved task once. Colibri then receives one bounded review
 
 Review is off by default. It adds at most one 768-token review request with a 120-second HTTP deadline. A failed or cancelled review preserves completed worker changes and history; the worker is never automatically retried. Loading and review can add time. Activity records the stages.
 
+### Continuous improvement feedback (opt-in memory)
+
+After a successfully saved chat answer or completed Developer task, AI Assist offers a small,
+non-modal **Was this useful?** prompt. **Yes** records a rating; **Not quite** allows a
+short correction. **Skip** dismisses the prompt. The existing manual **Give feedback**
+action still prepares a revised prompt without sending it.
+
+Ratings and corrections stay in the private local `task-feedback.json` journal.
+They do not trigger a model request, repeat any commands, modify project files,
+or automatically change model instructions. A separate unchecked **Remember this as a
+preference** option explicitly adds the user's written preference to shared memory.
+Incognito chats never persist feedback. The journal contains no original answer,
+prompt, file content or task command. Feedback is bounded and saved atomically.
+The offer is not modal; the user can continue to work without rating.
+
+The goal is to make learning visible and controlled: corrections may guide a future
+revision when the user asks; the journal is not evidence that the model's quality
+has improved without subsequent evaluation.
+
 ### Feedback and verification
 
 **Give feedback** on an answer prepares a follow-up draft with your comments and optional success criteria. Review the draft before sending it. Feedback does not send a request or repeat edits automatically.
@@ -73,6 +92,20 @@ Developer commands run with your account's permissions from the chosen project d
 ### Blender
 
 When Blender is installed, Developer tells the model where it is, so a task like "render a 512-pixel preview of scene.blend" or "add a ground plane to every .blend file here" can use it. The model writes a Blender Python script in the project and asks to run Blender in the background (`--background --factory-startup --python script.py`). The file write and the command each need your approval, as usual, and commands stop after 120 seconds. AI Assist looks for Blender on `PATH`, in `Program Files\Blender Foundation` on Windows (the newest version) and in `Applications` on macOS. Set `AI_ASSIST_BLENDER` to choose a specific copy. This does not connect to a Blender window that is already open.
+
+### Blender, live
+
+To let Developer work on the scene you have open, install the add-on once. In Blender, choose **Edit → Preferences → Add-ons → Install…** and pick `blender_addon/ai_assist_bridge.py` from the AI Assist folder, then enable **AI Assist Bridge**. Open the 3D Viewport sidebar (N), choose the **AI Assist** tab and click **Connect**.
+
+While Blender is connected, Developer gets two more tools. **blender_scene** reads the scene: objects, transforms, materials, selection, frames and render settings. **blender_run** runs Blender Python. It shows you the code first, and runs only when you click **Run**. Each run is one undo step in Blender, so Ctrl+Z takes it back.
+
+The add-on is off until you click Connect, and off again when you click Disconnect or quit Blender. It listens only on this computer (127.0.0.1) and answers only AI Assist, which reads a secret from its private data folder (`blender-bridge.json`). Code running in Blender is not sandboxed, and AI Assist's internet gate cannot see inside Blender, so read it before you approve. To check the add-on with a real Blender, run `blender --background --factory-startup --python tools/blender_bridge_smoke.py`.
+
+### Your 3D character
+
+`character_builder.py` creates a stylised 3D character with the Blender installed on this computer, running in the background with nothing downloaded. It accepts a name, height, build, skin tone, hairstyle (none, short, long, bun, curly, spiky), hair, eye and clothing colours, and an accessory (glasses, hat, headphones). `blender_character.py` builds the character from Blender's own shapes and writes `portrait.png`, `character.blend` and, where Blender can export glTF, `character.glb`. A description in your own words can fill in the choices: a local model's reply is reduced to valid choices only (`choices_from_model_reply`). The first-run page offers this step.
+
+The character has a humanoid skeleton (hips, spine, chest, neck, head, arms, hands, legs and feet, named as in VRM 1.0). Its rest pose is a T-pose, as game engines expect; the portrait lowers the arms. AI Assist also writes `character.vrm`, the same model with VRM's bone map and terms of use, for VRM apps and worlds. To use the character in Unreal Engine 5, import `character.glb` as a skeletal mesh (drag it into the Content Browser), or import `character.vrm` with the VRM4U plugin. The VRM terms start at the most careful settings (only you may use the avatar, non-commercial use); change them in any VRM editor.
 
 ### Shared memory across chats
 

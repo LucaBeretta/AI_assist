@@ -42,3 +42,18 @@ class PreferenceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LookPreferenceTests(unittest.TestCase):
+    def setUp(self):
+        fixtures.ApiTests.setUp(self)
+
+    def test_the_look_is_classic_until_chosen_and_survives_a_restart(self):
+        self.assertEqual(self.api.web_preferences()["settings"]["look"], "classic")
+        self.assertTrue(self.api.set_web_preferences({"look": "cockpit"})["ok"])
+        self.assertEqual(settings.load(self.store.directory)["look"], "cockpit")
+        restarted = fixtures.Api(self.events, self.store, self.engine, colibri=self.colibri)
+        self.addCleanup(restarted._close)
+        self.assertEqual(restarted.web_preferences()["settings"]["look"], "cockpit")
+        for look in ("3d", "", None, True):
+            self.assertFalse(self.api.set_web_preferences({"look": look})["ok"])

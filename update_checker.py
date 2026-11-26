@@ -8,6 +8,8 @@ import urllib.request
 
 
 SHIPPED_SUBFOLDER_FILE = ("child_gate", "sitecustomize.py")
+# The add-on people install in Blender to connect it to AI Assist.
+BLENDER_ADDON_FILE = ("blender_addon", "ai_assist_bridge.py")
 # Packages whose modules ship with the app, and the web workspace's page files.
 SHIPPED_PACKAGES = ("app_core", "webui")
 SHIPPED_STATIC = ("webui", "static")
@@ -27,7 +29,7 @@ def is_shipped(path):
             "install_runtime.ps1", "README.md", "LEGGIMI-colibri.md"})
     if len(parts) == 3 and parts[:2] == ("assets", "icon"):
         return path.suffix.lower() in {".ico", ".icns", ".png", ".svg"}
-    if parts == SHIPPED_SUBFOLDER_FILE:
+    if parts == SHIPPED_SUBFOLDER_FILE or parts == BLENDER_ADDON_FILE:
         return True
     if len(parts) == 2 and parts[0] in SHIPPED_PACKAGES:
         return path.suffix == ".py"

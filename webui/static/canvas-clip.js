@@ -15,13 +15,19 @@ window.canvasClip = (() => {
     });
   }
 
-  async function record(canvas, {mimeType, duration, draw}) {
+  // `audio`, when given, starts the sound to record with the picture and
+  // returns {tracks, stop}, as Quick animation's 3D sound does.
+  async function record(canvas, {mimeType, duration, draw, audio}) {
     draw(0);
     const stream = canvas.captureStream(30);
+    let sound = null;
     let frame = 0;
     let recorder;
     try {
-      recorder = new window.MediaRecorder(stream, {mimeType, videoBitsPerSecond: 3_000_000});
+      sound = audio ? audio() : null;
+      sound?.tracks.forEach(track => stream.addTrack(track));
+      recorder = new window.MediaRecorder(stream, {mimeType, videoBitsPerSecond: 3_000_000,
+                                                   ...(sound ? {audioBitsPerSecond: 192_000} : {})});
       return await new Promise((resolve, reject) => {
         const parts = [];
         recorder.ondataavailable = event => {
@@ -54,6 +60,7 @@ window.canvasClip = (() => {
         if (recorder && recorder.state !== "inactive") recorder.stop();
       } finally {
         stream.getTracks().forEach(track => track.stop());
+        sound?.stop();
       }
     }
   }

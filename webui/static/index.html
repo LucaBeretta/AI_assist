@@ -6,6 +6,8 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-eval'; style-src 'self'; img-src 'self' data:; media-src blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <title>AI Assist</title>
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="feedback-loop.css">
+  <link rel="stylesheet" href="cockpit.css">
   <script defer src="strings.js"></script>
   <script defer src="markdown.js"></script>
   <script defer src="workspace.js"></script>
@@ -20,11 +22,14 @@
   <script defer src="sharing.js"></script>
   <script defer src="photo-video.js"></script>
   <script defer src="photo-shader.js"></script>
+  <script defer src="spatial-sound.js"></script>
   <script defer src="canvas-clip.js"></script>
   <script defer src="quick-animation.js"></script>
   <script defer src="camera-scene.js"></script>
   <script defer src="camera-studio.js"></script>
   <script defer src="recent-clips.js"></script>
+  <script defer src="feedback-loop.js"></script>
+  <script defer src="cockpit.js"></script>
 </head>
 <body>
 <div class="app">
@@ -93,6 +98,24 @@
           <h1 id="welcome-title"><span data-i18n="Your first local conversation"></span></h1>
           <p class="welcome-lead"><span data-i18n="Choose a model that fits this computer. Your conversations stay here."></span></p>
           <section class="side-group"><h2><span data-i18n="This computer"></span></h2><p id="welcome-hardware" class="mono"><span data-i18n="Reading hardware…"></span></p></section>
+          <section id="welcome-character" class="side-group" hidden><h2 data-i18n="Your 3D character"></h2>
+            <p class="setting-hint" data-i18n="Make a character that looks like you. Blender builds it on this computer; nothing goes online."></p>
+            <div class="character-layout">
+            <div id="character-form" class="character-form" hidden>
+              <label class="field"><span data-i18n="Name"></span><input id="character-name" maxlength="40" autocomplete="off"></label>
+              <label class="field"><span data-i18n="Skin tone"></span><select id="character-skin"></select></label>
+              <label class="field"><span data-i18n="Hair"></span><select id="character-hair_style"></select></label>
+              <label class="field"><span data-i18n="Hair colour"></span><input id="character-hair_color" type="color" value="#3b2a20"></label>
+              <label class="field"><span data-i18n="Top colour"></span><input id="character-top_color" type="color" value="#0e8c78"></label>
+              <label class="field"><span data-i18n="Height"></span><select id="character-height"></select></label>
+              <label class="field"><span data-i18n="Build"></span><select id="character-build"></select></label>
+              <label class="field"><span data-i18n="Extra"></span><select id="character-accessory"></select></label>
+            </div>
+            <img id="character-portrait" class="character-portrait" alt="" hidden>
+            </div>
+            <p id="character-status" class="setting-hint" role="status" aria-live="polite"></p>
+            <div class="welcome-actions"><button id="character-create" class="btn" type="button" hidden><span data-i18n="Create with Blender"></span></button></div>
+          </section>
           <section class="side-group"><h2 data-i18n="A model to start with"></h2>
             <label class="field"><span><span data-i18n="Recommended model"></span></span><select id="welcome-model"></select></label>
             <p id="welcome-reason" class="setting-hint"></p>
@@ -116,6 +139,10 @@
           </button>
           <button id="delete-chat" class="icon-btn" type="button" aria-label="Delete chat" title="Delete chat" data-i18n-aria-label="Delete chat" data-i18n-title="Delete chat">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"></path></svg>
+          </button>
+          <button id="look" class="icon-btn" type="button" aria-pressed="false" aria-label="3D look" title="Switch between the classic and the 3D look" data-i18n-aria-label="3D look" data-i18n-title="Switch between the classic and the 3D look">
+            <svg class="icon-cube-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"></path><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"></path></svg>
+            <svg class="icon-cube-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z" fill="currentColor" fill-opacity=".25"></path><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"></path></svg>
           </button>
           <button id="theme" class="icon-btn" type="button" aria-label="Switch theme" title="Switch theme · Ctrl+Shift+L" data-i18n-aria-label="Switch theme" data-i18n-title="Switch theme · Ctrl+Shift+L">
             <svg class="icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg>
@@ -346,6 +373,16 @@
                   <option value="ripple" data-i18n="Ripple"></option>
                 </select>
               </label>
+              <label class="field"><span data-i18n="3D sound (optional)"></span>
+                <input id="quick-animation-sound" type="file" accept="audio/*">
+              </label>
+              <label id="quick-animation-movement-field" class="field" hidden><span data-i18n="Sound movement"></span>
+                <select id="quick-animation-movement">
+                  <option value="around" data-i18n="Circles around you"></option>
+                  <option value="sideways" data-i18n="Left to right"></option>
+                  <option value="overhead" data-i18n="Over your head"></option>
+                </select>
+              </label>
               <div class="model-actions">
                 <button id="quick-animation-play" class="btn" type="button" disabled data-i18n="Play preview"></button>
                 <button id="quick-animation-save" class="btn primary" type="button" disabled data-i18n="Save clip"></button>
@@ -470,6 +507,8 @@
     </select></label>
     <label class="setting-row"><span><span class="setting-title"><span data-i18n="Theme"></span></span><span class="setting-hint"><span data-i18n="Ctrl+Shift+L switches anywhere."></span></span></span>
       <select id="setting-theme"><option value="night" data-i18n="Night"></option><option value="day" data-i18n="Day"></option></select></label>
+    <label class="setting-row"><span><span class="setting-title"><span data-i18n="Look"></span></span><span class="setting-hint"><span data-i18n="The cube button at the top switches anywhere."></span></span></span>
+      <select id="setting-look"><option value="classic" data-i18n="Classic"></option><option value="cockpit" data-i18n="3D cockpit"></option></select></label>
   </section>
   <section class="setting-group" data-pane="general"><h3 data-i18n="Updates"></h3>
     <div class="setting-row"><span><span class="setting-title"><span data-i18n="Check for updates"></span></span><span class="setting-hint" data-i18n="Checks upstream source files. Local changes can also appear as differences."></span></span>
@@ -546,10 +585,11 @@
   </section>
   <section class="setting-group" data-pane="privacy" aria-labelledby="lan-pairing-title" hidden>
     <h3 id="lan-pairing-title" data-i18n="LAN pairing"></h3>
-    <p class="setting-hint" data-i18n="Manual only. Off on every launch. Pairing shares no chats, files, commands or inference."></p>
+    <p class="setting-hint" data-i18n="Manual only. Off on every launch. Pairing alone shares no chats, files, commands or AI."></p>
     <label class="setting-row"><span class="setting-title" data-i18n="This computer's LAN IPv4 address"></span><input id="sharing-address" class="setting-input mono" type="text" placeholder="192.168.1.10" autocomplete="off"></label>
     <label class="check-row"><input id="sharing-enabled" type="checkbox"><span data-i18n="Enable LAN pairing"></span></label>
     <label class="check-row"><input id="sharing-usage" type="checkbox"><span><span data-i18n="Also share this computer's CPU, RAM and GPU usage with paired devices"></span><span class="setting-hint" data-i18n="Only devices you paired with a PIN can read it, while pairing is on. Off every time AI Assist starts."></span></span></label>
+    <label class="check-row"><input id="sharing-ai" type="checkbox"><span><span data-i18n="Also let devices I allow use this computer's AI"></span><span class="setting-hint" data-i18n="They can see its models and chat with them, encrypted, while pairing is on. No files, commands or downloads. Off every time AI Assist starts."></span></span></label>
     <div id="sharing-details" hidden>
       <p class="setting-hint" data-i18n="Compare this certificate code on the other device before entering the PIN. PIN expires after 120 seconds; three attempts."></p>
       <dl><dt data-i18n="Address"></dt><dd id="sharing-endpoint" class="mono"></dd><dt data-i18n="Certificate code"></dt><dd id="sharing-code" class="mono"></dd><dt>PIN</dt><dd id="sharing-pin" class="mono"></dd></dl>
@@ -557,6 +597,7 @@
     </div>
     <details class="setting-details"><summary data-i18n="Pair another device"></summary>
       <form id="pair-form">
+        <p class="setting-hint" data-i18n="Paste the host's displayed address to fill in its IPv4 address and port. Compare the certificate code on the host before entering the PIN."></p>
         <label class="setting-row"><span class="setting-title" data-i18n="Target LAN IPv4 address"></span><input class="setting-input mono" id="pair-address" type="text" required autocomplete="off"></label>
         <label class="setting-row"><span class="setting-title" data-i18n="Port"></span><input class="setting-input mono" id="pair-port" type="number" min="1" max="65535" required></label>
         <label class="setting-row"><span class="setting-title" data-i18n="Certificate code"></span><input class="setting-input mono" id="pair-code" type="text" pattern="[0-9A-Fa-f]{16}" required autocomplete="off"></label>
@@ -564,6 +605,7 @@
         <div class="setting-actions"><button id="pair-submit" class="btn" type="submit" data-i18n="Pair device"></button></div>
       </form>
     </details>
+    <div id="sharing-clients-box" hidden><p class="setting-hint" data-i18n="Devices paired with this computer. Tick the ones that may use its AI."></p><ul id="sharing-clients" class="sharing-clients"></ul></div>
     <ul id="sharing-peers" class="connection-log"></ul><p id="sharing-status" class="setting-hint" role="status"></p>
   </section>
     </div>

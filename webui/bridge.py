@@ -11,8 +11,10 @@ log = logging.getLogger(__name__)
 
 
 class Bridge:
-    def __init__(self, evaluate, interval=0.03, autostart=True, on_flush=None):
+    def __init__(self, evaluate, interval=0.03, autostart=True, on_flush=None, evaluate_compute=None, on_compute_failure=None):
         self._evaluate = evaluate
+        self._evaluate_compute = evaluate_compute
+        self._on_compute_failure = on_compute_failure
         self._interval = interval
         self._events = deque()
         self._lock = threading.Lock()
@@ -68,14 +70,25 @@ class Bridge:
                     batch[-1]["text"] += event["text"]
                 else:
                     batch.append(event)
-            try:
-                payload = json.dumps(batch, ensure_ascii=False, allow_nan=False)
-                payload = payload.replace("</", "<\\/").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
-                if not self._closed.is_set():
-                    self._evaluate("app.onEvent(" + payload + ")")
-            except Exception:
-                # Delivery failures must not tear down inference workers.
-                log.exception("Could not deliver web UI events")
+            compute = [event for event in batch if event.get("window") == "compute"]
+            main = [event for event in batch if event.get("window") != "compute"]
+            self._deliver(main, self._evaluate)
+            if compute:
+                self._deliver(compute, self._evaluate_compute, self._on_compute_failure)
+
+    def _deliver(self, batch, evaluate, on_failure=None):
+        if not batch or self._closed.is_set():
+            return
+        try:
+            if evaluate is None:
+                raise RuntimeError("No Mission Control event receiver.")
+            payload = json.dumps(batch, ensure_ascii=False, allow_nan=False)
+            payload = payload.replace("</", "<\\/").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
+            evaluate("app.onEvent(" + payload + ")")
+        except Exception:
+            log.exception("Could not deliver web UI events")
+            if on_failure and any(event["type"] == "internet_approval" for event in batch):
+                on_failure()
 
     def _run(self):
         while not self._closed.wait(self._interval):

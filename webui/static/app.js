@@ -528,7 +528,7 @@ window.app = (() => {
       const record = currentChat();
       if (!record) return;
       element("prompt").value = draftText(id);
-      if (record.model) element("model").value = modelValue(record.model, record.backend || record.environment?.backend);
+      if (record.model) element("model").value = wantedModel = modelValue(record.model, record.backend || record.environment?.backend);
       element("context").value = record.context_length ?? "";
     } catch (error) {
       if (version !== selectionVersion) return;
@@ -621,7 +621,13 @@ window.app = (() => {
   async function refreshModels() {
     engineReady = false;
     controls();
-    const result = await call("state");
+    let result;
+    try { result = await call("state"); }
+    catch (error) {
+      // No AI engine on this computer: a paired computer that shares its AI can still answer.
+      if (await addSharedComputers(element("model").value)) { engineReady = true; controls(); }
+      throw error;
+    }
     lastState = result;
     engineReady = true;
     const previous = element("model").value;
@@ -646,6 +652,7 @@ window.app = (() => {
       return group;
     }));
     element("model").value = values.includes(previous) ? previous : values[0] || "";
+    addSharedComputers(previous);
     window.workspaceui?.onState(result);
     window.premiumui?.onState(result);
     window.parityui?.onState(result);
@@ -655,11 +662,42 @@ window.app = (() => {
 
   function showError(error) { status(error.message || String(error)); controls(); }
 
-  function modelValue(name, backend = "Ollama") { return backend === "Colibri" ? JSON.stringify([backend, name]) : name; }
+  // Paired computers that share their AI with this one, each as its own group (local network only, pinned TLS).
+  let wantedModel = "";
+  async function addSharedComputers(previous) {
+    if (!window.pywebview.api.shared_ai_models) return false;
+    let computers = [];
+    try { computers = (await call("shared_ai_models")).computers || []; } catch (error) { return false; }
+    const select = element("model");
+    const current = select.value;
+    select.replaceChildren(...[...select.children].filter(child => !child.sharedComputer));
+    const values = [];
+    for (const computer of computers) {
+      if (computer.state !== "ready" || !computer.models.length) continue;
+      const group = document.createElement("optgroup");
+      group.label = t("Paired computer {v0}", {v0: computer.address});
+      group.sharedComputer = computer.id;
+      for (const name of computer.models) {
+        const option = document.createElement("option");
+        option.value = modelValue(name, computer.backend); option.textContent = name;
+        values.push(option.value); group.append(option);
+      }
+      select.append(group);
+    }
+    const keep = [wantedModel, previous].find(value => values.includes(value));
+    select.value = keep || current || values[0] || "";
+    controls();
+    return values.length > 0;
+  }
+
+  function modelValue(name, backend = "Ollama") { return !backend || backend === "Ollama" ? name : JSON.stringify([backend, name]); }
   function modelChoice() {
     const value = element("model").value;
     if (value.startsWith("[")) {
-      try { const pair = JSON.parse(value); if (pair[0] === "Colibri" && typeof pair[1] === "string") return {backend: pair[0], name: pair[1]}; } catch (error) { /* ordinary model tag */ }
+      try {
+        const pair = JSON.parse(value);
+        if ((pair[0] === "Colibri" || String(pair[0]).startsWith("peer:")) && typeof pair[1] === "string") return {backend: pair[0], name: pair[1]};
+      } catch (error) { /* ordinary model tag */ }
     }
     return {backend: "Ollama", name: value};
   }
@@ -835,6 +873,13 @@ window.app = (() => {
             if (selected === event.chat_id) {
               renderChats();
               refreshUsage(event.chat_id);
+              if (event.type === "done" && event.operation !== "compact" && event.saved !== false) {
+                const record = window.app.currentChat();
+                const index = (record?.messages?.length || 0) - 1;
+                if (record?.id === event.chat_id && !record?.incognito && record?.messages?.[index]?.role === "assistant") {
+                  window.feedbackui?.chat(event.chat_id, index);
+                }
+              }
             }
           }).catch(error => { if (selected === event.chat_id) showError(error); });
         } else {

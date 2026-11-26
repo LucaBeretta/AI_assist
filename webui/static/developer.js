@@ -153,6 +153,11 @@ window.devui = (() => {
       card.append(head);
       if (action.description) card.append(node("p", "dev-hint pad", action.description));
       card.append(node("p", "dev-hint pad mono", `in ${action.cwd} · timeout ${action.timeout_seconds}s`));
+    } else if (action.kind === "blender_run") {
+      head.append(node("span", "tag", "BLENDER"), node("span", "strong", t("Run in the open Blender")));
+      card.append(head);
+      if (action.description) card.append(node("p", "dev-hint pad", action.description));
+      card.append(node("pre", "diff", action.code || ""));
     } else {
       head.append(node("span", "strong", action.kind || t("Action")));
       card.append(head, node("pre", "diff", JSON.stringify(action, null, 2)));
@@ -174,7 +179,8 @@ window.devui = (() => {
         for (const item of actions.querySelectorAll("button")) item.disabled = false;
       }
     };
-    const yes = btn(action.kind === "run_command" ? t("Run") : t("Apply"), "btn primary", () => decide(true));
+    const runs = action.kind === "run_command" || action.kind === "blender_run";
+    const yes = btn(runs ? t("Run") : t("Apply"), "btn primary", () => decide(true));
     function updateApplyLabel() {
       const chosen = blocks.filter(item => item.box.checked).length;
       yes.textContent = chosen === blocks.length ? t("Apply all") : t("Apply {v0} of {v1}", {v0: (chosen), v1: (blocks.length)});
@@ -182,11 +188,13 @@ window.devui = (() => {
     }
     if (blocks.length) updateApplyLabel();
     actions.append(btn(t("Reject"), "btn ghost", () => decide(false)), node("span", "grow"),
-                   node("span", "dev-hint", action.kind === "write_file" ? t("The original is kept: you can restore it from Checkpoints.") : t("Runs on this computer, not sandboxed.")),
+                   node("span", "dev-hint", action.kind === "write_file" ? t("The original is kept: you can restore it from Checkpoints.")
+                     : action.kind === "blender_run" ? t("Runs inside Blender, not sandboxed. Ctrl+Z in Blender undoes it.")
+                     : t("Runs on this computer, not sandboxed.")),
                    yes);
     card.append(actions);
     append(card);
-    if (window.Notification?.permission === "granted" && document.hidden) new Notification(t("AI Assist needs your review"), {body: action.path || action.command || ""});
+    if (window.Notification?.permission === "granted" && document.hidden) new Notification(t("AI Assist needs your review"), {body: action.path || action.command || action.description || ""});
   }
 
   function commandResult(text) {
@@ -270,6 +278,7 @@ window.devui = (() => {
     loadCheckpoints();
     loadFiles();
     loadPins();
+    if (event.type === "agent_done" && task.chatId && !window.app?.currentChat()?.incognito) window.feedbackui?.developer(task.chatId, task.id);
   }
 
   function controls() {

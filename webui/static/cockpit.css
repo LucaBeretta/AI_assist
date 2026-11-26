@@ -1,0 +1,68 @@
+/* 3D cockpit look: the chat floats in the middle, the sidebar angles towards you over a glowing floor.
+   Turned on by the master switch (cockpit.js sets :root[data-look="cockpit"]); the classic look is untouched. */
+
+:root[data-look="cockpit"] {
+  --cockpit-angle: 22deg;
+  --cockpit-grid: rgba(94, 230, 208, .16);
+  --cockpit-horizon: rgba(94, 230, 208, .25);
+  --cockpit-panel: rgba(18, 22, 27, .96);
+  --cockpit-shadow: 0 40px 80px rgba(0, 0, 0, .6), inset 0 1px 0 rgba(255, 255, 255, .05);
+}
+:root[data-look="cockpit"][data-theme="day"] {
+  --cockpit-grid: rgba(20, 120, 108, .14);
+  --cockpit-horizon: rgba(20, 120, 108, .22);
+  --cockpit-panel: var(--panel);
+  --cockpit-shadow: 0 30px 60px rgba(30, 40, 60, .18), inset 0 1px 0 rgba(255, 255, 255, .6);
+}
+
+/* The floor: a grid in perspective that fades towards the horizon. */
+:root[data-look="cockpit"] .app { position: relative; overflow: hidden; }
+:root[data-look="cockpit"] .app::before {
+  content: ""; position: absolute; left: -60%; right: -60%; top: 70%; height: 140%;
+  transform: perspective(700px) rotateX(82deg); transform-origin: 50% 0;
+  background-image: linear-gradient(var(--cockpit-grid) 1px, transparent 1px),
+                    linear-gradient(90deg, var(--cockpit-grid) 1px, transparent 1px);
+  background-size: 64px 64px;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 22%, #000 100%);
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 22%, #000 100%);
+  pointer-events: none; z-index: 0;
+}
+:root[data-look="cockpit"] .app::after {
+  content: ""; position: absolute; left: 0; right: 0; top: 70%; height: 1px;
+  background: var(--cockpit-horizon); pointer-events: none; z-index: 0;
+}
+
+/* Panels float above the floor, with room around them. */
+:root[data-look="cockpit"] .shell {
+  position: relative; z-index: 1; gap: 28px; padding: 22px 28px 26px 44px;
+  perspective: 1500px; perspective-origin: 50% 45%;
+}
+:root[data-look="cockpit"] .sidebar {
+  background: var(--cockpit-panel); border: 1px solid var(--border-2); border-radius: 20px;
+  box-shadow: var(--cockpit-shadow);
+  transform-origin: 100% 50%; transform: rotateY(var(--cockpit-angle));
+  transition: transform 500ms var(--ease);
+}
+:root[data-look="cockpit"] .sidebar:hover,
+:root[data-look="cockpit"] .sidebar:focus-within { transform: rotateY(calc(var(--cockpit-angle) / 3)); }
+:root[data-look="cockpit"] .main {
+  background: var(--cockpit-panel); border: 1px solid var(--border-2); border-radius: 22px;
+  box-shadow: 0 50px 100px rgba(0, 0, 0, .55), inset 0 1px 0 rgba(255, 255, 255, .06);
+  overflow: hidden;
+}
+:root[data-look="cockpit"][data-theme="day"] .main { box-shadow: var(--cockpit-shadow); }
+:root[data-look="cockpit"] .statusbar { position: relative; z-index: 1; }
+
+/* Motion off for people who ask for less of it: the panels stay put. */
+@media (prefers-reduced-motion: reduce) {
+  :root[data-look="cockpit"] .sidebar { transition: none; }
+}
+/* Narrow windows keep the classic single column. */
+@media (max-width: 760px) {
+  :root[data-look="cockpit"] .shell { padding: 10px; perspective: none; }
+}
+
+/* The master switch's cube icon: outlined in classic, filled in the cockpit. */
+.icon-btn .icon-cube-on { display: none; }
+:root[data-look="cockpit"] .icon-btn .icon-cube-on { display: block; }
+:root[data-look="cockpit"] .icon-btn .icon-cube-off { display: none; }

@@ -24,6 +24,7 @@ from webui.bridge import Bridge
 from webui.developer import DeveloperTasks
 from app_core import photo_video
 from app_core.chat_service import ChatService
+from app_core import shared_ai
 import developer_tools
 from task_checkpoints import CheckpointStore
 from project_store import ProjectStore, inherited_environment
@@ -42,6 +43,7 @@ from webui.colibri import ColibriService
 from webui.api_utils import json_method as _json_method
 from webui.jobs import Jobs
 from webui.parity import ParityApi, hybrid_settings, relaunch
+from webui.feedback_loop import FeedbackApi
 from webui.privacy import PrivacyApi
 from app_core.privacy import privacy_status
 from compute_telemetry import TelemetrySampler
@@ -49,6 +51,7 @@ from webui.compute import ComputePoller
 import lan_devices
 from app_core.hourly_status import HourlyStatusReport
 from webui.sharing import SharingApi
+from webui.character import CharacterApi
 import network_gate
 
 
@@ -91,16 +94,18 @@ def inference_message(message):
     return item
 
 
-class Api(SharingApi, PrivacyApi, ParityApi):
+class Api(FeedbackApi, SharingApi, PrivacyApi, ParityApi, CharacterApi):
     def __init__(self, bridge, store=None, engine=None, hardware=None, desktop=None, colibri=None):
         self._bridge = bridge
         self._store = store if store is not None else ChatStore()
         self._engine = engine if engine is not None else importlib.import_module("app_core.runtime")
         self._lock = threading.RLock()
         self._closed = False
+        self._shared_ai = shared_ai.SharedAI(self._store.directory / "pairing")
         self._chats = ChatService(self._store, self._engine, self._lock, self._bridge.emit,
                                   prepare_colibri=lambda *args: self._colibri.prepare(*args),
-                                  require_vision=self._require_vision, context_usage=self._usage)
+                                  require_vision=self._require_vision, context_usage=self._usage,
+                                  shared_ai=self._shared_ai)
         self._hardware = hardware
         # The online catalog is read once per session: every read is an internet request the gate asks about.
         self._catalog_lock = threading.Lock()
@@ -292,6 +297,7 @@ class Api(SharingApi, PrivacyApi, ParityApi):
             self._settings = settings.save(self._store.directory, {**self._settings, "compute_window": value})
 
     def _compute_window_closed(self):
+        self._internet.block_pending(window="compute")
         try:
             self._compute_source(False, "window")
         except ValueError:
@@ -316,8 +322,14 @@ class Api(SharingApi, PrivacyApi, ParityApi):
         return {"ok": True, "fullscreen": self._desktop.toggle_compute_fullscreen()}
 
     @_json_method
+    def web_preferences(self):
+        """The saved web preferences alone, without contacting any engine."""
+        with self._lock:
+            return {"ok": True, "settings": deepcopy(self._settings)}
+
+    @_json_method
     def set_web_preferences(self, values):
-        if not isinstance(values, dict) or not set(values) <= {"first_run_complete", "zoom", "language"}:
+        if not isinstance(values, dict) or not set(values) <= {"first_run_complete", "zoom", "language", "look"}:
             raise ValueError("Choose supported web preferences.")
         with self._lock:
             if self._closed:
@@ -378,7 +390,13 @@ class Api(SharingApi, PrivacyApi, ParityApi):
             if task:
                 metrics = task["metrics"]
         report = None
-        if backend == "Colibri":
+        peer = shared_ai.peer_of(backend)
+        if peer is not None:
+            # A paired computer answers: its address names it; this computer's Ollama is not involved.
+            paired = self._shared_ai.store.client_record(peer) or {}
+            backend = f"Paired computer {paired.get('address', '?')}"
+            details, connected, host, loaded_context = {}, True, self._engine.ollama_url(), None
+        elif backend == "Colibri":
             colibri = self._colibri.availability()
             details, connected = {}, colibri["running"]
             report = {"server": {"state": colibri["state"], "tokens_per_second": colibri.get("tokens_per_second")}}
@@ -501,7 +519,8 @@ class Api(SharingApi, PrivacyApi, ParityApi):
                             try:
                                 cards += model_advisor.recommend_hugging_face(
                                     hardware, model_library.fetch_hugging_face_models(),
-                                    skip={card["name"] for card in cards})
+                                    skip={card["name"] for card in cards},
+                                    available=model_library.hugging_face_tag_available)
                             except (OSError, ValueError, RuntimeError):
                                 # Hugging Face suggestions are extra: Ollama's still stand without them.
                                 log.info("Hugging Face suggestions are unavailable", exc_info=True)
@@ -791,8 +810,7 @@ class Api(SharingApi, PrivacyApi, ParityApi):
             self._require_idle(chat_id)
             record = self._chats.load(chat_id)
         target_backend = backend if backend is not None else record.get("backend", record["environment"]["backend"])
-        if target_backend not in {"Ollama", "Colibri"}:
-            raise ValueError("Choose Ollama or Colibri.")
+        self._check_backend(target_backend)
         self._require_vision(model, self._request_messages(record), target_backend)
         with self._lock:
             self._require_idle(chat_id)
@@ -804,7 +822,25 @@ class Api(SharingApi, PrivacyApi, ParityApi):
             record["backend"] = record["environment"]["backend"] = target_backend
             return {"ok": True, "chat": self._chats.save(record)}
 
+    def _backend_known(self, backend):
+        """Ollama, Colibri, or a paired computer's shared AI (peer:<id>)."""
+        peer = shared_ai.peer_of(backend)
+        return backend in {"Ollama", "Colibri"} or (peer is not None and self._shared_ai.paired(peer))
+
+    def _check_backend(self, backend):
+        if not self._backend_known(backend):
+            raise ValueError("Choose Ollama, Colibri or a paired computer.")
+
+    @_json_method
+    def shared_ai_models(self):
+        """Paired computers and the models each shares with this one. Contacts paired computers only."""
+        return {"ok": True, "computers": self._shared_ai.computers()}
+
     def _require_vision(self, model, messages, backend="Ollama"):
+        if shared_ai.peer_of(backend) is not None:
+            if any(message.get("images") for message in messages):
+                raise ValueError("Pictures stay on this computer. Choose a model on this computer to send images.")
+            return
         if backend == "Colibri" and any(message.get("images") for message in messages):
             raise ValueError("Colibri does not report a vision capability. Use a vision model in Ollama for images.")
         if any(item.get("images") for item in messages):
@@ -1298,7 +1334,7 @@ class Api(SharingApi, PrivacyApi, ParityApi):
                 raise ValueError("This model is being unloaded; try again when it finishes.")
             record = self._chats.load(chat_id)
             backend = backend if backend is not None else record.get("backend", record["environment"]["backend"])
-            if backend not in {"Ollama", "Colibri"}:
+            if not self._backend_known(backend):
                 raise ValueError("Choose Ollama or Colibri.")
             if backend == "Colibri" and (self._jobs.busy("colibri") or self._developer.uses_colibri()):
                 raise ValueError("Wait for the Colibri operation or quality review to finish.")
@@ -1397,7 +1433,8 @@ def main():
         # An absolute file URI does not enable pywebview's internal HTTP server.
         page = Path(__file__).resolve().parent / "static" / "index.html"
         desktop = Desktop()
-        bridge = Bridge(desktop.evaluate, autostart=False, on_flush=desktop.flush)
+        bridge = Bridge(desktop.evaluate, autostart=False, on_flush=desktop.flush, evaluate_compute=desktop.evaluate_compute,
+                        on_compute_failure=lambda: api._internet.block_pending(window="compute"))
         api = Api(bridge, store=store, desktop=desktop)
         preferences = settings.load(store.directory)
         screens = getattr(webview, "screens", [])

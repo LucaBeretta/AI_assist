@@ -113,3 +113,72 @@ class SharingTests(unittest.TestCase):
         child.stdin.close.assert_called_once()
         child.wait.assert_called_once_with(timeout=2)
         self.assertEqual(service.details, {})
+
+
+class SharedAiSwitchTests(unittest.TestCase):
+    setUp = fixtures.ApiTests.setUp
+    finish = SharingTests.finish
+    service = SharingTests.service
+
+    def test_only_ollama_on_this_computer_can_be_shared(self):
+        from webui.sharing import local_ollama
+        self.assertEqual(local_ollama("http://localhost:11434"), "http://127.0.0.1:11434")
+        self.assertEqual(local_ollama("http://127.0.0.1:12000/"), "http://127.0.0.1:12000")
+        self.assertEqual(local_ollama("http://127.0.0.1"), "http://127.0.0.1:11434")
+        for url in ("http://192.168.1.30:11434", "https://ollama.com", "", None, "http://[::1]:11434x", "file:///etc"):
+            self.assertIsNone(local_ollama(url), url)
+
+    def test_ai_sharing_is_its_own_choice_and_names_ai_answers_in_the_approval(self):
+        service = self.service()
+        with patch("webui.sharing.network_gate.allow_external", return_value=True) as approve, \
+                patch("webui.sharing.PairingProcess", return_value=service) as factory:
+            self.assertEqual(self.finish(self.api.set_sharing(True, "192.168.1.10"))["type"], "job_done")
+            self.assertEqual(factory.call_args.args[3], None)  # pairing alone shares no AI
+            self.assertFalse(self.api.sharing_state()["ai"])
+            self.assertNotIn("AI answers", approve.call_args.args[2])
+            service.share_usage, service.share_ai = False, None
+            self.assertEqual(self.finish(self.api.set_sharing(True, "192.168.1.10", False, True))["type"], "job_done")
+            self.assertEqual(factory.call_args.args[3], "http://127.0.0.1:11434")
+            self.assertIn("AI answers", approve.call_args.args[2])
+            self.assertTrue(self.api.sharing_state()["ai"])
+            self.assertEqual(service.stop.call_count, 1)  # restarted so the new choice takes effect
+
+    def test_ai_sharing_refuses_an_ollama_on_another_computer(self):
+        self.engine.ollama_url = lambda: "http://192.168.1.30:11434"
+        with patch("webui.sharing.PairingProcess") as factory:
+            result = self.api.set_sharing(True, "192.168.1.10", False, True)
+        self.assertFalse(result["ok"])
+        self.assertIn("this computer", result["error"])
+        factory.assert_not_called()
+
+    def test_each_paired_device_needs_its_own_permission(self):
+        store = TrustStore(self.api._sharing_directory)
+        self.assertFalse(self.api.allow_shared_ai("mac", True)["ok"])  # not paired yet
+        store.save_server("mac", "secret-token")
+        store.save_server("laptop", "other-token")
+        self.assertEqual(self.api.sharing_state()["clients"], [{"id": "laptop", "ai": False}, {"id": "mac", "ai": False}])
+        self.assertEqual(self.api.allow_shared_ai("mac", True)["clients"], [{"id": "laptop", "ai": False}, {"id": "mac", "ai": True}])
+        self.assertTrue(store.ai_allowed("mac"))
+        self.assertNotIn("token", json.dumps(self.api.sharing_state()))
+        self.api.allow_shared_ai("mac", False)
+        self.assertFalse(store.ai_allowed("mac"))
+        for bad in (("../mac", True), ("mac", "yes"), (None, True)):
+            self.assertFalse(self.api.allow_shared_ai(*bad)["ok"])
+
+    def test_worker_shares_ollama_only_when_asked(self):
+        host = Mock(port=1234, fingerprint="a" * 64, window=Mock(open=Mock(return_value="123456")))
+        for share_ai, expected in ((None, None), ("http://127.0.0.1:11434", "http://127.0.0.1:11434")):
+            factory = Mock(return_value=host)
+            serve("192.168.1.10", self.store.directory, io.StringIO('{"command":"close"}\n'), io.StringIO(), factory=factory,
+                  share_ai=share_ai)
+            self.assertEqual(factory.call_args.kwargs.get("ollama"), expected)
+        child = Mock(stdout=io.StringIO(json.dumps({"ok": True, "address": "192.168.1.10", "port": 1, "pin": "1",
+                                                    "verification_code": "A" * 16, "expires_at": 1}) + "\n"),
+                     stdin=Mock(), poll=Mock(return_value=None))
+        process = PairingProcess("192.168.1.10", self.store.directory, share_ai="http://127.0.0.1:11434")
+        with patch("webui.sharing.network_gate.child_environment", return_value={}), \
+                patch("webui.sharing.subprocess.Popen", return_value=child) as spawn:
+            process.start()
+            arguments = spawn.call_args.args[0]
+            self.assertEqual(arguments[arguments.index("--share-ai") + 1], "http://127.0.0.1:11434")
+            process.stop()

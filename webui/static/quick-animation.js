@@ -10,19 +10,30 @@
   const save = el("save");
   const status = el("status");
   const empty = el("empty");
+  const sound = el("sound");
+  const movement = el("movement");
   const mediaType = window.canvasClip.supportedType(canvas);
   let renderer;
   let ready = false;
   let photoVersion = 0;
   let previewFrame = 0;
   let saving = false;
+  let soundBuffer = null;
+  let soundVersion = 0;
+  let previewSound = null;
 
   function setPlayLabel(label) {
     play.setAttribute("data-i18n", label);
     play.textContent = t(label);
   }
 
+  function stopPreviewSound() {
+    previewSound?.stop();
+    previewSound = null;
+  }
+
   function pause() {
+    stopPreviewSound();
     if (!previewFrame) return;
     cancelAnimationFrame(previewFrame);
     previewFrame = 0;
@@ -30,7 +41,7 @@
   }
 
   function updateControls() {
-    input.disabled = effect.disabled = saving;
+    input.disabled = effect.disabled = sound.disabled = movement.disabled = saving;
     play.disabled = !ready || saving;
     save.disabled = !ready || saving || !mediaType;
   }
@@ -51,6 +62,10 @@
       }
     }
     setPlayLabel("Pause preview");
+    if (soundBuffer) {
+      try { previewSound = window.spatialSound.start(soundBuffer, movement.value, window.photoShader.duration); }
+      catch (error) { status.textContent = t(error.message); }
+    }
     previewFrame = requestAnimationFrame(tick);
   }
 
@@ -79,7 +94,10 @@
       const source = document.createElement("canvas");
       source.width = canvas.width;
       source.height = canvas.height;
-      source.getContext("2d").drawImage(image, 0, 0, source.width, source.height);
+      const context = source.getContext("2d");
+      context.imageSmoothingEnabled = true;
+      context.imageSmoothingQuality = "high";  // a sharper shrink for large photos
+      context.drawImage(image, 0, 0, source.width, source.height);
       renderer ??= window.photoShader.create(canvas);
       renderer.setImage(source);
       drawFrame(0);
@@ -96,6 +114,27 @@
     }
   }
 
+  async function loadSound() {
+    const version = ++soundVersion;
+    const wasPlaying = Boolean(previewFrame);
+    pause();
+    soundBuffer = null;
+    el("movement-field").hidden = true;
+    status.textContent = "";
+    try {
+      const file = window.spatialSound.checkFile(sound.files[0]);
+      if (!file) return;
+      const buffer = await window.spatialSound.decode(file);
+      if (version !== soundVersion) return;
+      soundBuffer = buffer;
+      el("movement-field").hidden = false;
+      status.textContent = t("3D sound ready. Use headphones to hear it move.");
+      if (wasPlaying && ready) startPreview();
+    } catch (error) {
+      if (version === soundVersion) status.textContent = t(error.message);
+    }
+  }
+
   async function saveClip() {
     if (!ready || saving || !mediaType) return;
     if (!window.pywebview?.api?.save_quick_animation) {
@@ -109,6 +148,8 @@
     try {
       const clip = await window.canvasClip.record(canvas, {
         mimeType: mediaType, duration: window.photoShader.duration, draw: drawFrame,
+        audio: soundBuffer && (() => window.spatialSound.start(
+          soundBuffer, movement.value, window.photoShader.duration, {record: true})),
       });
       status.textContent = t("Choose where to save the clip.");
       const encoded = (await window.canvasClip.readDataUrl(clip)).split(",", 2)[1];
@@ -128,6 +169,10 @@
   }
 
   input.addEventListener("change", loadPhoto);
+  sound.addEventListener("change", loadSound);
+  movement.addEventListener("change", () => {
+    if (previewFrame) { pause(); startPreview(); }
+  });
   effect.addEventListener("change", () => {
     if (ready && !previewFrame) {
       try { drawFrame(0); }
