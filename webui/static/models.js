@@ -8,6 +8,8 @@ window.modelsui = (() => {
   let pull = null;            // {id, model, completed, total, status}
   let advice = null;          // last recommend_models result
   let installed = [];
+  let shared = [];            // paired computers that share their models with this one
+  const abilities = new Map(); // model name -> {tags, context} from this computer's Ollama (/api/show), or "reading"
   let loaded = {};
   const finishedPulls = new Set();
 
@@ -56,14 +58,36 @@ window.modelsui = (() => {
   }
 
   // ---------- installed ----------
+  // What a model can do, in plain words, read from this computer's Ollama (no internet).
+  async function readAbilities(name) {
+    if (abilities.has(name) || !window.pywebview?.api?.model_capabilities) return;
+    abilities.set(name, "reading");
+    try {
+      const data = (await call("model_capabilities", name, "Ollama")).metadata || {};
+      const reported = data.capabilities || [];
+      const tags = [["vision", t("reads pictures")], ["tools", t("can use tools (needed by Developer)")], ["thinking", t("thinks before answering")]]
+        .filter(([key]) => reported.includes(key)).map(([, label]) => label);
+      abilities.set(name, {tags, context: data.context_length || null});
+    } catch (error) { abilities.set(name, {tags: [], context: null}); }
+    renderInstalled();
+  }
   function renderInstalled() {
     const list = element("models-installed");
-    if (!installed.length) { list.replaceChildren(node("p", "dev-hint", t("No models installed yet. Pick one below to download it."))); return; }
+    if (!installed.length) {
+      list.replaceChildren(node("p", "dev-hint", shared.length ? t("Nothing installed here. Chats use your paired computer.")
+                                                               : t("No models installed yet. Pick one below to download it.")));
+      return;
+    }
     list.replaceChildren(...installed.map(name => {
       const row = node("div", "model-row");
       const info = node("div", "model-info");
       const title = node("span", "model-name mono", name);
       info.append(title);
+      const known = abilities.get(name);
+      if (known && known !== "reading") {
+        for (const tag of known.tags) info.append(node("span", "pill", tag));
+        if (known.context) title.title = t("Remembers up to {v0} tokens of a conversation.", {v0: known.context});
+      } else if (!known) readAbilities(name);
       const details = loaded[name];
       if (details) {
         const split = details.size_vram != null && details.size ? Math.round(details.size_vram / details.size * 100) : null;
@@ -174,13 +198,33 @@ window.modelsui = (() => {
     }
   }
 
+  // Models a paired computer shares: chat only, so they are listed apart with "Use in chat".
+  function renderShared() {
+    const ready = shared.filter(computer => computer.state === "ready" && computer.models?.length);
+    element("models-shared-section").hidden = !ready.length;
+    element("models-shared").replaceChildren(...ready.flatMap(computer => computer.models.map(name => {
+      const row = node("div", "model-row");
+      const info = node("div", "model-info");
+      info.append(node("span", "model-name mono", name), node("span", "pill", computer.name || computer.address || t("a paired computer")));
+      const actions = node("div", "model-actions");
+      actions.append(btn(t("Use in chat"), "btn", async () => {
+        try { await window.app?.selectModel(name, computer.backend); window.app?.showView("chat"); } catch (error) { note(error.message); }
+      }));
+      row.append(info, actions);
+      return row;
+    })));
+  }
   async function refresh() {
+    if (window.pywebview?.api?.shared_ai_models) {
+      try { shared = (await call("shared_ai_models")).computers || []; } catch (error) { shared = []; }
+      renderShared();
+    }
     try {
       const state = await call("state");
       installed = state.ollama?.models || (state.engine === "Ollama" ? state.models || [] : []);
       loaded = state.loaded || {};
-      renderInstalled();
-    } catch (error) { note(error.message); }
+    } catch (error) { installed = []; if (!shared.length) note(error.message); }
+    renderInstalled();
   }
 
   async function loadAdvice(refresh = false) {

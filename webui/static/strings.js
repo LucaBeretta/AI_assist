@@ -356,9 +356,7 @@ window.i18n = (() => {
   "stopped": "fermo",
   "loading": "caricamento",
   "Agent step {v0} / {v1}": "Passo agente {v0} / {v1}",
-  "Capabilities": "Funzionalità",
   "Refresh": "Aggiorna",
-  "Capabilities reported by the selected model. Unreported features remain unknown.": "Funzionalità dichiarate dal modello scelto. Quelle non dichiarate restano sconosciute.",
   "Create desktop shortcut": "Crea collegamento sul desktop",
   "Desktop shortcut": "Collegamento sul desktop",
   "Create": "Crea",
@@ -435,12 +433,6 @@ window.i18n = (() => {
   "Optional. Colibri is a second AI engine that you install separately. Without it, leave quality review off and Ollama works as usual.": "Facoltativo. Colibri è un secondo motore AI da installare a parte. Senza Colibri lascia la revisione qualità disattivata: Ollama funziona come sempre.",
   "Manage local memory handoff": "Gestisci lo scambio della memoria locale",
   "Ollama acts once; Colibri reviews without tools. Memory handoff unloads only the selected local worker.": "Ollama esegue una volta; Colibri rivede senza strumenti. Lo scambio di memoria scarica solo il modello locale scelto per il lavoro.",
-  "Reported": "Dichiarata",
-  "Not reported": "Non dichiarata",
-  "Advertised context: {v0}": "Contesto dichiarato: {v0}",
-  "tools": "Strumenti",
-  "vision": "Immagini",
-  "thinking": "Ragionamento",
   " available now": " disponibili ora",
   "e.g. qwen3:14b, or hf.co/user/model-GGUF:Q4_K_M from Hugging Face": "per esempio qwen3:14b, oppure hf.co/utente/modello-GGUF:Q4_K_M da Hugging Face",
   "{v0} chats have an interrupted reply: open them to keep or discard it.": "{v0} chat hanno una risposta interrotta: aprile per conservarla o scartarla.",
@@ -690,7 +682,16 @@ window.i18n = (() => {
   "Look": "Aspetto",
   "The cube button at the top switches anywhere.": "Il pulsante a cubo in alto cambia aspetto ovunque.",
   "Classic": "Classico",
-  "3D cockpit": "Cabina 3D"
+  "3D cockpit": "Cabina 3D",
+  "Installed on this computer": "Installati su questo computer",
+  "Shared by your paired computers": "Condivisi dai tuoi computer abbinati",
+  "Chat only: pictures and Developer tasks stay on this computer.": "Solo chat: immagini e attività di Developer restano su questo computer.",
+  "reads pictures": "legge le immagini",
+  "can use tools (needed by Developer)": "usa strumenti (serve a Developer)",
+  "thinks before answering": "ragiona prima di rispondere",
+  "Remembers up to {v0} tokens of a conversation.": "Ricorda fino a {v0} token di una conversazione.",
+  "Nothing installed here. Chats use your paired computer.": "Niente installato qui. Le chat usano il tuo computer abbinato.",
+  "a paired computer": "un computer abbinato"
 };
   const en = Object.fromEntries(Object.keys(it).map(key => [key, key]));
   const messages = {en, it};

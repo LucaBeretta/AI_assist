@@ -50,9 +50,26 @@ window.securityui = (() => {
     logs = state.connections || logs; renderLog();
     el("privacy-gate").textContent = state.gate.installed ? t("Internet locked; external requests need approval.") : t("Internet gate is not active.");
     const summary = state.firewall;
-    el("firewall-status").textContent = state.busy ? t("Working…") : summary ? [t(summary.state), summary.message || summary.error || ""].filter(Boolean).join(" · ") : t("Checking firewall…");
-    for (const id of ["firewall-on", "firewall-off", "firewall-relock", "firewall-lift"]) el(id).disabled = Boolean(state.busy) || summary?.state === "unavailable";
+    // The lock explains itself in summary.detail (for example "Lifted until 14:30. It turns back on by itself.").
+    el("firewall-status").textContent = state.busy ? t("Working…") : summary ? [t(summary.state), summary.detail || summary.message || summary.error || ""].filter(Boolean).join(" · ") : t("Checking firewall…");
+    // One control that follows the lock: only the actions that make sense now are shown.
+    const offer = firewallActions(summary);
+    for (const id of ["firewall-on", "firewall-off", "firewall-relock"]) {
+      el(id).hidden = !offer.has(id);
+      el(id).disabled = Boolean(state.busy);
+    }
+    el("firewall-lift-row").hidden = !offer.has("firewall-lift");
+    el("firewall-lift").disabled = Boolean(state.busy);
     if (state.approval) show(state.approval);
+  }
+  function firewallActions(summary) {
+    const state = summary?.state;
+    if (!summary || state === "unavailable") return new Set();
+    if (state === "on") return new Set(["firewall-lift", "firewall-off"]);
+    if (state === "lifted" || state === "disabled") return new Set(["firewall-relock", "firewall-off"]);
+    if (state === "off" || state === "partial" || state === "changed") return new Set(summary.can_turn_on === false ? [] : ["firewall-on"]);
+    // Windows Firewall itself off or ignored, or the state could not be read: the lock's rules can still be added or removed.
+    return new Set(summary.has_rules ? ["firewall-on", "firewall-off"] : ["firewall-on"]);
   }
   async function openSettings() {
     try {

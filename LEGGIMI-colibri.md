@@ -8,8 +8,7 @@ AI Assist usa un'unica interfaccia desktop web con pywebview: WebView2 su Window
 |---|---|
 | **Chat** | Conversazioni, streaming e Stop, allegati, contesto sempre visibile, compattazione e versioni delle risposte |
 | **Developer** | Progetto, file fissati, piano, approvazioni di modifiche e comandi, Activity e punti di ripristino |
-| **Models / Modelli** | Hardware, consigli, download Ollama e gestione del motore Colibri |
-| **Capabilities / Funzionalità** | Capacità dichiarate dal modello; ciò che non dichiara resta sconosciuto |
+| **Models / Modelli** | Hardware, modelli installati con ciò che sanno fare (leggere immagini, usare strumenti, ragionare), modelli dei computer abbinati, consigli, download Ollama e gestione del motore Colibri |
 | **Settings / Impostazioni** | Lingua, tema, memoria condivisa, prompt salvati, scaricamento dalla memoria, aggiornamenti e backup |
 
 ## 1. Avvio

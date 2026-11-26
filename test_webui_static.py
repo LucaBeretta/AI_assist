@@ -145,6 +145,54 @@ class StaticTests(unittest.TestCase):
         ''')
 
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_models_show_what_each_model_can_do_and_the_paired_computers_models(self):
+        self.run_scenario(r'''
+        const api = window.pywebview.api;
+        api.state = async () => ({ok:true, engine:'Ollama', host:'localhost', models:['qwen3:8b','gemma3:4b'], ollama:{models:['qwen3:8b','gemma3:4b']}, loaded:{}});
+        api.model_capabilities = async name => ({ok:true, metadata: name === 'qwen3:8b'
+          ? {capabilities:['completion','tools','thinking'], context_length:40960} : {capabilities:['completion','vision'], context_length:131072}});
+        api.shared_ai_models = async () => ({ok:true, computers:[{id:'pc', backend:'peer:pc', name:'Studio-PC', address:'192.168.1.20', state:'ready', models:['qwen3:32b']}]});
+        api.recommend_models = async () => ({ok:true, hardware:{gpus:[]}, recommendations:[]});
+        const chosen = [];
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'models.js'),'utf8'),{document,window,Map,Set,Error,String,Number,Boolean,Array});
+        await window.listeners.pywebviewready();
+        window.app.selectModel = async (...args) => { chosen.push(args); };
+        await elements.get('nav-models').listeners.click();
+        for (let i = 0; i < 6; i++) await new Promise(resolve => setImmediate(resolve));
+        const rows = elements.get('models-installed').children.map(row => row.textContent);
+        assert.match(rows.find(text => text.includes('qwen3:8b')), /can use tools \(needed by Developer\).*thinks before answering/);
+        assert.match(rows.find(text => text.includes('gemma3:4b')), /reads pictures/);
+        assert.equal(elements.get('models-shared-section').hidden, false);
+        const sharedRow = elements.get('models-shared').children[0];
+        assert.match(sharedRow.textContent, /qwen3:32b.*Studio-PC/);
+        await sharedRow.children[1].children[0].listeners.click();      // Use in chat
+        assert.equal(JSON.stringify(chosen.at(-1)), '["qwen3:32b","peer:pc"]');
+        assert.equal(elements.get('chat-view').hidden, false);
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_the_firewall_lock_offers_only_what_fits_its_state(self):
+        self.run_scenario(r'''
+        const api = window.pywebview.api;
+        let firewall = {state:'off', detail:'Off. Ollama can reach the internet by itself.', can_turn_on:true, has_rules:false};
+        api.privacy_state = async () => ({ok:true, gate:{installed:true}, connections:[], firewall, busy:null});
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'security.js'),'utf8'),{document,window,Map,Set,Error,String,Number,Boolean,Array,Date,Math});
+        const shown = () => ['firewall-on','firewall-off','firewall-relock','firewall-lift-row'].filter(id => !document.getElementById(id).hidden);
+        await window.securityui.openSettings();
+        assert.deepEqual(shown(), ['firewall-on']);
+        assert.match(elements.get('firewall-status').textContent, /Ollama can reach the internet by itself/);   // the lock's own explanation
+        firewall = {state:'on', detail:'On.', has_rules:true};
+        await window.securityui.openSettings();
+        assert.deepEqual(shown(), ['firewall-off','firewall-lift-row']);
+        firewall = {state:'lifted', detail:'Lifted until 14:30. It turns back on by itself.', has_rules:true};
+        await window.securityui.openSettings();
+        assert.deepEqual(shown(), ['firewall-off','firewall-relock']);
+        firewall = {state:'partial', detail:'Partly on.', has_rules:true, can_turn_on:true};
+        await window.securityui.openSettings();
+        assert.deepEqual(shown(), ['firewall-on']);
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
     def test_reading_sharing_settings_never_enables_the_listener(self):
         self.run_scenario(r'''
         vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'sharing.js'),'utf8'),{document,window,Map,Set,Error,String,Number,Boolean,Array,Date,Object});
@@ -382,13 +430,12 @@ class StaticTests(unittest.TestCase):
         ''')
 
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
-    def test_parity_feedback_capabilities_and_deploy_confirmation(self):
+    def test_parity_feedback_updates_and_deploy_confirmation(self):
         self.run_scenario(r'''
         vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'parity.js'),'utf8'), {document,window,Map,Set,Error,String,Number,Boolean,Array,URL});
         const api=window.pywebview.api;
         saved.messages=[{role:'assistant',content:'Old reply'}];
         api.prepare_feedback=async(...args)=>{calls.push(['feedback',...args]);return {ok:true,text:'Prepared follow-up'};};
-        api.model_capabilities=async()=>({ok:true,metadata:{capabilities:['tools'],context_length:32768}});
         api.check_updates=async()=>{
           window.app.onEvent([{type:'job_done',job_id:'u1',operation:'updates',result:{differences:[],download:'https://example.com/source.zip'}}]);
           return {ok:true,job_id:'u1'};
@@ -400,8 +447,6 @@ class StaticTests(unittest.TestCase):
         await elements.get('feedback-form').listeners.submit({preventDefault(){}});
         assert.equal(elements.get('prompt').value,'Prepared follow-up');
         assert(!calls.some(item=>item[0]==='chat-a'));
-        await window.parityui.capabilities();
-        assert.match(elements.get('capabilities-result').textContent,/Reported/);
         await elements.get('check-updates').listeners.click();
         assert.match(elements.get('update-result').textContent,/matches upstream/);
         assert.equal(elements.get('check-updates').disabled,false);
