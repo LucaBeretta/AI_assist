@@ -224,8 +224,10 @@ class SharingApi:
                     "ai": bool(enabled and self._sharing_ai), "host": deepcopy(service.details) if enabled else None,
                     "peers": self._paired_records(), "clients": self._ai_clients()}
 
+    # `source` is the window that asked ("compute" for Mission Control). Never name a parameter `window`:
+    # it would hide the page's window inside pywebview's generated function (test_webui_js_api.py).
     @json_method
-    def set_sharing(self, enabled, address=None, share_usage=False, share_ai=False, window="main"):
+    def set_sharing(self, enabled, address=None, share_usage=False, share_ai=False, source="main"):
         if type(enabled) is not bool or type(share_usage) is not bool or type(share_ai) is not bool:
             raise ValueError("Sharing must be true or false.")
         if enabled and (not isinstance(address, str) or not permitted_ipv4(address)):
@@ -263,7 +265,7 @@ class SharingApi:
         with self._lock:
             if self._closed or self._sharing_closed:
                 raise ValueError("The app is closing.")
-            return self._jobs.start("sharing", work, key="sharing", window="compute" if window == "compute" else "main")
+            return self._jobs.start("sharing", work, key="sharing", window="compute" if source == "compute" else "main")
 
     @json_method
     def allow_shared_ai(self, peer_id, allowed):
@@ -275,17 +277,17 @@ class SharingApi:
         return {"ok": True, "clients": self._ai_clients()}
 
     @json_method
-    def new_pairing_pin(self, window="main"):
+    def new_pairing_pin(self, source="main"):
         def work(progress, cancel):
             with self._sharing_lock:
                 if not self._sharing.enabled or self._sharing_closed:
                     raise ValueError("Enable LAN sharing first.")
                 self._sharing_service.new_pin()
                 return self.sharing_state()
-        return self._jobs.start("sharing", work, key="sharing", window="compute" if window == "compute" else "main")
+        return self._jobs.start("sharing", work, key="sharing", window="compute" if source == "compute" else "main")
 
     @json_method
-    def pair_device(self, address, port, verification_code, pin, window="main"):
+    def pair_device(self, address, port, verification_code, pin, source="main"):
         # The core validates the address, port, certificate code and PIN before connecting.
         def work(progress, cancel):
             if not network_gate.allow_external("Pair LAN device", str(address),
@@ -304,7 +306,7 @@ class SharingApi:
         with self._lock:
             if self._closed or self._sharing_closed:
                 raise ValueError("The app is closing.")
-            return self._jobs.start("sharing", work, key="sharing", window="compute" if window == "compute" else "main")
+            return self._jobs.start("sharing", work, key="sharing", window="compute" if source == "compute" else "main")
 
     def _close_sharing(self):
         self._sharing_closed = True
