@@ -403,9 +403,8 @@ def _read_file(project, arguments, on_event):
             + "".join(lines[start - 1:end]) + part_note)
 
 
-def _write_file(project, arguments, approve_action, cancel_event, on_event, destination_selected=False, expected_old=None):
-    target, path = _safe_target(project, arguments.get("path"))
-    content = arguments.get("content")
+def _new_file_bytes(content):
+    """``content`` as UTF-8 bytes, refused when it is not text or too large to edit."""
     if not isinstance(content, str):
         raise ValueError("write_file requires complete text content.")
     try:
@@ -415,68 +414,50 @@ def _write_file(project, arguments, approve_action, cancel_event, on_event, dest
     if len(new_bytes) > _file_limit():
         raise ValueError(f"New content exceeds the {_file_limit():,}-byte editing limit.")
     projects._decode_text(new_bytes)
-    old_bytes = _snapshot(target)
-    if expected_old is not None and old_bytes != expected_old:
-        raise ValueError("The file changed while the edit was prepared. Read it again and retry.")
-    old_text = projects._decode_text(old_bytes) if old_bytes is not None else ""
-    if old_bytes == new_bytes:
-        return f"No change needed: {path} already contains this exact text."
-    diff_lines = difflib.unified_diff(
-        old_text.splitlines(keepends=True), content.splitlines(keepends=True),
-        fromfile=path if old_bytes is not None else "/dev/null", tofile=path,
-    )
-    diff = "".join(line if line.endswith("\n") else line + "\n\\ No newline at end of file\n"
-                   for line in diff_lines)
-    _check_cancelled(cancel_event)
-    approved = _approved(approve_action, {"kind": "write_file", "path": path, "content": content,
-                             "diff": diff, "hunks": diff_hunks.hunks(diff), "exists": old_bytes is not None, "destination": str(target),
-                             "destination_selected": destination_selected},
-                         allow_destination=old_bytes is None and not destination_selected)
-    _check_cancelled(cancel_event)
-    if isinstance(approved, str):
-        chosen = Path(approved).expanduser()
-        if not chosen.is_absolute():
-            raise ValueError("The chosen save destination must be an absolute file path.")
-        chosen = chosen.resolve()
-        if chosen != target:
-            # Only the approval UI can supply this override. Recompute the
-            # diff at that destination and require review before any write.
-            projects._check_components(chosen.parts)
-            result = _write_file(chosen.parent, {"path": chosen.name, "content": content},
-                                 approve_action, cancel_event, on_event, destination_selected=True)
-            return f"User-selected destination: {chosen}\n{result}\nThe originally proposed path was not written."
+    return new_bytes
 
-    def recheck():
-        current, _ = _safe_target(project, path)
-        if current != target or _snapshot(current) != old_bytes:
-            raise ValueError("The file changed after its diff was prepared. Read it again and request a new approval.")
 
-    recheck()
-    selection = ""
-    if isinstance(approved, dict):
-        selected = approved["hunks"]
-        rejected = [item["id"] for item in diff_hunks.hunks(diff) if item["id"] not in selected]
-        selection = (f" Applied blocks: {', '.join(selected) or 'none'}; Rejected blocks: {', '.join(rejected) or 'none'}."
-                     " Do not reapply rejected blocks without a new user request.")
-        if not selected:
-            return "No file changes were applied." + selection
-        content = diff_hunks.apply_selected(old_text, content, selected)
-        new_bytes = content.encode("utf-8")
-        if rejected and old_bytes and old_bytes.startswith(codecs.BOM_UTF8):
-            new_bytes = codecs.BOM_UTF8 + new_bytes
-        if len(new_bytes) > _file_limit():
-            raise ValueError("The selected blocks exceed the editing limit.")
-        projects._decode_text(new_bytes)
-        diff = "".join(line if line.endswith("\n") else line + "\n\\ No newline at end of file\n" for line in
-            difflib.unified_diff(old_text.splitlines(keepends=True), content.splitlines(keepends=True), fromfile=path, tofile=path))
-    checkpoint = getattr(_run, "checkpoint", None)
-    if checkpoint is not None:
-        if checkpoint.capture(_run.task_id, _run.project, target, old_bytes):
-            _run.checkpoint_saved = True
-            _emit(on_event, "checkpoint", "Saved original before changing " + path, task_id=_run.task_id, path=path)
-        recheck()
-    target.parent.mkdir(parents=True, exist_ok=True)
-    recheck()
+def _text_diff(old_text, new_text, fromfile, tofile):
+    """A unified diff that marks a last line without a newline, as git does."""
+    lines = difflib.unified_diff(old_text.splitlines(keepends=True), new_text.splitlines(keepends=True),
+                                 fromfile=fromfile, tofile=tofile)
+    return "".join(line if line.endswith("\n") else line + "\n\\ No newline at end of file\n" for line in lines)
+
+
+def _write_to_chosen_destination(chosen, target, content, approve_action, cancel_event, on_event):
+    """Write to the file the person picked in the approval dialog instead.
+
+    Returns None when they picked the proposed file itself."""
+    chosen = Path(chosen).expanduser()
+    if not chosen.is_absolute():
+        raise ValueError("The chosen save destination must be an absolute file path.")
+    chosen = chosen.resolve()
+    if chosen == target:
+        return None
+    # Only the approval UI can supply this override. Recompute the
+    # diff at that destination and require review before any write.
+    projects._check_components(chosen.parts)
+    result = _write_file(chosen.parent, {"path": chosen.name, "content": content},
+                         approve_action, cancel_event, on_event, destination_selected=True)
+    return f"User-selected destination: {chosen}\n{result}\nThe originally proposed path was not written."
+
+
+def _apply_selected_blocks(selected, partial, old_text, old_bytes, content, path):
+    """The text with only the approved diff blocks applied, its bytes, and its diff.
+
+    When some blocks were rejected (``partial``), the file keeps its UTF-8 byte-order mark."""
+    content = diff_hunks.apply_selected(old_text, content, selected)
+    new_bytes = content.encode("utf-8")
+    if partial and old_bytes and old_bytes.startswith(codecs.BOM_UTF8):
+        new_bytes = codecs.BOM_UTF8 + new_bytes
+    if len(new_bytes) > _file_limit():
+        raise ValueError("The selected blocks exceed the editing limit.")
+    projects._decode_text(new_bytes)
+    return content, new_bytes, _text_diff(old_text, content, path, path)
+
+
+def _replace_file(target, new_bytes, old_bytes, cancel_event, recheck):
+    """Write ``new_bytes`` beside ``target`` and swap it in at once, keeping the old file's permissions."""
     temporary_path = None
     try:
         with tempfile.NamedTemporaryFile(mode="wb", prefix=".aiassist-", suffix=".tmp",
@@ -494,6 +475,54 @@ def _write_file(project, arguments, approve_action, cancel_event, on_event, dest
     finally:
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
+
+
+def _write_file(project, arguments, approve_action, cancel_event, on_event, destination_selected=False, expected_old=None):
+    target, path = _safe_target(project, arguments.get("path"))
+    content = arguments.get("content")
+    new_bytes = _new_file_bytes(content)
+    old_bytes = _snapshot(target)
+    if expected_old is not None and old_bytes != expected_old:
+        raise ValueError("The file changed while the edit was prepared. Read it again and retry.")
+    old_text = projects._decode_text(old_bytes) if old_bytes is not None else ""
+    if old_bytes == new_bytes:
+        return f"No change needed: {path} already contains this exact text."
+    diff = _text_diff(old_text, content, path if old_bytes is not None else "/dev/null", path)
+    _check_cancelled(cancel_event)
+    approved = _approved(approve_action, {"kind": "write_file", "path": path, "content": content,
+                             "diff": diff, "hunks": diff_hunks.hunks(diff), "exists": old_bytes is not None, "destination": str(target),
+                             "destination_selected": destination_selected},
+                         allow_destination=old_bytes is None and not destination_selected)
+    _check_cancelled(cancel_event)
+    if isinstance(approved, str):
+        elsewhere = _write_to_chosen_destination(approved, target, content, approve_action, cancel_event, on_event)
+        if elsewhere is not None:
+            return elsewhere
+
+    def recheck():
+        current, _ = _safe_target(project, path)
+        if current != target or _snapshot(current) != old_bytes:
+            raise ValueError("The file changed after its diff was prepared. Read it again and request a new approval.")
+
+    recheck()
+    selection = ""
+    if isinstance(approved, dict):
+        selected = approved["hunks"]
+        rejected = [item["id"] for item in diff_hunks.hunks(diff) if item["id"] not in selected]
+        selection = (f" Applied blocks: {', '.join(selected) or 'none'}; Rejected blocks: {', '.join(rejected) or 'none'}."
+                     " Do not reapply rejected blocks without a new user request.")
+        if not selected:
+            return "No file changes were applied." + selection
+        content, new_bytes, diff = _apply_selected_blocks(selected, bool(rejected), old_text, old_bytes, content, path)
+    checkpoint = getattr(_run, "checkpoint", None)
+    if checkpoint is not None:
+        if checkpoint.capture(_run.task_id, _run.project, target, old_bytes):
+            _run.checkpoint_saved = True
+            _emit(on_event, "checkpoint", "Saved original before changing " + path, task_id=_run.task_id, path=path)
+        recheck()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    recheck()
+    _replace_file(target, new_bytes, old_bytes, cancel_event, recheck)
     _emit(on_event, "changed", f"Updated {path}" if old_bytes is not None else f"Created {path}",
           path=path, diff=diff, destination=str(target))
     return f"Successfully {'updated' if old_bytes is not None else 'created'} {path} ({len(new_bytes):,} bytes)." + selection
@@ -551,29 +580,28 @@ def _run_command(project, arguments, approve_action, cancel_event, on_event=None
                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                env=network_gate.child_environment("developer agent command"), **options)
     output = []
-    count = [0]
-    truncated = [False]
+    count = 0
+    truncated = False
     lock = threading.Lock()
 
     def collect_output():
+        nonlocal count, truncated
         decoder = codecs.getincrementaldecoder("utf-8")("replace")
         try:
             reader = getattr(process.stdout, "read1", process.stdout.read)
             while True:
                 chunk = reader(4096)
-                if not chunk:
-                    decoded = decoder.decode(b"", final=True)
-                else:
-                    decoded = decoder.decode(chunk)
+                decoded = decoder.decode(chunk, final=not chunk)
                 with lock:
-                    remaining = _MAX_OUTPUT_CHARS - count[0]
-                    output.append(decoded[:remaining]) if remaining else None
-                    count[0] += min(remaining, len(decoded))
-                    truncated[0] = truncated[0] or len(decoded) > remaining
+                    remaining = _MAX_OUTPUT_CHARS - count
+                    if remaining:
+                        output.append(decoded[:remaining])
+                    count += min(remaining, len(decoded))
+                    truncated = truncated or len(decoded) > remaining
                 if not chunk:
                     break
         except (OSError, ValueError):
-            pass
+            pass  # The pipe closed because the command ended or was stopped.
         finally:
             process.stdout.close()
 
@@ -600,7 +628,7 @@ def _run_command(project, arguments, approve_action, cancel_event, on_event=None
     _check_cancelled(cancel_event)
     with lock:
         result = "".join(output)
-        if truncated[0]:
+        if truncated:
             result = _shorten(result + "\n", _MAX_OUTPUT_CHARS, "Command output shortened at 20,000 characters.")
     status = f"Command timed out after {timeout} seconds; its process tree was stopped." if timed_out else f"Command exited with code {process.returncode}."
     result = status + "\n" + result
@@ -820,17 +848,8 @@ def run_agent(host, model, project_root, messages, on_event, approve_action,
         _run.task_id, _run.project = None, None
 
 
-def _run_agent(host, model, project_root, messages, on_event, approve_action,
-               cancel_event=None, context_length=4096, max_steps=DEFAULT_MAX_STEPS, chat_fn=None,
-               plan_first=False, approve_plan=None):
-    """Run tools on a worker thread, returning the updated native chat history.
-
-    ``approve_action`` must return exactly True to allow a reviewed operation.
-    Its UI integration may queue a dialog and block this worker until answered.
-    Events are plain dictionaries and never touch Tk. Cancellation immediately
-    stops local commands; an in-flight HTTP worker may finish in the background.
-    """
-    project = projects._project_root(project_root)
+def _check_agent_request(host, model, messages, on_event, approve_action, context_length, max_steps):
+    """Refuse a run whose callbacks, Ollama host, model, limits or messages cannot work."""
     if not callable(on_event) or not callable(approve_action):
         raise ValueError("Agent events and action approvals require callbacks.")
     if not isinstance(host, str):
@@ -846,6 +865,147 @@ def _run_agent(host, model, project_root, messages, on_event, approve_action,
         raise ValueError("Agent step limit must be between 1 and 30.")
     if not isinstance(messages, list) or not messages or any(not isinstance(message, dict) for message in messages):
         raise ValueError("Provide at least one conversation message.")
+
+
+def _parse_call_arguments(calls):
+    """Decode each tool call's JSON arguments in place; return {call index: error} for unreadable ones."""
+    argument_errors = {}
+    for index, call in enumerate(calls):
+        function = call.get("function") if isinstance(call, dict) else None
+        if not isinstance(function, dict) or not isinstance(function.get("name"), str):
+            raise RuntimeError("Ollama returned an invalid native tool call.")
+        try:
+            arguments = function.get("arguments", {})
+            if isinstance(arguments, str):
+                arguments = json.loads(arguments)
+            if not isinstance(arguments, dict):
+                raise ValueError("Tool arguments must be a JSON object.")
+            function["arguments"] = arguments
+        except ValueError as error:
+            # Keep echoed native messages valid even when a model supplies
+            # malformed argument JSON. Its tool result explains the error.
+            function["arguments"] = {}
+            argument_errors[index] = str(error)
+    return argument_errors
+
+
+def _read_agent_reply(response, history, step, on_event):
+    """One step's assistant message, its tool calls and their argument errors.
+
+    Returns None when the reply was cut off or held an unreadable tool call: the
+    model has then been asked in ``history`` to retry, and no tool runs."""
+    message = response.get("message")
+    if not isinstance(message, dict) or not isinstance(message.get("content", ""), str):
+        raise RuntimeError("Ollama returned an unreadable agent message.")
+    calls = copy.deepcopy(message.get("tool_calls") or [])
+    content = message.get("content", "")
+    if response.get("done_reason") == "length":
+        history.append({"role": "assistant", "content": content})
+        history.append({"role": "user", "content": _retry_message(history)})
+        _emit(on_event, "status", f"Step {step + 1}: output was cut off; no tools executed, asking for a shorter retry.")
+        return None
+    if not calls and content:
+        calls, remaining, malformed = text_tool_calls(content)
+        if malformed:
+            history.append({"role": "assistant", "content": content})
+            history.append({"role": "user", "content": _retry_message(history)})
+            _emit(on_event, "status", f"Step {step + 1}: the model wrote an unreadable tool call; asking it to retry.")
+            return None
+        if calls:
+            content = remaining
+            _emit(on_event, "status", f"Step {step + 1}: recovered a tool call the model wrote as text.")
+    if not isinstance(calls, list) or len(calls) > _MAX_TOOL_CALLS:
+        raise RuntimeError("Ollama returned too many or invalid tool calls in one step.")
+    argument_errors = _parse_call_arguments(calls)
+    assistant = {"role": "assistant", "content": content}
+    if isinstance(message.get("thinking"), str) and message["thinking"]:
+        assistant["thinking"] = message["thinking"]
+    if calls:
+        assistant["tool_calls"] = calls
+    return assistant, calls, argument_errors
+
+
+def _review_plan(plan, history, on_event, cancel_event, approve_plan):
+    """Ask the person to approve the model's numbered plan, which ends planning.
+
+    A reply that is not a numbered plan is sent back for one."""
+    if not re.search(r"^\s*\d+[.)]\s+\S", plan, re.MULTILINE):
+        history.append({"role": "user", "content": "Return a nonempty numbered plan for approval."})
+        return
+    _emit(on_event, "plan", plan)
+    _check_cancelled(cancel_event)
+    decision = approve_plan(plan)
+    _check_cancelled(cancel_event)
+    if decision is False or decision is None:
+        raise AgentCancelled("The plan was cancelled; no actions were taken.")
+    if decision is True:
+        approved_plan = plan
+    elif isinstance(decision, str) and decision.strip() and len(decision) <= 50000:
+        approved_plan = decision.strip()
+    else:
+        raise ValueError("Plan approval must return True, edited nonempty text, or False to cancel.")
+    _run.planning = False
+    history.append({"role": "user", "content": "Approved plan:\n" + approved_plan + "\nCarry out this approved plan now."})
+    _emit(on_event, "plan_approved", approved_plan)
+
+
+def _run_tool_calls(project, calls, argument_errors, history, failures, step, output_limit,
+                    on_event, approve_action, cancel_event):
+    """Run one step's tool calls in order and add each result to ``history``.
+
+    ``failures`` counts each kind of failure across steps. Returns the failure that
+    has now happened four times (the step's later calls are then not run), or ""."""
+    repeated_failure = ""
+    nudges = []
+    for index, call in enumerate(calls):
+        _check_cancelled(cancel_event)
+        function = call.get("function") if isinstance(call, dict) else None
+        name = function.get("name", "unknown") if isinstance(function, dict) else "unknown"
+        if not isinstance(name, str):
+            name = "unknown"
+        _emit(on_event, "tool_start", f"{name}…", tool=name, step=step + 1)
+        try:
+            if repeated_failure:
+                raise ValueError("Not executed: repeated command failures stopped this task.")
+            if index in argument_errors:
+                raise ValueError(argument_errors[index])
+            if _run.planning and name not in _READ_TOOL_NAMES:
+                raise ValueError("Planning is read-only. Writes and commands are blocked until the plan is approved.")
+            arguments = function.get("arguments", {}) if isinstance(function, dict) else {}
+            result = _execute_tool(project, name, arguments, approve_action, cancel_event, on_event)
+        except AgentCancelled:
+            raise
+        except (ValueError, TypeError, OSError, RuntimeError) as error:
+            result = f"Tool failed: {error}"
+        _emit(on_event, "tool_result", result, tool=name, step=step + 1)
+        history.append({"role": "tool", "tool_name": name,
+                        "content": _shorten(result, output_limit)})
+        signature = _failure_signature(name, result)
+        if signature:
+            failures[signature] = failures.get(signature, 0) + 1
+            nudge = _STUCK_NUDGES.get(failures[signature])
+            if nudge:
+                nudges.append({"role": "user", "content": _retry_message(history, nudge.format(error=signature))})
+                _emit(on_event, "status", f"Step {step + 1}: the same failure repeated; asking the model to "
+                      + ("trace the code line by line." if failures[signature] == 2 else "stop and report."))
+            if failures[signature] >= 4:
+                repeated_failure = signature
+    history.extend(nudges)
+    return repeated_failure
+
+
+def _run_agent(host, model, project_root, messages, on_event, approve_action,
+               cancel_event=None, context_length=4096, max_steps=DEFAULT_MAX_STEPS, chat_fn=None,
+               plan_first=False, approve_plan=None):
+    """Run tools on a worker thread, returning the updated native chat history.
+
+    ``approve_action`` must return exactly True to allow a reviewed operation.
+    Its UI integration may queue a dialog and block this worker until answered.
+    Events are plain dictionaries and never touch Tk. Cancellation immediately
+    stops local commands; an in-flight HTTP worker may finish in the background.
+    """
+    project = projects._project_root(project_root)
+    _check_agent_request(host, model, messages, on_event, approve_action, context_length, max_steps)
     history = copy.deepcopy(messages)
     if plan_first:
         history.append({"role": "user", "content": (
@@ -865,71 +1025,13 @@ def _run_agent(host, model, project_root, messages, on_event, approve_action,
         if summary:
             _emit(on_event, "metrics", f"Step {step + 1}/{max_steps}: {summary}",
                   step=step + 1, max_steps=max_steps, metrics=response_metrics(response))
-        message = response.get("message")
-        if not isinstance(message, dict) or not isinstance(message.get("content", ""), str):
-            raise RuntimeError("Ollama returned an unreadable agent message.")
-        calls = copy.deepcopy(message.get("tool_calls") or [])
-        content = message.get("content", "")
-        if response.get("done_reason") == "length":
-            history.append({"role": "assistant", "content": content})
-            history.append({"role": "user", "content": _retry_message(history)})
-            _emit(on_event, "status", f"Step {step + 1}: output was cut off; no tools executed, asking for a shorter retry.")
+        reply = _read_agent_reply(response, history, step, on_event)
+        if reply is None:
             continue
-        if not calls and content:
-            calls, remaining, malformed = text_tool_calls(content)
-            if malformed:
-                history.append({"role": "assistant", "content": content})
-                history.append({"role": "user", "content": _retry_message(history)})
-                _emit(on_event, "status", f"Step {step + 1}: the model wrote an unreadable tool call; asking it to retry.")
-                continue
-            if calls:
-                content = remaining
-                _emit(on_event, "status", f"Step {step + 1}: recovered a tool call the model wrote as text.")
-        if not isinstance(calls, list) or len(calls) > _MAX_TOOL_CALLS:
-            raise RuntimeError("Ollama returned too many or invalid tool calls in one step.")
-        argument_errors = {}
-        for index, call in enumerate(calls):
-            function = call.get("function") if isinstance(call, dict) else None
-            if not isinstance(function, dict) or not isinstance(function.get("name"), str):
-                raise RuntimeError("Ollama returned an invalid native tool call.")
-            try:
-                arguments = function.get("arguments", {})
-                if isinstance(arguments, str):
-                    arguments = json.loads(arguments)
-                if not isinstance(arguments, dict):
-                    raise ValueError("Tool arguments must be a JSON object.")
-                function["arguments"] = arguments
-            except ValueError as error:
-                # Keep echoed native messages valid even when a model supplies
-                # malformed argument JSON. Its tool result explains the error.
-                function["arguments"] = {}
-                argument_errors[index] = str(error)
-        assistant = {"role": "assistant", "content": content}
-        if isinstance(message.get("thinking"), str) and message["thinking"]:
-            assistant["thinking"] = message["thinking"]
-        if calls:
-            assistant["tool_calls"] = calls
+        assistant, calls, argument_errors = reply
         history.append(assistant)
         if _run.planning and not calls:
-            plan = assistant["content"].strip()
-            if not re.search(r"^\s*\d+[.)]\s+\S", plan, re.MULTILINE):
-                history.append({"role": "user", "content": "Return a nonempty numbered plan for approval."})
-                continue
-            _emit(on_event, "plan", plan)
-            _check_cancelled(cancel_event)
-            decision = approve_plan(plan)
-            _check_cancelled(cancel_event)
-            if decision is False or decision is None:
-                raise AgentCancelled("The plan was cancelled; no actions were taken.")
-            if decision is True:
-                approved_plan = plan
-            elif isinstance(decision, str) and decision.strip() and len(decision) <= 50000:
-                approved_plan = decision.strip()
-            else:
-                raise ValueError("Plan approval must return True, edited nonempty text, or False to cancel.")
-            _run.planning = False
-            history.append({"role": "user", "content": "Approved plan:\n" + approved_plan + "\nCarry out this approved plan now."})
-            _emit(on_event, "plan_approved", approved_plan)
+            _review_plan(assistant["content"].strip(), history, on_event, cancel_event, approve_plan)
             continue
         if assistant["content"]:
             _emit(on_event, "assistant", assistant["content"], final=not calls)
@@ -937,41 +1039,8 @@ def _run_agent(host, model, project_root, messages, on_event, approve_action,
             if not assistant["content"].strip():
                 raise RuntimeError("The model returned no agent response. Choose a model with native tool calling.")
             return {"messages": history, "assistant_text": assistant["content"]}
-        nudges = []
-        for index, call in enumerate(calls):
-            _check_cancelled(cancel_event)
-            function = call.get("function") if isinstance(call, dict) else None
-            name = function.get("name", "unknown") if isinstance(function, dict) else "unknown"
-            if not isinstance(name, str):
-                name = "unknown"
-            _emit(on_event, "tool_start", f"{name}\u2026", tool=name, step=step + 1)
-            try:
-                if repeated_failure:
-                    raise ValueError("Not executed: repeated command failures stopped this task.")
-                if index in argument_errors:
-                    raise ValueError(argument_errors[index])
-                if _run.planning and name not in _READ_TOOL_NAMES:
-                    raise ValueError("Planning is read-only. Writes and commands are blocked until the plan is approved.")
-                arguments = function.get("arguments", {}) if isinstance(function, dict) else {}
-                result = _execute_tool(project, name, arguments, approve_action, cancel_event, on_event)
-            except AgentCancelled:
-                raise
-            except (ValueError, TypeError, OSError, RuntimeError) as error:
-                result = f"Tool failed: {error}"
-            _emit(on_event, "tool_result", result, tool=name, step=step + 1)
-            history.append({"role": "tool", "tool_name": name,
-                            "content": _shorten(result, output_limit)})
-            signature = _failure_signature(name, result)
-            if signature:
-                failures[signature] = failures.get(signature, 0) + 1
-                nudge = _STUCK_NUDGES.get(failures[signature])
-                if nudge:
-                    nudges.append({"role": "user", "content": _retry_message(history, nudge.format(error=signature))})
-                    _emit(on_event, "status", f"Step {step + 1}: the same failure repeated; asking the model to "
-                          + ("trace the code line by line." if failures[signature] == 2 else "stop and report."))
-                if failures[signature] >= 4:
-                    repeated_failure = signature
-        history.extend(nudges)
+        repeated_failure = _run_tool_calls(project, calls, argument_errors, history, failures, step, output_limit,
+                                           on_event, approve_action, cancel_event)
         if repeated_failure:
             break
     final = f"Developer agent stopped after {max_steps} steps. Review the activity and changes before continuing."
