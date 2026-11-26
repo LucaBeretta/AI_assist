@@ -322,6 +322,9 @@ class StaticTests(unittest.TestCase):
         assert.equal(elements.get('dev-run').disabled,true);
         assert.match(elements.get('dev-status').textContent,/paired computer, which answers chats only/);
         assert.equal(elements.get('dev-choose-model').hidden,false);
+        choice = {backend:'Ollama', name:'qwen3:8b'};
+        window.listeners.languagechange();                        // the note is written again in the new language
+        assert.equal(elements.get('dev-status').textContent,'Model: qwen3:8b, on this computer.');
         """)
 
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")

@@ -317,7 +317,6 @@ window.i18n = (() => {
   "Use in chat": "Usa nella chat",
   "Use shared memory": "Usa memoria condivisa",
   "Use the current model and context as the project setup": "Usa modello e contesto attuali come impostazioni del progetto",
-  "Uses the model and context chosen in Chats.": "Usa il modello e il contesto scelti in Chat.",
   "Waiting for your plan approval": "In attesa dell’approvazione del piano",
   "Waiting for your review": "In attesa della tua revisione",
   "Working…": "Al lavoro…",

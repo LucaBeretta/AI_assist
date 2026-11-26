@@ -465,6 +465,7 @@ window.devui = (() => {
 
   // ---------- wiring ----------
   function onShow() { loadCheckpoints(); loadFiles(); loadPins(); void syncTask(); showModel(); controls(); element("dev-task").focus?.(); }
+  window.addEventListener?.("languagechange", showModel);  // the model note follows the language
   element("dev-choose-model")?.addEventListener("click", () => { window.app?.showView?.("chat"); element("model").focus?.(); });
 
   element("dev-project").value = recall("aiassist-dev-project") || "";
