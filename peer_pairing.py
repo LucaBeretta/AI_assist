@@ -400,6 +400,182 @@ def _cloud_model(name):
     return lowered.endswith("-cloud") or lowered.endswith(":cloud")
 
 
+class _PairingRequestHandler(BaseHTTPRequestHandler):
+    """One request to a PairingHost: pairing, live usage and the shared AI."""
+
+    @property
+    def host(self):
+        return self.server.pairing_host
+
+    def setup(self):
+        super().setup()
+        self.connection.settimeout(5)
+
+    def log_message(self, *_args):
+        pass  # Never log secret request bodies.
+
+    def _paired_client(self):
+        """The paired client's ID when this request carries its secret token, else None."""
+        if self.headers.get("Origin") or not permitted_ipv4(self.client_address[0], loopback=True):
+            return None
+        client = self.headers.get("X-AI-Assist-Client", "")
+        auth = self.headers.get("Authorization", "")
+        token = auth[7:] if auth.startswith("Bearer ") else ""
+        return client if self.host.store.authenticate_client(client, token) else None
+
+    def _json_reply(self, status, data):
+        payload = _json_packet(data)
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def _shared_ai(self, method):
+        route = self.path[len("/ollama"):]
+        if self.host.ollama is None or (method, route) not in AI_ROUTES:
+            self.send_error(404)
+            return
+        client = self._paired_client()
+        if client is None:
+            self.send_error(403)
+            return
+        if not self.host.store.ai_allowed(client):
+            self._json_reply(403, {"error": "This computer has not allowed this device to use its AI."})
+            return
+        body = None
+        if method == "POST":
+            try:
+                size = int(self.headers.get("Content-Length", "-1"))
+            except ValueError:
+                size = -1
+            if size < 2 or size > MAX_AI_REQUEST:
+                self.send_error(413)
+                return
+            try:
+                # Data only (peer_inference_contract): plain-text messages, never tools,
+                # files, commands or Ollama options. This computer writes Ollama's request itself.
+                request = json.loads(self.rfile.read(size))
+                forward_body = _shared_ai_body(route, request)
+            except (UnicodeError, ValueError, RecursionError) as error:
+                # RecursionError: JSON nested too deeply for Python to read.
+                self._json_reply(400, {"error": str(error) if isinstance(error, contract.InvalidInferenceRequest)
+                                       else "The request is not valid JSON."})
+                return
+            if _cloud_model(forward_body["model"]):
+                self._json_reply(403, {"error": "Cloud models are not shared. Choose a model on this computer."})
+                return
+            body = json.dumps(forward_body).encode("utf-8")
+        if not self.host._ai_slots.acquire(blocking=False):
+            self._json_reply(429, {"error": "This computer is already answering other devices. Try again shortly."})
+            return
+        try:
+            # Answers can take minutes; the pairing handler's short timeout is for pairing only.
+            self.connection.settimeout(AI_TIMEOUT)
+            forward = urllib.request.Request(self.host.ollama + route, data=body, method=method,
+                                             headers={"Content-Type": "application/json"} if body else {})
+            try:
+                upstream = urllib.request.urlopen(forward, timeout=AI_TIMEOUT)
+            except urllib.error.HTTPError as error:
+                detail = error.read(4096)
+                error.close()
+                self.send_response(error.code)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(detail)))
+                self.end_headers()
+                self.wfile.write(detail)
+                return
+            except (OSError, urllib.error.URLError):
+                self._json_reply(502, {"error": "Ollama is not running on the shared computer."})
+                return
+            with upstream:
+                self.send_response(200)
+                self.send_header("Content-Type", upstream.headers.get("Content-Type", "application/json"))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                # Stream as Ollama writes, so the reply appears word by word on the other device.
+                while True:
+                    chunk = upstream.read1(65536) if hasattr(upstream, "read1") else upstream.read(65536)
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    self.wfile.flush()
+        except (OSError, ssl.SSLError):
+            pass  # The other device hung up or stopped the answer.
+        finally:
+            self.host._ai_slots.release()
+
+    def do_GET(self):
+        if self.path.startswith("/ollama/"):
+            self._shared_ai("GET")
+            return
+        # Live usage for paired clients only: TLS, a paired ID and its secret token.
+        if self.path != "/usage" or self.host.usage is None:
+            self.send_error(404)
+            return
+        client = self._paired_client()
+        if client is None:
+            self.send_error(403)
+            return
+        now = time.monotonic()
+        with self.host._usage_lock:
+            if now - self.host._usage_seen.get(client, -USAGE_MIN_INTERVAL) < USAGE_MIN_INTERVAL:
+                self.send_error(429)
+                return
+            self.host._usage_seen[client] = now
+        try:
+            payload = _json_packet(sanitize_usage(self.host.usage()))
+        except Exception:
+            self.send_error(503)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def do_POST(self):
+        if self.path.startswith("/ollama/"):
+            self._shared_ai("POST")
+            return
+        if (self.path != "/pair" or self.headers.get("Origin") or
+                self.headers.get("Content-Type", "").split(";")[0].strip() != "application/json"):
+            self.send_error(403)
+            return
+        if not permitted_ipv4(self.client_address[0], loopback=True):
+            self.send_error(403)
+            return
+        try:
+            size = int(self.headers.get("Content-Length", "-1"))
+        except ValueError:
+            size = -1
+        if size < 1 or size > MAX_REQUEST:
+            self.send_error(413)
+            return
+        try:
+            obj = json.loads(self.rfile.read(size))
+        except (UnicodeError, ValueError):
+            self.send_error(400)
+            return
+        if not isinstance(obj, dict) or not _safe_id(obj.get("client_id")):
+            self.send_error(400)
+            return
+        if not self.host.window.verify_once(obj.get("pin")):
+            self.send_error(403)
+            return
+        token = secrets.token_urlsafe(32)
+        self.host.store.save_server(obj["client_id"], token)
+        payload = _json_packet({"node_id": self.host.node_id, "token": token})
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+
 class PairingHost:
     """HTTPS pairing endpoint, plus opt-in services for paired clients.
 
@@ -428,182 +604,14 @@ class PairingHost:
         self._ai_slots = threading.BoundedSemaphore(AI_CONCURRENT)
         self._usage_lock = threading.Lock()
         self._usage_seen = {}
-        host = self
-
-        class Handler(BaseHTTPRequestHandler):
-            def setup(self):
-                super().setup()
-                self.connection.settimeout(5)
-
-            def log_message(self, *_args):
-                pass  # Never log secret request bodies.
-
-            def _paired_client(self):
-                """The paired client's ID when this request carries its secret token, else None."""
-                if self.headers.get("Origin") or not permitted_ipv4(self.client_address[0], loopback=True):
-                    return None
-                client = self.headers.get("X-AI-Assist-Client", "")
-                auth = self.headers.get("Authorization", "")
-                token = auth[7:] if auth.startswith("Bearer ") else ""
-                return client if host.store.authenticate_client(client, token) else None
-
-            def _json_reply(self, status, data):
-                payload = _json_packet(data)
-                self.send_response(status)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Cache-Control", "no-store")
-                self.send_header("Content-Length", str(len(payload)))
-                self.end_headers()
-                self.wfile.write(payload)
-
-            def _shared_ai(self, method):
-                route = self.path[len("/ollama"):]
-                if host.ollama is None or (method, route) not in AI_ROUTES:
-                    self.send_error(404)
-                    return
-                client = self._paired_client()
-                if client is None:
-                    self.send_error(403)
-                    return
-                if not host.store.ai_allowed(client):
-                    self._json_reply(403, {"error": "This computer has not allowed this device to use its AI."})
-                    return
-                body = None
-                if method == "POST":
-                    try:
-                        size = int(self.headers.get("Content-Length", "-1"))
-                    except ValueError:
-                        size = -1
-                    if size < 2 or size > MAX_AI_REQUEST:
-                        self.send_error(413)
-                        return
-                    try:
-                        # Data only (peer_inference_contract): plain-text messages, never tools,
-                        # files, commands or Ollama options. This computer writes Ollama's request itself.
-                        request = json.loads(self.rfile.read(size))
-                        forward_body = _shared_ai_body(route, request)
-                    except (UnicodeError, ValueError, RecursionError) as error:
-                        # RecursionError: JSON nested too deeply for Python to read.
-                        self._json_reply(400, {"error": str(error) if isinstance(error, contract.InvalidInferenceRequest)
-                                               else "The request is not valid JSON."})
-                        return
-                    if _cloud_model(forward_body["model"]):
-                        self._json_reply(403, {"error": "Cloud models are not shared. Choose a model on this computer."})
-                        return
-                    body = json.dumps(forward_body).encode("utf-8")
-                if not host._ai_slots.acquire(blocking=False):
-                    self._json_reply(429, {"error": "This computer is already answering other devices. Try again shortly."})
-                    return
-                try:
-                    # Answers can take minutes; the pairing handler's short timeout is for pairing only.
-                    self.connection.settimeout(AI_TIMEOUT)
-                    forward = urllib.request.Request(host.ollama + route, data=body, method=method,
-                                                     headers={"Content-Type": "application/json"} if body else {})
-                    try:
-                        upstream = urllib.request.urlopen(forward, timeout=AI_TIMEOUT)
-                    except urllib.error.HTTPError as error:
-                        detail = error.read(4096)
-                        error.close()
-                        self.send_response(error.code)
-                        self.send_header("Content-Type", "application/json")
-                        self.send_header("Content-Length", str(len(detail)))
-                        self.end_headers()
-                        self.wfile.write(detail)
-                        return
-                    except (OSError, urllib.error.URLError):
-                        self._json_reply(502, {"error": "Ollama is not running on the shared computer."})
-                        return
-                    with upstream:
-                        self.send_response(200)
-                        self.send_header("Content-Type", upstream.headers.get("Content-Type", "application/json"))
-                        self.send_header("Cache-Control", "no-store")
-                        self.end_headers()
-                        # Stream as Ollama writes, so the reply appears word by word on the other device.
-                        while True:
-                            chunk = upstream.read1(65536) if hasattr(upstream, "read1") else upstream.read(65536)
-                            if not chunk:
-                                break
-                            self.wfile.write(chunk)
-                            self.wfile.flush()
-                except (OSError, ssl.SSLError):
-                    pass  # The other device hung up or stopped the answer.
-                finally:
-                    host._ai_slots.release()
-
-            def do_GET(self):
-                if self.path.startswith("/ollama/"):
-                    self._shared_ai("GET")
-                    return
-                # Live usage for paired clients only: TLS, a paired ID and its secret token.
-                if self.path != "/usage" or host.usage is None:
-                    self.send_error(404)
-                    return
-                client = self._paired_client()
-                if client is None:
-                    self.send_error(403)
-                    return
-                now = time.monotonic()
-                with host._usage_lock:
-                    if now - host._usage_seen.get(client, -USAGE_MIN_INTERVAL) < USAGE_MIN_INTERVAL:
-                        self.send_error(429)
-                        return
-                    host._usage_seen[client] = now
-                try:
-                    payload = _json_packet(sanitize_usage(host.usage()))
-                except Exception:
-                    self.send_error(503)
-                    return
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Cache-Control", "no-store")
-                self.send_header("Content-Length", str(len(payload)))
-                self.end_headers()
-                self.wfile.write(payload)
-
-            def do_POST(self):
-                if self.path.startswith("/ollama/"):
-                    self._shared_ai("POST")
-                    return
-                if (self.path != "/pair" or self.headers.get("Origin") or
-                        self.headers.get("Content-Type", "").split(";")[0].strip() != "application/json"):
-                    self.send_error(403)
-                    return
-                if not permitted_ipv4(self.client_address[0], loopback=True):
-                    self.send_error(403)
-                    return
-                try:
-                    size = int(self.headers.get("Content-Length", "-1"))
-                except ValueError:
-                    size = -1
-                if size < 1 or size > MAX_REQUEST:
-                    self.send_error(413)
-                    return
-                try:
-                    obj = json.loads(self.rfile.read(size))
-                except (UnicodeError, ValueError):
-                    self.send_error(400)
-                    return
-                if not isinstance(obj, dict) or not _safe_id(obj.get("client_id")):
-                    self.send_error(400)
-                    return
-                if not host.window.verify_once(obj.get("pin")):
-                    self.send_error(403)
-                    return
-                token = secrets.token_urlsafe(32)
-                host.store.save_server(obj["client_id"], token)
-                payload = _json_packet({"node_id": host.node_id, "token": token})
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Cache-Control", "no-store")
-                self.send_header("Content-Length", str(len(payload)))
-                self.end_headers()
-                self.wfile.write(payload)
 
         # Keep the previous port when it is free, so paired clients find this host again.
         try:
-            self.httpd = ThreadingHTTPServer((bind_ip, port if type(port) is int and 1024 <= port <= 65535 else 0), Handler)
+            self.httpd = ThreadingHTTPServer((bind_ip, port if type(port) is int and 1024 <= port <= 65535 else 0),
+                                             _PairingRequestHandler)
         except OSError:
-            self.httpd = ThreadingHTTPServer((bind_ip, 0), Handler)
+            self.httpd = ThreadingHTTPServer((bind_ip, 0), _PairingRequestHandler)
+        self.httpd.pairing_host = self
         self.httpd.daemon_threads = True
         # A client that hangs up after a failed certificate check is expected: do not print it.
         self.httpd.handle_error = lambda request, client_address: None
@@ -644,11 +652,8 @@ def pair_with_host(address, port, target_verification_code, pin, client_id, stor
         raise PairingError("Enter the 16-character code shown on the target device.")
     if not isinstance(pin, str) or not re.fullmatch(r"[0-9]{6}", pin):
         raise PairingError("Enter the six-digit PIN shown on the target device.")
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    context.check_hostname = False
-    context.verify_mode = ssl.CERT_NONE  # Next line explicitly pins the out-of-band certificate.
-    context.minimum_version = ssl.TLSVersion.TLSv1_2
-    conn = http.client.HTTPSConnection(address, port, timeout=5, context=context)
+    # The certificate is self-signed: the lines below check it against the code shown on the target.
+    conn = http.client.HTTPSConnection(address, port, timeout=5, context=_client_context())
     try:
         conn.connect()
         fingerprint = hashlib.sha256(conn.sock.getpeercert(binary_form=True)).hexdigest()
@@ -677,9 +682,19 @@ def pair_with_host(address, port, target_verification_code, pin, client_id, stor
         conn.close()
 
 
-def fetch_usage(record, client_id, timeout=2.0):
-    """Ask one paired host for its usage. The TLS certificate must match the one
-    pinned at pairing time before the token is sent."""
+def _client_context():
+    """TLS for connecting to another AI Assist. Its certificate is self-signed, so the
+    usual authority check is off: callers compare the certificate's fingerprint
+    themselves, right after connecting and before sending anything."""
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    return context
+
+
+def _peer_target(record, client_id):
+    """A paired peer's address, port, token and pinned fingerprint, checked before connecting."""
     if not isinstance(record, dict):
         raise PairingError("Invalid paired peer record.")
     address, port, token, pinned = (record.get(key) for key in ("address", "port", "token", "fingerprint"))
@@ -687,19 +702,40 @@ def fetch_usage(record, client_id, timeout=2.0):
         raise PairingError("Refusing a non-LAN address or invalid port.")
     if not _safe_id(client_id) or not isinstance(token, str) or not isinstance(pinned, str) or len(pinned) != 64:
         raise PairingError("Invalid paired peer record.")
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    context.check_hostname = False
-    context.verify_mode = ssl.CERT_NONE  # Pinned explicitly below, before any credential is sent.
-    context.minimum_version = ssl.TLSVersion.TLSv1_2
-    conn = http.client.HTTPSConnection(address, port, timeout=timeout, context=context)
+    return address, port, token, pinned
+
+
+def _pinned_request(target, client_id, method, path, *, body=None, timeout):
+    """Send one authenticated request to a paired peer; return (connection, response).
+
+    The peer's certificate must match the fingerprint pinned at pairing time before
+    the token is sent. The caller reads the response and closes the connection.
+    """
+    address, port, token, pinned = target
+    conn = http.client.HTTPSConnection(address, port, timeout=timeout, context=_client_context())
     try:
         conn.connect()
         fingerprint = hashlib.sha256(conn.sock.getpeercert(binary_form=True)).hexdigest()
         if not hmac.compare_digest(fingerprint, pinned):
             raise PairingError("This device's certificate changed. Pair it again.")
-        conn.request("GET", "/usage", headers={"X-AI-Assist-Client": client_id,
-                                               "Authorization": "Bearer " + token, "Accept": "application/json"})
-        response = conn.getresponse()
+        headers = {"X-AI-Assist-Client": client_id, "Authorization": "Bearer " + token, "Accept": "application/json"}
+        if body is not None:
+            headers["Content-Type"] = "application/json"
+        conn.request(method, path, body=body, headers=headers)
+        return conn, conn.getresponse()
+    except PairingError:
+        conn.close()
+        raise
+    except (OSError, ssl.SSLError, http.client.HTTPException, ValueError) as exc:
+        conn.close()
+        raise PeerOffline(f"Could not reach this device: {exc}") from exc
+
+
+def fetch_usage(record, client_id, timeout=2.0):
+    """Ask one paired host for its usage. The TLS certificate must match the one
+    pinned at pairing time before the token is sent."""
+    conn, response = _pinned_request(_peer_target(record, client_id), client_id, "GET", "/usage", timeout=timeout)
+    try:
         if response.status == 404:
             raise UsageUnavailable("Usage sharing is off on this device.")
         if response.status != 200:
@@ -724,39 +760,13 @@ def open_shared_ai(record, client_id, method, path, body=None, timeout=AI_TIMEOU
     """
     if (method, path) not in AI_ROUTES:
         raise PairingError("Only listing models and chatting are shared.")
-    if not isinstance(record, dict):
-        raise PairingError("Invalid paired peer record.")
-    address, port, token, pinned = (record.get(key) for key in ("address", "port", "token", "fingerprint"))
-    if not permitted_ipv4(address, loopback=True) or type(port) is not int or not 1 <= port <= 65535:
-        raise PairingError("Refusing a non-LAN address or invalid port.")
-    if not _safe_id(client_id) or not isinstance(token, str) or not isinstance(pinned, str) or len(pinned) != 64:
-        raise PairingError("Invalid paired peer record.")
+    target = _peer_target(record, client_id)
     payload = None
     if method == "POST":
         # Refuse here what the shared computer would refuse, before connecting.
         payload = json.dumps(contract.validate_request(body) if path == "/api/chat"
                              else _shared_ai_body(path, body)).encode("utf-8")
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    context.check_hostname = False
-    context.verify_mode = ssl.CERT_NONE  # Pinned explicitly below, before any credential is sent.
-    context.minimum_version = ssl.TLSVersion.TLSv1_2
-    conn = http.client.HTTPSConnection(address, port, timeout=timeout, context=context)
-    try:
-        conn.connect()
-        fingerprint = hashlib.sha256(conn.sock.getpeercert(binary_form=True)).hexdigest()
-        if not hmac.compare_digest(fingerprint, pinned):
-            raise PairingError("This device's certificate changed. Pair it again.")
-        headers = {"X-AI-Assist-Client": client_id, "Authorization": "Bearer " + token, "Accept": "application/json"}
-        if payload is not None:
-            headers["Content-Type"] = "application/json"
-        conn.request(method, "/ollama" + path, body=payload, headers=headers)
-        response = conn.getresponse()
-    except (OSError, ssl.SSLError, http.client.HTTPException) as exc:
-        conn.close()
-        raise PeerOffline(f"Could not reach this device: {exc}") from exc
-    except PairingError:
-        conn.close()
-        raise
+    conn, response = _pinned_request(target, client_id, method, "/ollama" + path, body=payload, timeout=timeout)
     if response.status == 200:
         return response
     detail = response.read(4096)
