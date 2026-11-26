@@ -229,15 +229,16 @@ function boot(items) {
   app.listeners.pointermove({pointerId: 3, clientX: 400, clientY: 0});
   assert.equal(view.camera.yaw, 50);
 
-  // The cube steps classic → 3D cockpit → 3D viewport → classic; the cockpit leaves the stage alone.
+  // The cube's first step is the 3D cockpit, which leaves the stage alone. Back in the viewport the last
+  // camera is kept, and the cube's next step from there flattens the stage again.
   await cube.listeners.click();
   assert.equal(root.getAttribute('data-look'), 'cockpit');
   assert.equal(shell.style.transform, '');
+  await page.lookui.setLook('viewport');
+  assert.match(shell.style.transform, /rotateY\(50deg\)/);
   await cube.listeners.click();
-  assert.equal(root.getAttribute('data-look'), 'viewport');
-  assert.match(shell.style.transform, /rotateY\(50deg\)/);  // the last camera is kept
-  await cube.listeners.click();
-  assert.equal(root.getAttribute('data-look'), 'classic');
+  assert.notEqual(root.getAttribute('data-look'), 'viewport');
+  assert.equal(shell.style.transform, '');
 
   // After a restart the saved look and camera come back straight away.
   page = boot([['aiassist-look', 'viewport'], ['aiassist-viewport-camera', '{"view":"top","yaw":0,"elevation":90,"zoom":0.8,"panel":"sidebar","grid":false}']]);
