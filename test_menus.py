@@ -27,7 +27,9 @@ for (const id of ['quick-menu', 'chat-more', 'open-appearance', 'rename-chat', '
 nodes.get('quick-menu').hidden = true;
 nodes.get('setting-look').options = [{value: 'classic', textContent: 'Classic'}, {value: 'cockpit', textContent: '3D cockpit'}, {value: 'browser', textContent: 'Browser'}];
 const root = new Node('html'); root.setAttribute('data-theme', 'night');
-const document = {getElementById: id => nodes.get(id) || null, createElement: tag => new Node(null, tag), documentElement: root, addEventListener() {}, activeElement: null};
+const pageListeners = {};
+const document = {getElementById: id => nodes.get(id) || null, createElement: tag => new Node(null, tag), documentElement: root,
+  addEventListener(type, fn) { pageListeners[type] = fn; }, activeElement: null};
 let chat = {id: 'chat-a', incognito: false};
 let look = 'cockpit';
 const window = {innerWidth: 1280, innerHeight: 800,
@@ -71,9 +73,41 @@ assert.notEqual(pressed.at(-1), 'theme');
 nodes.get('open-appearance').listeners.click();
 labelled('Day').listeners.click();
 assert.equal(pressed.at(-1), 'theme');
+// Escape closes the menu only: it must not also reach the app, where it stops an answer or a task
 nodes.get('open-appearance').listeners.click();
-menu.listeners.keydown({key: 'Escape', preventDefault() {}});
+let stopped = false;
+pageListeners.keydown({key: 'Escape', preventDefault() {}, stopPropagation() { stopped = true; }});
 assert.equal(menu.hidden, true);
+assert.equal(stopped, true);
+pageListeners.keydown({key: 'Escape', preventDefault() {}, stopPropagation() { throw new Error('not open'); }});
+// Focus moving elsewhere (Tab, Ctrl+K, Ctrl+N) closes it, so its items never act on another chat
+nodes.get('chat-more').listeners.click();
+pageListeners.focusin({target: new Node('prompt')});
+assert.equal(menu.hidden, true);
+// Night / Day read the theme when clicked: Ctrl+Shift+L may have changed it while the menu was open
+nodes.get('open-appearance').listeners.click();
+root.setAttribute('data-theme', 'day');
+const before = pressed.length;
+labelled('Night').listeners.click();
+assert.equal(pressed.length, before + 1);
+assert.equal(pressed.at(-1), 'theme');
+// With no chat open, Rename and Delete are greyed out instead of doing nothing
+chat = null;
+nodes.get('chat-more').listeners.click();
+assert.equal(labelled('Rename…').disabled, true);
+assert.equal(labelled('Delete chat').disabled, true);
+assert.equal(labelled('Chat instructions…'), undefined);
+nodes.get('chat-more').listeners.click();
+// With the app zoomed to 130%, the menu still opens under its button and inside the window
+const zoom = 1.3;
+nodes.get('chat-more').getBoundingClientRect = () => ({left: 1202, top: 13, right: 1244, bottom: 55});
+menu.offsetWidth = 200;
+menu.getBoundingClientRect = () => ({width: 200 * zoom, height: 150 * zoom});
+chat = {id: 'chat-a', incognito: false};
+nodes.get('chat-more').listeners.click();
+const left = parseFloat(menu.style.left) * zoom, top = parseFloat(menu.style.top) * zoom;
+assert.ok(Math.abs(left + 200 * zoom - 1244) < 1, 'right edge under the button: ' + left);
+assert.ok(Math.abs(top - 59) < 1, 'just below the button: ' + top);
 process.stdout.write('checked\n');
 '''
 
