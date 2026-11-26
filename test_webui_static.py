@@ -145,6 +145,108 @@ class StaticTests(unittest.TestCase):
         ''')
 
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_new_chat_and_recent_chats_bring_the_chat_screen_to_the_front(self):
+        self.run_scenario(r'''
+        window.pywebview.api.new_chat = async () => ({ok:true,chat:{...structuredClone(saved),id:'chat-new',title:'New chat'}});
+        await window.listeners.pywebviewready();
+        await elements.get('nav-models').listeners.click();
+        assert.equal(elements.get('chat-view').hidden,true);
+        await elements.get('new-chat').listeners.click();
+        assert.equal(elements.get('chat-view').hidden,false);   // the new chat is on screen, not behind Models
+        assert.equal(elements.get('models-view').hidden,true);
+        await elements.get('nav-dev').listeners.click();
+        await elements.get('chats').children[0].children[0].listeners.click();
+        assert.equal(elements.get('chat-view').hidden,false);   // a recent chat opens on the Chats screen
+        assert.equal(elements.get('dev-view').hidden,true);
+        await elements.get('nav-models').listeners.click();
+        await elements.get('new-incognito').listeners.click();
+        assert.equal(elements.get('chat-view').hidden,false);
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_messages_and_errors_are_not_overwritten_by_the_live_status(self):
+        self.run_scenario(r'''
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'workspace.js'),'utf8'), {document,window,Map,Error,String,Number,Boolean,Array,Date,Math});
+        await window.listeners.pywebviewready();
+        const live = {ok:true,backend:'Ollama',engine_state:'ready',model_name:'fake:7b'};
+        window.app.notify('Chat deleted.');
+        window.workspaceui.renderStatus(live);
+        assert.equal(elements.get('status').textContent,'Chat deleted.');   // still readable after the 2-second refresh
+        assert.equal(window.app.statusHeld(),true);
+        window.app.notify('Ollama is not running.', {error:true});
+        window.workspaceui.renderStatus(live);
+        assert.equal(elements.get('status').textContent,'Ollama is not running.');
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_was_this_useful_sits_above_its_own_message_box_and_goes_away_when_moving_on(self):
+        self.run_scenario(r'''
+        // Each page's message-box area, with its form, as the real page has them.
+        const area = view => {
+          const wrap = new Element(), form = new Element('form');
+          wrap.children.push(form);
+          wrap.querySelector = selector => selector === 'form' ? form : null;
+          wrap.insertBefore = (node, before) => { wrap.children.splice(wrap.children.indexOf(before), 0, node); node.parentNode = wrap; };
+          document.getElementById(view).querySelector = selector => selector === '.composer-wrap' ? wrap : null;
+          return {wrap, form};
+        };
+        const chatArea = area('chat-view'), devArea = area('dev-view');
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'feedback-loop.js'),'utf8'),
+          {document,window,Set,Error,String,Number,Boolean,Array});
+        const card = chatArea.wrap.children.find(child => child.id === 'task-feedback') || null;
+        window.feedbackui.chat('chat-a', 1);
+        const line = chatArea.wrap.children[0];
+        assert.equal(line.id,'task-feedback');                 // inside the chat page, just above its message box
+        assert.equal(chatArea.wrap.children[1],chatArea.form);
+        assert.equal(line.hidden,false);
+        await elements.get('composer').listeners.submit({preventDefault(){}});
+        assert.equal(line.hidden,true);                        // sending the next message moves on
+        window.feedbackui.developer('chat-a','task-1');
+        assert.equal(devArea.wrap.children[0].id,'task-feedback');   // a Developer task asks above the task box
+        assert.equal(line.hidden,false);
+        const [yes, notQuite] = line.children[1].children;
+        notQuite.listeners.click();                             // typing in "Not quite" is never interrupted
+        window.feedbackui.chat('chat-a', 3);
+        assert.equal(devArea.wrap.children[0].id,'task-feedback');
+        assert.equal(card,null);
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_developer_says_before_run_when_the_chosen_model_cannot_be_used(self):
+        self.run_scenario(r'''
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'developer.js'),'utf8'),
+          {document,window,Map,Set,Error,String,Number,Boolean,Array,Date,Math,JSON,Object,setTimeout,clearTimeout});
+        await window.listeners.pywebviewready();
+        let choice = {backend:'peer:pc1', name:'qwen3:32b'};
+        window.app.modelChoice = () => choice;
+        window.devui.onShow();
+        assert.match(elements.get('dev-status').textContent,/paired computer, which answers chats only/);
+        assert.equal(elements.get('dev-run').disabled,true);
+        assert.equal(elements.get('dev-choose-model').hidden,false);
+        await elements.get('dev-choose-model').listeners.click();
+        assert.equal(elements.get('chat-view').hidden,false);   // takes the person to the model list
+        choice = {backend:'Ollama', name:'qwen3:8b'};
+        window.devui.onShow();
+        assert.equal(elements.get('dev-status').textContent,'Model: qwen3:8b, on this computer.');
+        assert.equal(elements.get('dev-run').disabled,false);
+        assert.equal(elements.get('dev-choose-model').hidden,true);
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_capabilities_explains_a_paired_computers_model_instead_of_failing(self):
+        self.run_scenario(r'''
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'parity.js'),'utf8'),
+          {document,window,Map,Set,Error,String,Number,Boolean,Array,Date,Math,JSON,Object,setTimeout,clearTimeout});
+        await window.listeners.pywebviewready();
+        window.pywebview.api.model_capabilities = async () => ({ok:false,error:'Choose Ollama or Colibri.'});
+        window.app.modelChoice = () => ({backend:'peer:pc1', name:'qwen3:32b'});
+        await window.parityui.capabilities();
+        const text = elements.get('capabilities-result').textContent;
+        assert.match(text,/paired computer: it answers chats with text/);
+        assert.doesNotMatch(text,/Choose Ollama or Colibri/);
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
     def test_reading_sharing_settings_never_enables_the_listener(self):
         self.run_scenario(r'''
         vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'sharing.js'),'utf8'),{document,window,Map,Set,Error,String,Number,Boolean,Array,Date,Object});

@@ -299,6 +299,8 @@ code, kbd, pre, .mono { font-family: var(--mono); }
 .statusbar .grow { flex: 1 1 auto; }
 .status-engine { display: inline-flex; align-items: center; gap: 7px; }
 .status-engine::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+.status-engine.is-error { color: var(--red); }
+.status-engine.is-error::before { background: var(--red); }
 .privacy { color: var(--green); }
 .privacy.is-remote, .level-warn { color: var(--amber); accent-color: var(--amber); }
 .level-full { color: var(--red); accent-color: var(--red); }

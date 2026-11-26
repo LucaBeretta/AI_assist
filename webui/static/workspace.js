@@ -16,7 +16,11 @@ window.workspaceui = (() => {
   };
   const show = id => { const dialog = el(id); if (dialog.showModal) dialog.showModal(); else dialog.open = true; };
   const close = id => { const dialog = el(id); if (dialog.close) dialog.close(); else dialog.open = false; };
-  const error = value => { el("status").textContent = value.message || String(value); };
+  const error = value => {
+    const text = value.message || String(value);
+    if (window.app?.notify) window.app.notify(text, {error: true});
+    else el("status").textContent = text;
+  };
   function button(text, action) {
     const item = node("button", text, "btn ghost"); item.type = "button";
     item.addEventListener("click", () => Promise.resolve().then(action).catch(error)); return item;
@@ -133,7 +137,8 @@ window.workspaceui = (() => {
   }
   function renderStatus(value) {
     if (value.ok === false) return;
-    el("status").textContent = value.backend && value.engine_state ? value.backend.toLowerCase() + " " + t(value.engine_state) : value.engine;
+    // A message or error the person has not read yet stays (see app.js status()).
+    if (!window.app?.statusHeld?.()) el("status").textContent = value.backend && value.engine_state ? value.backend.toLowerCase() + " " + t(value.engine_state) : value.engine;
     el("status-model").textContent = value.model_name || "";
     el("status-placement").textContent = value.gpu_fraction == null ? (value.backend === "Colibri" ? "ram + ssd" : "")
       : `${Math.round(value.gpu_fraction * 100)}% gpu · ${Math.round(value.cpu_fraction * 100)}% cpu`;

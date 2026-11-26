@@ -23,7 +23,21 @@ window.app = (() => {
   let lastState = null;
   let sidebarVersion = 0;
 
-  function status(text) { element("status").textContent = text; }
+  // One-off messages stay readable: the live status refresh (every 2 s) waits for them.
+  // A confirmation stays 6 s; an error stays, in red, until the next click.
+  let statusHeldUntil = 0;
+  function status(text, {error = false} = {}) {
+    const node = element("status");
+    node.textContent = text;
+    node.classList?.toggle("is-error", error);
+    statusHeldUntil = error ? Infinity : Date.now() + 6000;
+  }
+  const statusHeld = () => Date.now() < statusHeldUntil;
+  document.addEventListener?.("pointerdown", () => {
+    if (statusHeldUntil !== Infinity) return;
+    statusHeldUntil = 0;
+    element("status").classList?.remove("is-error");
+  }, true);
 
   async function call(method, ...args) {
     const result = await window.pywebview.api[method](...args);
@@ -408,7 +422,7 @@ window.app = (() => {
         working.textContent = t("working");
         node.append(working);
       }
-      node.addEventListener("click", () => openChat(record.id).catch(showError));
+      node.addEventListener("click", () => { showView("chat"); return openChat(record.id).catch(showError); });
       node.addEventListener("contextmenu", event => showMenu(event, [
         [t("Open"), () => { showView("chat"); openChat(record.id).catch(showError); }],
         [t("Rename…"), () => startRename(record.id)],
@@ -611,6 +625,7 @@ window.app = (() => {
   }
 
   async function newChat(incognito = false) {
+    showView("chat");  // started from another section, the new chat would otherwise open hidden
     const result = selectedProject || incognito ? await call("new_chat", incognito, selectedProject) : await call("new_chat");
     addChatFirst(result.chat);
     renderChats();
@@ -660,7 +675,7 @@ window.app = (() => {
     controls();
   }
 
-  function showError(error) { status(error.message || String(error)); controls(); }
+  function showError(error) { status(error.message || String(error), {error: true}); controls(); }
 
   // Paired computers that share their AI with this one, each as its own group (local network only, pinned TLS).
   let wantedModel = "";
@@ -1309,7 +1324,8 @@ window.app = (() => {
 
   function setPrompt(text) { element("prompt").value = text; fitPrompt(); scheduleDraft(); element("prompt").focus?.(); }
   window.addEventListener("languagechange", () => { renderMessages(); renderChats(); renderProjectBar(); });
-  return {onEvent, openSettings, showView, syncContext, selectModel, modelChoice, setPrompt,
+  return {onEvent, openSettings, showView, syncContext, selectModel, modelChoice, setPrompt, statusHeld,
+          notify: (text, options) => status(text, options),
           currentChat, refreshChat: async id => {
             if (selected !== id) return;
             await reloadChat(id);

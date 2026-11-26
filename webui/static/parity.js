@@ -119,6 +119,13 @@ window.parityui = (() => {
   el("feedback-cancel").addEventListener("click", () => close("feedback-dialog"));
   async function capabilities() {
     const box = el("capabilities-result"), selected = window.app.modelChoice();
+    if (!selected.name) { box.textContent = t("Choose a model in Chats first."); return; }
+    // A paired computer's model answers chats with text only, over the local network.
+    if (String(selected.backend).startsWith("peer:")) {
+      box.replaceChildren(node("div", selected.name, "model-row mono"),
+        node("p", t("Runs on a paired computer: it answers chats with text. Pictures and Developer tasks need a model on this computer."), "model-row"));
+      return;
+    }
     box.textContent = t("Working…");
     try {
       const result = await call("model_capabilities", selected.name, selected.backend), data = result.metadata;

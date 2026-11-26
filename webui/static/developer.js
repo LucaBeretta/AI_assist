@@ -281,10 +281,28 @@ window.devui = (() => {
     if (event.type === "agent_done" && task.chatId && !window.app?.currentChat()?.incognito) window.feedbackui?.developer(task.chatId, task.id);
   }
 
+  // Developer runs tasks with an Ollama model on this computer; say so before Run, not after.
+  function modelCheck() {
+    const choice = window.app?.modelChoice?.() || {name: element("model").value, backend: "Ollama"};
+    // "blocked" only when the choice can never work here; an empty list may still be loading.
+    if (!choice.name) return {usable: false, blocked: false, note: t("Choose a model in Chats first.")};
+    if (choice.backend === "Ollama") return {usable: true, blocked: false, note: t("Model: {v0}, on this computer.", {v0: choice.name})};
+    if (String(choice.backend).startsWith("peer:")) {
+      return {usable: false, blocked: true, note: t("{v0} runs on a paired computer, which answers chats only. Developer needs a model on this computer.", {v0: choice.name})};
+    }
+    return {usable: false, blocked: true, note: t("Developer needs an Ollama model on this computer, not {v0}.", {v0: choice.backend})};
+  }
+  function showModel() {
+    if (task?.running || starting) return;
+    const check = modelCheck();
+    status(check.note);
+    element("dev-choose-model").hidden = check.usable;
+  }
+
   function controls() {
     const running = Boolean(task?.running);
     const busy = running || Boolean(starting);
-    element("dev-run").disabled = busy;
+    element("dev-run").disabled = busy || modelCheck().blocked;
     element("dev-stop").disabled = !running;
     element("dev-project").disabled = busy;
     element("dev-browse").disabled = busy;
@@ -298,9 +316,9 @@ window.devui = (() => {
     const project = element("dev-project").value.trim();
     if (!text) return;
     if (!project) { status(t("Choose a project folder first.")); element("dev-project").focus?.(); return; }
-    const choice = window.app?.modelChoice() || {name: element("model").value, backend: "Ollama"};
-    if (choice.backend !== "Ollama") { status(t("Developer currently requires an Ollama model.")); return; }
-    const model = choice.name;
+    const check = modelCheck();
+    if (!check.usable) { showModel(); return; }
+    const model = (window.app?.modelChoice?.() || {name: element("model").value}).name;
     starting = {chatId: null, events: []};
     controls();
     try {
@@ -435,7 +453,8 @@ window.devui = (() => {
   }
 
   // ---------- wiring ----------
-  function onShow() { loadCheckpoints(); loadFiles(); loadPins(); void syncTask(); element("dev-task").focus?.(); }
+  function onShow() { loadCheckpoints(); loadFiles(); loadPins(); void syncTask(); showModel(); controls(); element("dev-task").focus?.(); }
+  element("dev-choose-model")?.addEventListener("click", () => { window.app?.showView?.("chat"); element("model").focus?.(); });
 
   element("dev-project").value = recall("aiassist-dev-project") || "";
   async function setProject(folder) {

@@ -131,7 +131,6 @@ window.i18n = (() => {
   "Describe the task…  (Ctrl+Enter to run)": "Descrivi il compito…  (Ctrl+Invio per avviare)",
   "Destination: ": "Destinazione: ",
   "Developer": "Developer",
-  "Developer currently requires an Ollama model.": "Developer richiede un modello Ollama.",
   "Discard": "Scarta",
   "Disk": "Disco",
   "Dismiss": "Chiudi avviso",
@@ -690,7 +689,13 @@ window.i18n = (() => {
   "Look": "Aspetto",
   "The cube button at the top switches anywhere.": "Il pulsante a cubo in alto cambia aspetto ovunque.",
   "Classic": "Classico",
-  "3D cockpit": "Cabina 3D"
+  "3D cockpit": "Cabina 3D",
+  "Choose a model in Chats first.": "Scegli prima un modello in Chat.",
+  "Model: {v0}, on this computer.": "Modello: {v0}, su questo computer.",
+  "{v0} runs on a paired computer, which answers chats only. Developer needs a model on this computer.": "{v0} gira su un computer abbinato, che risponde solo alle chat. Developer ha bisogno di un modello su questo computer.",
+  "Developer needs an Ollama model on this computer, not {v0}.": "Developer ha bisogno di un modello Ollama su questo computer, non {v0}.",
+  "Choose a model": "Scegli un modello",
+  "Runs on a paired computer: it answers chats with text. Pictures and Developer tasks need a model on this computer.": "Gira su un computer abbinato: risponde alle chat con testo. Immagini e attività di Developer richiedono un modello su questo computer."
 };
   const en = Object.fromEntries(Object.keys(it).map(key => [key, key]));
   const messages = {en, it};
