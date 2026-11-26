@@ -20,8 +20,11 @@ class PrivacyApi:
         self._firewall_outcomes = []
 
     def _poll_firewall(self):
+        was_busy = self._firewall.busy
         self._firewall_outcomes.extend(self._firewall.poll())
         self._firewall_outcomes = self._firewall_outcomes[-10:]
+        if was_busy and not self._firewall.busy:
+            self._firewall_read_at = time.monotonic()  # a slow read may take 90 s: the minute starts when it ends
 
     def _start_privacy(self):
         with self._privacy_lock:

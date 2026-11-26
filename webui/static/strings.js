@@ -690,7 +690,9 @@ window.i18n = (() => {
   "Check online for suggestions": "Cerca suggerimenti online",
   "Asks before going online: reads model lists from ollama.com and huggingface.co": "Chiede prima di andare online: legge gli elenchi dei modelli da ollama.com e huggingface.co",
   "Loaded models and their Unload buttons are on the Models screen.": "I modelli caricati e i loro pulsanti Scarica dalla memoria sono nella schermata Modelli.",
-  "Open Models": "Apri Modelli"
+  "Open Models": "Apri Modelli",
+  "Menu": "Menu",
+  "To see models that fit this computer, click Check online for suggestions. It asks before going online.": "Per vedere i modelli adatti a questo computer, fai clic su Cerca suggerimenti online. Chiede prima di andare online."
 };
   const en = Object.fromEntries(Object.keys(it).map(key => [key, key]));
   const messages = {en, it};

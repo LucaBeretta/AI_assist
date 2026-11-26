@@ -26,10 +26,14 @@
   <script defer src="quick-animation.js"></script>
   <script defer src="feedback-loop.js"></script>
   <script defer src="cockpit.js"></script>
+  <script defer src="sidebar-toggle.js"></script>
 </head>
 <body>
 <div class="app">
   <div class="shell">
+    <button id="open-sidebar" class="icon-btn bordered sidebar-toggle" type="button" aria-expanded="false" aria-label="Menu" title="Menu" data-i18n-aria-label="Menu" data-i18n-title="Menu">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
+    </button>
     <aside class="sidebar" aria-label="Chats" data-i18n-aria-label="Chats">
       <div class="brand">
         <span class="brand-name"><svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 9-8 9-8-9z"></path></svg>AI Assist</span>
@@ -422,6 +426,7 @@
   <footer class="statusbar">
     <span id="status" class="status-engine" role="status" aria-live="polite"><span data-i18n="Connecting…"></span></span>
     <span id="status-model"></span><span id="status-placement"></span><span id="status-vram"></span>
+    <span id="status-context-box" class="status-context" hidden><meter id="status-meter" min="0" max="1" value="0"></meter><span id="status-context"></span></span>
     <span id="status-speed"></span><span id="status-agent"></span>
     <span class="grow"></span>
     <span id="status-privacy" class="privacy" data-i18n="local only"></span>

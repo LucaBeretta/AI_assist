@@ -148,7 +148,10 @@ class StaticTests(unittest.TestCase):
     def test_models_screen_rereads_this_computer_offline_and_goes_online_only_from_its_button(self):
         self.run_scenario(r'''
         const asks = [];
-        window.pywebview.api.recommend_models = async refresh => { asks.push(refresh); return {ok:true,hardware:{gpus:[]},recommendations:[]}; };
+        window.pywebview.api.recommend_models = async (refresh, online) => {
+          asks.push([refresh, online]);
+          return {ok:true,hardware:{gpus:[]},recommendations:[],checked:online === true};
+        };
         vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'models.js'),'utf8'),{document,window,Map,Set,Error,String,Number,Boolean,Array});
         await window.listeners.pywebviewready();
         await elements.get('nav-models').listeners.click();
@@ -156,10 +159,11 @@ class StaticTests(unittest.TestCase):
         await elements.get('nav-chats').listeners.click();
         await elements.get('nav-models').listeners.click();
         await new Promise(resolve=>setImmediate(resolve));
-        assert.deepEqual(asks.slice(-2),[false,false]);       // each visit re-reads, without going online
+        assert.deepEqual(asks,[[false,false],[false,false]]);   // each visit re-reads, never going online, not even the first
+        assert.match(elements.get('models-recommended').textContent,/click Check online for suggestions/);
         await elements.get('models-check-online').listeners.click();
         await new Promise(resolve=>setImmediate(resolve));
-        assert.equal(asks.at(-1),true);                       // only this button asks to go online
+        assert.deepEqual(asks.at(-1),[true,true]);              // only this button asks to go online
         ''')
 
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
@@ -181,6 +185,73 @@ class StaticTests(unittest.TestCase):
         await elements.get('hybrid-model').listeners.change();
         assert.equal(JSON.stringify(saved.at(-1)),'[true,"colibri-8b",true]');
         assert.equal(elements.get('hybrid-status').textContent,'Saved.');
+        // Picking another reviewer by clearing the field first keeps quality review on.
+        elements.get('hybrid-model').value='';
+        elements.get('hybrid-model').listeners.input();
+        assert.equal(elements.get('hybrid-enabled').disabled,true);
+        elements.get('hybrid-model').value='colibri-14b';
+        elements.get('hybrid-model').listeners.input();
+        assert.equal(elements.get('hybrid-enabled').checked,true);
+        await elements.get('hybrid-model').listeners.change();
+        assert.equal(JSON.stringify(saved.at(-1)),'[true,"colibri-14b",true]');
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_quality_review_never_saves_before_the_saved_settings_are_read(self):
+        self.run_scenario(r'''
+        const saved = [];
+        window.pywebview.api.set_hybrid_settings = async (...args) => { saved.push(args); return {ok:true,hybrid:{enabled:args[0],review_model:args[1],manage_memory:args[2]}}; };
+        window.pywebview.api.update_status = async () => ({ok:true});
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'parity.js'),'utf8'),
+          {document,window,Map,Set,Error,String,Number,Boolean,Array,Date,Math,JSON,Object,setTimeout,clearTimeout});
+        await window.parityui.openSettings();                     // the engine state has not arrived: the form is empty
+        elements.get('hybrid-memory').checked=false;
+        await elements.get('hybrid-memory').listeners.change();
+        assert.equal(saved.length,0);
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_status_bar_shows_how_full_the_context_is_outside_chats(self):
+        self.run_scenario(r"""
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'workspace.js'),'utf8'), {document,window,Map,Error,String,Number,Boolean,Array,Date,Math});
+        const value = {ok:true,backend:'Ollama',engine_state:'ready',model_name:'fake:7b',context:'2.1k / 8.2k',fraction:0.26};
+        document.getElementById('chat-view').hidden = false;
+        window.workspaceui.renderStatus(value);
+        assert.equal(elements.get('status-context-box').hidden,true);    // Chats has its own meter by the message box
+        document.getElementById('chat-view').hidden = true;
+        window.workspaceui.renderStatus(value);
+        assert.equal(elements.get('status-context-box').hidden,false);   // for example during a Developer task
+        assert.equal(elements.get('status-context').textContent,'2.1k / 8.2k');
+        """)
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_narrow_windows_open_the_sidebar_from_a_menu_button(self):
+        self.run_scenario(r'''
+        const classes = new Set();
+        const shell = {classList: {contains: name => classes.has(name), toggle: (name, on) => { if (on) classes.add(name); else classes.delete(name); }}};
+        const sidebar = new Element('aside');
+        sidebar.contains = node => node === sidebar || node === inside;
+        const inside = new Element('button');
+        const keys = [], downs = [];
+        const page = {...document, querySelector: selector => selector === '.app' ? shell : selector === '.sidebar' ? sidebar : null,
+          addEventListener: (type, callback) => (type === 'keydown' ? keys : downs).push(callback)};
+        const button = page.getElementById('open-sidebar');
+        button.contains = node => node === button;
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'sidebar-toggle.js'),'utf8'),
+          {document: page, window, String, Boolean});
+        await button.listeners.click();
+        assert.equal(classes.has('sidebar-open'),true);
+        assert.equal(button.attributes['aria-expanded'],'true');
+        sidebar.listeners.click({target: {closest: () => inside}});   // choosing Models (or anything) in it closes it
+        assert.equal(classes.has('sidebar-open'),false);
+        await button.listeners.click();
+        let stopped = false;
+        keys[0]({key:'Escape', preventDefault(){}, stopPropagation(){ stopped = true; }});
+        assert.equal(classes.has('sidebar-open'),false);
+        assert.equal(stopped,true);                                 // Escape does not also stop a running answer
+        await button.listeners.click();
+        downs[0]({target: new Element()});                          // a click elsewhere closes it
+        assert.equal(classes.has('sidebar-open'),false);
         ''')
 
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")

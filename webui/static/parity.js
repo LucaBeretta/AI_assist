@@ -161,16 +161,23 @@ window.parityui = (() => {
     renderReviewerChoices();
     if (!hybrid) return;
     el("hybrid-enabled").checked = hybrid.enabled; el("hybrid-model").value = hybrid.review_model; el("hybrid-memory").checked = hybrid.manage_memory;
+    reviewWanted = hybrid.enabled;
     syncReviewer();
   }
-  // Quality review saves as soon as something changes. It can only be on once a reviewer model is chosen.
+  // Quality review saves as soon as something changes. It can only be on once a reviewer model is chosen:
+  // while the model field is empty (for example while picking another model) the box is greyed out,
+  // and the person's choice comes back with the next model.
+  let reviewWanted = false;
   function syncReviewer() {
+    const box = el("hybrid-enabled");
     const chosen = Boolean(el("hybrid-model").value.trim());
-    el("hybrid-enabled").disabled = !chosen;
-    if (!chosen) el("hybrid-enabled").checked = false;
+    if (!box.disabled) reviewWanted = box.checked;
+    box.disabled = !chosen;
+    box.checked = chosen && reviewWanted;
   }
   async function saveReviewer() {
     syncReviewer();
+    if (!hybrid) return;  // the saved settings have not been read yet: never overwrite them with an empty form
     try {
       const result = await call("set_hybrid_settings", el("hybrid-enabled").checked, el("hybrid-model").value.trim(), el("hybrid-memory").checked);
       hybrid = result.hybrid; qualityDirty = false; el("dev-quality").checked = hybrid.enabled; el("hybrid-status").textContent = t("Saved.");
@@ -215,6 +222,8 @@ window.parityui = (() => {
     if (!el("deploy-confirm").checked) { el("deploy-output").textContent = t("Confirm the upload before deploying."); return; }
     start("deploy_vercel", [el("deploy-folder").value, el("deploy-project").value, el("deploy-scope").value, el("deploy-domain").value], "deploy");
   });
+  // The sidebar's Refresh models also checks again the screen that is open.
+  el("refresh")?.addEventListener("click", () => { if (!el("capabilities-view").hidden) capabilities(); });
   window.addEventListener("languagechange", () => { if (!el("capabilities-view").hidden) capabilities(); modelDetails(); renderColibriState(); });
   updateControls();
   return {onEvent, onState, openSettings, openFeedback, capabilities};

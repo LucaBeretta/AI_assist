@@ -47,7 +47,7 @@ Il limite file salvato parte da 64 KB e supporta valori fino a 1 MB; i file gran
 
 ## 6. Stato, memoria e scorciatoie
 
-La barra in basso mostra motore, modello, quota GPU/CPU, VRAM, contesto, token al secondo e passo dell'agente quando i dati sono disponibili. Indica anche quando si usa un server remoto. Nelle Impostazioni puoi aggiungere, modificare e dimenticare ricordi; dal menu della chat scegli quelli da usare.
+La barra in basso mostra motore, modello, quota GPU/CPU, VRAM, token al secondo e passo dell'agente quando i dati sono disponibili. Quanto è pieno il contesto si vede in Chat accanto al box del messaggio e, durante un compito Developer, nella barra in basso. Indica anche quando si usa un server remoto. Nelle Impostazioni puoi aggiungere, modificare e dimenticare ricordi; dal menu della chat scegli quelli da usare.
 
 - **Ctrl+K:** cerca chat e comandi.
 - **Ctrl+N:** nuova chat; **Ctrl+Shift+N:** chat in incognito.

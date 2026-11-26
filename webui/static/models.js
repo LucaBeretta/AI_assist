@@ -95,6 +95,7 @@ window.modelsui = (() => {
     const list = element("models-recommended");
     if (!advice) { list.replaceChildren(node("p", "dev-hint", t("Checking which models fit this computer…"))); return; }
     const cards = advice.recommendations || [];
+    if (!cards.length && advice.checked === false) { list.replaceChildren(node("p", "dev-hint", t("To see models that fit this computer, click Check online for suggestions. It asks before going online."))); return; }
     if (!cards.length) { list.replaceChildren(node("p", "dev-hint", advice.catalog_error ? (window.i18n?.gate?.(advice.catalog_error) || advice.catalog_error) : t("No recommendations: the model catalog could not be read (offline?) or nothing fits."))); return; }
     list.replaceChildren(...cards.map(card => {
       const item = node("article", "model-card");
@@ -187,13 +188,14 @@ window.modelsui = (() => {
     renderHardware(advice?.hardware);
     renderRecommendations();
     try {
-      advice = await call("recommend_models", refresh);
+      advice = await call("recommend_models", refresh, refresh);  // only the button goes online
       renderHardware(advice.hardware);
       renderRecommendations();
     } catch (error) { note(error.message); element("models-recommended").replaceChildren(node("p", "dev-hint", error.message)); }
   }
 
-  // Opening the screen re-reads this computer and the installed models; going online is its own button.
+  // Opening the screen re-reads this computer and the installed models, offline: it shows suggestions
+  // already read in this session, and going online is its own button.
   function onShow() { refresh(); loadAdvice(); }
 
   element("pull-other").addEventListener("submit", event => {

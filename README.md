@@ -115,7 +115,7 @@ History defaults to `%LOCALAPPDATA%\AI Assist\chats` on Windows or `~/.aiassist/
 
 ## Model downloads
 
-Open **Models** for hardware-based recommendations and installed models. Downloads show progress and can be stopped; a model can then be selected in the chat composer. Loaded models can be unloaded explicitly or after the configured idle period. Recommendations are estimates, not guarantees of speed or GPU placement. The status bar reports model placement, context, VRAM and measured token speed when available.
+Open **Models** for hardware-based recommendations and installed models. Downloads show progress and can be stopped; a model can then be selected in the chat composer. Loaded models can be unloaded explicitly or after the configured idle period. Recommendations are estimates, not guarantees of speed or GPU placement. The status bar reports model placement, VRAM and measured token speed when available, and how full the context is during Developer tasks (in Chats, the meter sits by the message box).
 
 Recommendations come from two public lists, read once per session after one approval that names both sites: Ollama's library on ollama.com, and Hugging Face's most downloaded GGUF chat models on huggingface.co. For each Hugging Face model, AI Assist picks the first quantization in the order Q4_K_M, Q5_K_M, Q4_K_S, Q6_K, Q8_0, IQ4_XS, Q3_K_M that fits this computer, using the same memory estimate as the Ollama suggestions, and shows up to three. Download counts show popularity, not quality. Nothing downloads until you click Download.
 
