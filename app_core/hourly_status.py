@@ -1,5 +1,6 @@
 """Local hourly report collection, independent of native widgets."""
 import json
+import logging
 import os
 import queue
 import subprocess
@@ -13,6 +14,8 @@ from app_core import settings
 from model_advisor import detect_hardware
 from quiet_audio import QUIET_THRESHOLD, WindowsQuietDetector, is_quiet
 import network_gate
+
+log = logging.getLogger(__name__)
 
 HOUR_SECONDS = 3600
 QUIET_SECONDS = 20
@@ -171,8 +174,8 @@ class HourlyStatusReport:
                 if isinstance(answer, str) and answer.strip():
                     reflection = " ".join(answer.split())[:320]
                     reflected_by_model = True
-            except Exception:
-                pass
+            except Exception as error:
+                log.info("The hourly check-in used the plain summary: the local model did not answer (%s).", error)
         try:
             hardware = detect_hardware(host)
         except Exception:

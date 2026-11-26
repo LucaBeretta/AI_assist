@@ -435,6 +435,20 @@ class ListeningTests(GateTestCase):
         self.assertNotIn(b"\r\r\n", raw)
         self.assertEqual(len(raw.splitlines()), 2)
 
+    def test_a_failing_listener_is_logged_and_the_others_still_hear(self):
+        heard = []
+
+        def broken(entry):
+            raise RuntimeError("listener bug")
+
+        for listener in (broken, heard.append):
+            gate.add_listener(listener)
+            self.addCleanup(gate.remove_listener, listener)
+        with self.assertLogs("network_gate", "WARNING") as logged:
+            gate._record("blocked", gate.Request("k", "t", "", "", "", ""))
+        self.assertEqual([entry["target"] for entry in heard], ["t"])
+        self.assertIsInstance(logged.records[0].exc_info[1], RuntimeError)
+
 
 class InstalledGateTests(unittest.TestCase):
     def test_the_app_process_cannot_listen_beyond_this_computer(self):

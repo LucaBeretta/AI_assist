@@ -24,6 +24,7 @@ import hmac
 import importlib.machinery
 import ipaddress
 import json
+import logging
 import os
 from pathlib import Path
 import queue
@@ -41,6 +42,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+
+log = logging.getLogger(__name__)
 
 LOCAL, LAN, INTERNET = "this computer", "local network", "internet"
 GRANT_SECONDS = 60
@@ -820,7 +823,9 @@ def _record(decision, request, notify=False):
         try:
             listener(entry)
         except Exception:
-            pass
+            # A broken listener (such as the window's connection log) must not stop the
+            # request or the other listeners, but it should leave a trace.
+            log.warning("An internet gate listener failed.", exc_info=True)
     if notify:
         title = _TITLES.get(decision) or ("AI Assist blocked internet access" if decision.startswith("blocked")
                                           else "AI Assist internet gate")
