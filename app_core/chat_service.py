@@ -200,6 +200,89 @@ class ChatService:
             self._unsaved = {key: item for key, item in self._unsaved.items()
                              if item["chat_id"] not in self._incognito_ids}
 
+    def _add_chunk(self, stream_id, stream, compact, text):
+        """Keep one piece of an answer as it arrives, time the model's thinking, and show it."""
+        with stream["data_lock"]:
+            if stream["cancel"].is_set():
+                raise self._engine.StreamStopped()
+            if compact and sum(map(len, stream["parts"])) + len(text) > stream["summary_chars"]:
+                raise RuntimeError("The model summary exceeded the requested size; no compaction was saved.")
+            stream["parts"].append(text)
+            combined = "".join(stream["parts"])
+            if "<think>" in combined and "thinking_started" not in stream:
+                stream["thinking_started"] = time.monotonic()
+            if "</think>" in combined and "thinking_started" in stream and "thinking_seconds" not in stream:
+                stream["thinking_seconds"] = max(0, time.monotonic() - stream["thinking_started"])
+            if text and "loading" in stream:
+                stream["loading"].first_output()
+            if not compact:
+                self._emit("token", stream_id=stream_id, chat_id=stream["chat_id"], text=text)
+
+    def _request_answer(self, stream_id, stream, record, on_chunk, on_metrics):
+        """Ask the chat's engine for the answer: a paired computer, Colibri, or Ollama on this computer."""
+        engine = self._engine
+        if stream["cancel"].is_set():
+            raise engine.StreamStopped()
+        backend = record.get("backend", record["environment"]["backend"])
+        if not stream.get("vision_checked"):
+            self._require_vision(record["model"], stream["messages"], backend)
+        peer = shared_ai.peer_of(backend)
+        if peer is not None:
+            # Runs on a paired computer, over the TLS connection pinned at pairing (local network only).
+            return self._shared_ai.chat(peer, deepcopy(stream["messages"]), record["model"], on_chunk=on_chunk,
+                                        on_metrics=on_metrics, cancel_event=stream["cancel"])
+        if backend == "Colibri":
+            client = self._prepare_colibri(stream["cancel"],
+                lambda text: self._emit("status", text=text, chat_id=record["id"]))
+            if stream["cancel"].is_set():
+                raise engine.StreamStopped()
+            with network_gate.task("Send a message through Colibri", "Your message, conversation, shared notes and attached or pinned context."):
+                return client.chat(deepcopy(stream["messages"]), model=record["model"], on_chunk=on_chunk,
+                                   on_metrics=on_metrics, cancel_event=stream["cancel"])
+        loading = ModelLoadProgress(self._emit, record["model"], stream["cancel"],
+                                   stream_id=stream_id, chat_id=stream["chat_id"])
+        with stream["data_lock"]:
+            stream["loading"] = loading
+        loading.start(engine.running_details)
+        if stream["cancel"].is_set():
+            raise engine.StreamStopped()
+        options = {"keep_alive": f"{stream['keep_alive']}m"} if stream["keep_alive"] else {}
+        return engine.request_ollama(deepcopy(stream["messages"]), model=record["model"],
+                                     context_length=stream["context"],
+                                     on_chunk=on_chunk, on_metrics=on_metrics, cancel_event=stream["cancel"], **options)
+
+    def _save_compaction(self, stream_id, stream, current, kind, answer, error):
+        """Store a finished summary of the chat's first messages. The caller holds the lock."""
+        if kind == "done":
+            if not isinstance(answer, str) or not answer.strip() or len(answer) > stream["summary_chars"]:
+                raise ValueError("The model returned an empty or oversized summary; no compaction was saved.")
+            current["summary"] = {"text": answer.strip(), "upto": stream["upto"], "created_at": _utc_now()}
+            usage = self._context_usage(current, stream["context"])
+            self.save(current)
+            kind = "compact_done"
+        else:
+            usage = None
+        self._streams.pop(stream_id, None)
+        self._emit(kind, stream_id=stream_id, chat_id=stream["chat_id"], operation="compact",
+                   usage=usage, error=error if kind == "error" else None)
+
+    def _save_answer(self, stream_id, stream, current, kind, content, error):
+        """Store the answer, or what arrived before a stop or an error. The caller holds the lock."""
+        if content:
+            message = {"role": "assistant", "content": content}
+            if "thinking_started" in stream:
+                message["thinking_seconds"] = stream.get("thinking_seconds", max(0, time.monotonic() - stream["thinking_started"]))
+            current["messages"].append(message)
+        current["last_response"] = {"status": kind, "kind": "chat", "metrics": stream["metrics"]}
+        current["last_response"]["memories_used"] = deepcopy(stream.get("memories_used", []))
+        if error and kind == "error":
+            current["last_response"]["error"] = error
+        self.save(current)
+        self._streams.pop(stream_id, None)
+        self._emit(kind, stream_id=stream_id, chat_id=stream["chat_id"],
+                   text=content or "", metrics=stream["metrics"], memories_used=stream.get("memories_used", []),
+                   error=error if kind == "error" else None)
+
     def _run_stream(self, stream_id, stream, record):
         engine = self._engine
         ended = threading.Event()
@@ -208,21 +291,7 @@ class ChatService:
             self._emit("compact_started", stream_id=stream_id, chat_id=stream["chat_id"], operation="compact")
 
         def chunk(text):
-            with stream["data_lock"]:
-                if stream["cancel"].is_set():
-                    raise engine.StreamStopped()
-                if compact and sum(map(len, stream["parts"])) + len(text) > stream["summary_chars"]:
-                    raise RuntimeError("The model summary exceeded the requested size; no compaction was saved.")
-                stream["parts"].append(text)
-                combined = "".join(stream["parts"])
-                if "<think>" in combined and "thinking_started" not in stream:
-                    stream["thinking_started"] = time.monotonic()
-                if "</think>" in combined and "thinking_started" in stream and "thinking_seconds" not in stream:
-                    stream["thinking_seconds"] = max(0, time.monotonic() - stream["thinking_started"])
-                if text and "loading" in stream:
-                    stream["loading"].first_output()
-                if not compact:
-                    self._emit("token", stream_id=stream_id, chat_id=stream["chat_id"], text=text)
+            self._add_chunk(stream_id, stream, compact, text)
 
         def metrics(value):
             with stream["data_lock"]:
@@ -230,34 +299,7 @@ class ChatService:
 
         def request():
             try:
-                if stream["cancel"].is_set():
-                    raise engine.StreamStopped()
-                if not stream.get("vision_checked"):
-                    self._require_vision(record["model"], stream["messages"], record.get("backend", record["environment"]["backend"]))
-                peer = shared_ai.peer_of(record.get("backend", record["environment"]["backend"]))
-                if peer is not None:
-                    # Runs on a paired computer, over the TLS connection pinned at pairing (local network only).
-                    return self._shared_ai.chat(peer, deepcopy(stream["messages"]), record["model"], on_chunk=chunk,
-                                                on_metrics=metrics, cancel_event=stream["cancel"])
-                if record.get("backend", record["environment"]["backend"]) == "Colibri":
-                    client = self._prepare_colibri(stream["cancel"],
-                        lambda text: self._emit("status", text=text, chat_id=record["id"]))
-                    if stream["cancel"].is_set():
-                        raise engine.StreamStopped()
-                    with network_gate.task("Send a message through Colibri", "Your message, conversation, shared notes and attached or pinned context."):
-                        return client.chat(deepcopy(stream["messages"]), model=record["model"], on_chunk=chunk,
-                                           on_metrics=metrics, cancel_event=stream["cancel"])
-                loading = ModelLoadProgress(self._emit, record["model"], stream["cancel"],
-                                           stream_id=stream_id, chat_id=stream["chat_id"])
-                with stream["data_lock"]:
-                    stream["loading"] = loading
-                loading.start(engine.running_details)
-                if stream["cancel"].is_set():
-                    raise engine.StreamStopped()
-                options = {"keep_alive": f"{stream['keep_alive']}m"} if stream["keep_alive"] else {}
-                return engine.request_ollama(deepcopy(stream["messages"]), model=record["model"],
-                                             context_length=stream["context"],
-                                             on_chunk=chunk, on_metrics=metrics, cancel_event=stream["cancel"], **options)
+                return self._request_answer(stream_id, stream, record, chunk, metrics)
             except engine.StreamStopped:
                 raise
             except Exception as failure:
@@ -282,33 +324,9 @@ class ChatService:
                     content = partial if kind != "done" else answer
                 current = self._stream_record(stream)
                 if compact:
-                    if kind == "done":
-                        if not isinstance(answer, str) or not answer.strip() or len(answer) > stream["summary_chars"]:
-                            raise ValueError("The model returned an empty or oversized summary; no compaction was saved.")
-                        current["summary"] = {"text": answer.strip(), "upto": stream["upto"], "created_at": _utc_now()}
-                        usage = self._context_usage(current, stream["context"])
-                        self.save(current)
-                        kind = "compact_done"
-                    else:
-                        usage = None
-                    self._streams.pop(stream_id, None)
-                    self._emit(kind, stream_id=stream_id, chat_id=stream["chat_id"], operation="compact",
-                                      usage=usage, error=error if kind == "error" else None)
-                    return
-                if content:
-                    message = {"role": "assistant", "content": content}
-                    if "thinking_started" in stream:
-                        message["thinking_seconds"] = stream.get("thinking_seconds", max(0, time.monotonic() - stream["thinking_started"]))
-                    current["messages"].append(message)
-                current["last_response"] = {"status": kind, "kind": "chat", "metrics": stream["metrics"]}
-                current["last_response"]["memories_used"] = deepcopy(stream.get("memories_used", []))
-                if error and kind == "error":
-                    current["last_response"]["error"] = error
-                self.save(current)
-                self._streams.pop(stream_id, None)
-                self._emit(kind, stream_id=stream_id, chat_id=stream["chat_id"],
-                                  text=content or "", metrics=stream["metrics"], memories_used=stream.get("memories_used", []),
-                                  error=error if kind == "error" else None)
+                    self._save_compaction(stream_id, stream, current, kind, answer, error)
+                else:
+                    self._save_answer(stream_id, stream, current, kind, content, error)
         except Exception as failure:
             with stream["data_lock"]:
                 partial = "".join(stream["parts"])
