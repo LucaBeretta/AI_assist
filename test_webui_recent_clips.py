@@ -149,6 +149,17 @@ class RecentClipsTests(unittest.TestCase):
         self.assertEqual(clips.list()[0]["name"], f"{MAX_RECENT + 1}.mp4")
         self.assertTrue((self.store.directory / "0.mp4").is_file())
 
+    def test_a_damaged_list_is_moved_aside_and_a_new_one_starts(self):
+        clips = RecentClips(self.store.directory)
+        (self.store.directory / "recent-clips.json").write_text("[{not json")
+        with self.assertLogs("webui.recent_clips", "WARNING"):
+            self.assertEqual(clips.list(), [])
+        self.assertEqual((self.store.directory / "recent-clips.damaged.json").read_text(), "[{not json")
+        path = self.store.directory / "new.mp4"
+        path.write_bytes(MP4_HEADER)
+        clips.remember_recording(path, kind="quick")
+        self.assertEqual([clip["name"] for clip in clips.list()], ["new.mp4"])
+
     def test_dropped_ai_video_copy_is_deleted_but_saved_files_stay(self):
         clips = RecentClips(self.store.directory)
         job = str(uuid4())

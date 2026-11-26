@@ -3,6 +3,7 @@
 import base64
 from datetime import UTC, datetime
 import json
+import logging
 import os
 from pathlib import Path
 import stat
@@ -10,8 +11,11 @@ import threading
 from uuid import UUID, uuid4
 
 from app_core import photo_video
+from app_core.paths import replace_retrying
 from webui.local_files import write_bytes, write_utf8
 
+
+log = logging.getLogger(__name__)
 
 MAX_RECENT = 12
 MAX_MANIFEST_BYTES = 128 * 1024
@@ -51,6 +55,20 @@ class RecentClips:
         self._lock = threading.Lock()
 
     def _read(self):
+        """The saved list. A damaged list is moved aside, and Recent clips starts a new one."""
+        try:
+            return self._read_list()
+        except ValueError as damaged:  # also covers unreadable JSON and text
+            aside = self._manifest.with_name("recent-clips.damaged.json")
+            try:
+                replace_retrying(self._manifest, aside)
+            except OSError:
+                raise damaged from None
+            log.warning("Recent clips could not read its list (%s). It was moved to %s and a new list started.",
+                        damaged, aside.name)
+            return []
+
+    def _read_list(self):
         manifest = self._manifest
         try:
             if not stat.S_ISREG(manifest.lstat().st_mode):
