@@ -54,7 +54,7 @@ def list_models(base):
         with urllib.request.urlopen(f"{base}/api/tags", timeout=10) as response:
             result = json.loads(response.read().decode("utf-8"))
     except (urllib.error.URLError, TimeoutError) as error:
-        raise RuntimeError(f"Could not load models from {base}. Start Ollama, then click Refresh.") from error
+        raise RuntimeError(f"Could not load models from {base}. Start Ollama, then click Refresh models.") from error
     except json.JSONDecodeError as error:
         raise RuntimeError("Ollama returned an invalid model list.") from error
     return model_names(result)

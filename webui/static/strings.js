@@ -88,7 +88,6 @@ window.i18n = (() => {
   "Chat instructions": "Istruzioni della chat",
   "Chat instructions…": "Istruzioni della chat…",
   "Chats": "Chat",
-  "Check hardware and recommendations again": "Controlla di nuovo hardware e consigli",
   "Checking which models fit this computer…": "Controllo quali modelli sono adatti a questo computer…",
   "Checkpoints": "Punti di ripristino",
   "Choose a folder, then pin files to send them with every request.": "Scegli una cartella, poi fissa i file da inviare con ogni richiesta.",
@@ -196,7 +195,6 @@ window.i18n = (() => {
   "New project": "Nuovo progetto",
   "Next version": "Versione successiva",
   "No checkpoints yet. One is saved before the first change of each task.": "Nessun punto di ripristino. Verrà creato prima della prima modifica di ogni compito.",
-  "No models are loaded right now.": "Nessun modello è caricato in questo momento.",
   "No models installed yet. Pick one below to download it.": "Nessun modello installato. Scegline uno da scaricare.",
   "No recommendations: the model catalog could not be read (offline?) or nothing fits.": "Nessun consiglio disponibile: controlla la connessione o scegli un modello manualmente.",
   "No running model available": "Nessun modello disponibile sul server",
@@ -235,7 +233,6 @@ window.i18n = (() => {
   "Recent": "Recenti",
   "Recommended for this computer": "Consigliati per questo computer",
   "Recommended model": "Modello consigliato",
-  "Refresh checkpoints": "Aggiorna punti di ripristino",
   "Refresh models": "Aggiorna modelli",
   "Regenerate": "Rigenera",
   "Regenerate answer": "Rigenera risposta",
@@ -357,7 +354,6 @@ window.i18n = (() => {
   "loading": "caricamento",
   "Agent step {v0} / {v1}": "Passo agente {v0} / {v1}",
   "Capabilities": "Funzionalità",
-  "Refresh": "Aggiorna",
   "Capabilities reported by the selected model. Unreported features remain unknown.": "Funzionalità dichiarate dal modello scelto. Quelle non dichiarate restano sconosciute.",
   "Create desktop shortcut": "Crea collegamento sul desktop",
   "Desktop shortcut": "Collegamento sul desktop",
@@ -690,7 +686,11 @@ window.i18n = (() => {
   "Look": "Aspetto",
   "The cube button at the top switches anywhere.": "Il pulsante a cubo in alto cambia aspetto ovunque.",
   "Classic": "Classico",
-  "3D cockpit": "Cabina 3D"
+  "3D cockpit": "Cabina 3D",
+  "Check online for suggestions": "Cerca suggerimenti online",
+  "Asks before going online: reads model lists from ollama.com and huggingface.co": "Chiede prima di andare online: legge gli elenchi dei modelli da ollama.com e huggingface.co",
+  "Loaded models and their Unload buttons are on the Models screen.": "I modelli caricati e i loro pulsanti Scarica dalla memoria sono nella schermata Modelli.",
+  "Open Models": "Apri Modelli"
 };
   const en = Object.fromEntries(Object.keys(it).map(key => [key, key]));
   const messages = {en, it};

@@ -161,14 +161,24 @@ window.parityui = (() => {
     renderReviewerChoices();
     if (!hybrid) return;
     el("hybrid-enabled").checked = hybrid.enabled; el("hybrid-model").value = hybrid.review_model; el("hybrid-memory").checked = hybrid.manage_memory;
+    syncReviewer();
   }
-  el("hybrid-form").addEventListener("submit", async event => {
-    event.preventDefault();
+  // Quality review saves as soon as something changes. It can only be on once a reviewer model is chosen.
+  function syncReviewer() {
+    const chosen = Boolean(el("hybrid-model").value.trim());
+    el("hybrid-enabled").disabled = !chosen;
+    if (!chosen) el("hybrid-enabled").checked = false;
+  }
+  async function saveReviewer() {
+    syncReviewer();
     try {
-      const result = await call("set_hybrid_settings", el("hybrid-enabled").checked, el("hybrid-model").value, el("hybrid-memory").checked);
+      const result = await call("set_hybrid_settings", el("hybrid-enabled").checked, el("hybrid-model").value.trim(), el("hybrid-memory").checked);
       hybrid = result.hybrid; qualityDirty = false; el("dev-quality").checked = hybrid.enabled; el("hybrid-status").textContent = t("Saved.");
     } catch (failure) { el("hybrid-status").textContent = failure.message; }
-  });
+  }
+  el("hybrid-form").addEventListener("submit", event => { event.preventDefault(); saveReviewer(); });
+  for (const id of ["hybrid-enabled", "hybrid-memory", "hybrid-model"]) el(id).addEventListener("change", saveReviewer);
+  el("hybrid-model").addEventListener("input", syncReviewer);
   el("dev-quality").addEventListener("change", () => { qualityDirty = true; });
   el("check-updates").addEventListener("click", () => start("check_updates", [], "updates"));
   el("install-update").addEventListener("click", () => start("install_update", [], "install_update"));
@@ -186,7 +196,6 @@ window.parityui = (() => {
     try { await call("create_shortcut"); el("shortcut-result").textContent = t("Desktop shortcut created."); }
     catch (error) { el("shortcut-result").textContent = error.message; }
   });
-  el("capabilities-refresh").addEventListener("click", capabilities);
   el("colibri-browse").addEventListener("click", async () => {
     try { const chosen = await call("choose_folder"); if (!chosen.cancelled) { await call("set_colibri_folder", chosen.path); el("colibri-folder").value = chosen.path; } }
     catch (failure) { el("colibri-output").textContent = failure.message; }

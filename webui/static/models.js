@@ -193,14 +193,17 @@ window.modelsui = (() => {
     } catch (error) { note(error.message); element("models-recommended").replaceChildren(node("p", "dev-hint", error.message)); }
   }
 
-  function onShow() { refresh(); if (!advice) loadAdvice(); }
+  // Opening the screen re-reads this computer and the installed models; going online is its own button.
+  function onShow() { refresh(); loadAdvice(); }
 
   element("pull-other").addEventListener("submit", event => {
     event.preventDefault();
     const name = element("pull-other-name").value.trim();
     if (name) start(name);
   });
-  element("models-refresh").addEventListener("click", () => { advice = null; refresh(); loadAdvice(true); });
+  element("models-check-online").addEventListener("click", () => { advice = null; refresh(); loadAdvice(true); });
+  // The one "Refresh models" button also refreshes this screen when it is open.
+  element("refresh")?.addEventListener("click", () => { if (!element("models-view").hidden) onShow(); });
   window.addEventListener("languagechange", () => { if (!element("models-view").hidden) { renderHardware(advice?.hardware); renderAll(); } });
   return {onEvent, onShow};
 })();

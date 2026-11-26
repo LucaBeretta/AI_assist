@@ -941,21 +941,13 @@ window.app = (() => {
   // Windows-only controls (firewall lock, microphone check-ins) are hidden on other systems.
   if (root?.dataset) root.dataset.platform = /Windows/i.test(window.navigator?.userAgent || "") ? "windows" : /Mac/i.test(window.navigator?.userAgent || "") ? "mac" : "other";
 
+  // Loaded models are managed on the Models screen; Settings points there instead of repeating the list.
+  element("settings-open-models")?.addEventListener("click", () => { closeDialog("settings-dialog"); showView("models"); });
   async function openSettings() {
     showSettingsPane(settingsPane);
     try { await refreshModels(); } catch (error) { showError(error); }
     element("setting-theme").value = root?.getAttribute?.("data-theme") || "night";
     element("setting-idle").value = String(lastState?.settings?.idle_unload_minutes ?? 0);
-    const loaded = Object.entries(lastState?.loaded || {});
-    element("loaded-models").replaceChildren(...(loaded.length ? loaded.map(([name, details]) => {
-      const row = document.createElement("div");
-      row.className = "setting-row";
-      const label = document.createElement("span");
-      label.className = "mono";
-      label.textContent = `${name}${details?.size ? " · " + gigabytes(details.size) : ""}`;
-      row.append(label, button(t("Unload"), "btn", async () => { await unloadModel(name); openSettings(); }));
-      return row;
-    }) : [Object.assign(document.createElement("p"), {className: "setting-hint", textContent: t("No models are loaded right now.")})]));
     window.workspaceui?.openSettings();
     window.parityui?.openSettings();
     window.securityui?.openSettings();
@@ -1296,7 +1288,6 @@ window.app = (() => {
   // Mission Control opens the live Compute window (for a second screen); it is not a view in this window.
   const openMissionControl = () => call("open_compute_window").catch(showError);
   element("open-mission-control").addEventListener("click", openMissionControl);
-  element("open-models").addEventListener("click", () => showView("models"));
 
   async function selectModel(name, backend = "Ollama") {
     element("model").value = modelValue(name, backend);
