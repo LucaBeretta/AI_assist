@@ -135,8 +135,12 @@ window.workspaceui = (() => {
     }
     return false;
   }
+  let lastStatus = null;
+  // "local only", "remote server" or "cloud model" for the model the status bar describes, else null.
+  const modelPlace = name => lastStatus && lastStatus.model_name === name ? lastStatus.privacy_kind || null : null;
   function renderStatus(value) {
     if (value.ok === false) return;
+    lastStatus = value;
     // A message or error the person has not read yet stays (see app.js status()).
     if (!window.app?.statusHeld?.()) el("status").textContent = value.backend && value.engine_state ? value.backend.toLowerCase() + " " + t(value.engine_state) : value.engine;
     el("status-model").textContent = value.model_name || "";
@@ -168,5 +172,5 @@ window.workspaceui = (() => {
     catch (failure) { error(failure); }
   });
   window.addEventListener("languagechange", () => { if (el("settings-dialog").open) openSettings(); });
-  return {openSettings, openMemories, openInstructions, renderStatus, promptKey, onEvent, onState};
+  return {openSettings, openMemories, openInstructions, renderStatus, modelPlace, promptKey, onEvent, onState};
 })();

@@ -286,7 +286,13 @@ window.devui = (() => {
     const choice = window.app?.modelChoice?.() || {name: element("model").value, backend: "Ollama"};
     // "blocked" only when the choice can never work here; an empty list may still be loading.
     if (!choice.name) return {usable: false, blocked: false, note: t("Choose a model in Chats first.")};
-    if (choice.backend === "Ollama") return {usable: true, blocked: false, note: t("Model: {v0}, on this computer.", {v0: choice.name})};
+    if (choice.backend === "Ollama") {
+      // Where Ollama runs this model, as the status bar knows it (cloud model names also say so).
+      const place = window.workspaceui?.modelPlace?.(choice.name);
+      const note = place === "cloud model" || /[-:]cloud$/i.test(choice.name) ? "Model: {v0}, an Ollama cloud model: the task leaves this computer."
+        : place === "remote server" ? "Model: {v0}, on a remote Ollama server: the task leaves this computer." : "Model: {v0}, on this computer.";
+      return {usable: true, blocked: false, note: t(note, {v0: choice.name})};
+    }
     if (String(choice.backend).startsWith("peer:")) {
       return {usable: false, blocked: true, note: t("{v0} runs on a paired computer, which answers chats only. Developer needs a model on this computer.", {v0: choice.name})};
     }
@@ -302,10 +308,15 @@ window.devui = (() => {
   function controls() {
     const running = Boolean(task?.running);
     const busy = running || Boolean(starting);
-    element("dev-run").disabled = busy || modelCheck().blocked;
+    const check = modelCheck();
+    element("dev-run").disabled = busy || check.blocked;
     element("dev-stop").disabled = !running;
     element("dev-project").disabled = busy;
     element("dev-browse").disabled = busy;
+    if (busy) return;
+    // Run greyed out always comes with its reason, also when the model changed during a task.
+    element("dev-choose-model").hidden = check.usable;
+    if (check.blocked) status(check.note);
   }
 
   // ---------- run / stop ----------

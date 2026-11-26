@@ -692,6 +692,8 @@ window.i18n = (() => {
   "3D cockpit": "Cabina 3D",
   "Choose a model in Chats first.": "Scegli prima un modello in Chat.",
   "Model: {v0}, on this computer.": "Modello: {v0}, su questo computer.",
+  "Model: {v0}, an Ollama cloud model: the task leaves this computer.": "Modello: {v0}, un modello cloud di Ollama: l'attività esce da questo computer.",
+  "Model: {v0}, on a remote Ollama server: the task leaves this computer.": "Modello: {v0}, su un server Ollama remoto: l'attività esce da questo computer.",
   "{v0} runs on a paired computer, which answers chats only. Developer needs a model on this computer.": "{v0} gira su un computer abbinato, che risponde solo alle chat. Developer ha bisogno di un modello su questo computer.",
   "Developer needs an Ollama model on this computer, not {v0}.": "Developer ha bisogno di un modello Ollama su questo computer, non {v0}.",
   "Choose a model": "Scegli un modello",

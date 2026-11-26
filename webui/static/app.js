@@ -24,7 +24,7 @@ window.app = (() => {
   let sidebarVersion = 0;
 
   // One-off messages stay readable: the live status refresh (every 2 s) waits for them.
-  // A confirmation stays 6 s; an error stays, in red, until the next click.
+  // A confirmation stays 6 s; an error stays, in red, until the next click or key press.
   let statusHeldUntil = 0;
   function status(text, {error = false} = {}) {
     const node = element("status");
@@ -33,11 +33,13 @@ window.app = (() => {
     statusHeldUntil = error ? Infinity : Date.now() + 6000;
   }
   const statusHeld = () => Date.now() < statusHeldUntil;
-  document.addEventListener?.("pointerdown", () => {
+  function releaseError() {
     if (statusHeldUntil !== Infinity) return;
     statusHeldUntil = 0;
     element("status").classList?.remove("is-error");
-  }, true);
+  }
+  document.addEventListener?.("pointerdown", releaseError, true);
+  document.addEventListener?.("keydown", releaseError, true);
 
   async function call(method, ...args) {
     const result = await window.pywebview.api[method](...args);
@@ -624,12 +626,15 @@ window.app = (() => {
     for (const [id, value] of rest) chats.set(id, value);
   }
 
-  async function newChat(incognito = false) {
-    showView("chat");  // started from another section, the new chat would otherwise open hidden
+  // show: the person asked for it, so bring Chats to the front (from another section it would open hidden)
+  // and put the cursor in the message box. Replacing a deleted chat leaves the person where they are.
+  async function newChat(incognito = false, {show = true} = {}) {
+    if (show) showView("chat");
     const result = selectedProject || incognito ? await call("new_chat", incognito, selectedProject) : await call("new_chat");
     addChatFirst(result.chat);
     renderChats();
     await openChat(result.chat.id);
+    if (show) element("prompt").focus?.();
     if (incognito) status(t("Incognito chat: not saved, no memory."));
   }
 
@@ -815,7 +820,7 @@ window.app = (() => {
         renderChats();
         if (event.chat_id === selected) {
           selected = null;
-          (chats.size ? openChat(chats.keys().next().value) : newChat()).catch(showError);
+          (chats.size ? openChat(chats.keys().next().value) : newChat(false, {show: false})).catch(showError);
         }
         return true;
       case "memories_changed":
@@ -882,7 +887,7 @@ window.app = (() => {
           stream.text = "";
           liveReplies.delete(stream);
         }
-        if (selected === event.chat_id) status(event.type === "error" ? event.error : `${t(event.type)}${event.metrics?.eval_count ? ` · ${event.metrics.eval_count} tokens${rate(event.metrics)}` : ""}`);
+        if (selected === event.chat_id) status(event.type === "error" ? event.error : `${t(event.type)}${event.metrics?.eval_count ? ` · ${event.metrics.eval_count} tokens${rate(event.metrics)}` : ""}`, {error: event.type === "error"});
         if (selected === event.chat_id) {
           window.app.refreshChat(event.chat_id).then(() => {
             if (selected === event.chat_id) {
