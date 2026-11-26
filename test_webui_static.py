@@ -171,26 +171,101 @@ class StaticTests(unittest.TestCase):
         ''')
 
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
-    def test_the_firewall_lock_offers_only_what_fits_its_state(self):
-        self.run_scenario(r'''
+    def test_models_screen_says_when_ollama_is_off_and_never_waits_for_paired_computers(self):
+        self.run_scenario(r"""
         const api = window.pywebview.api;
-        let firewall = {state:'off', detail:'Off. Ollama can reach the internet by itself.', can_turn_on:true, has_rules:false};
+        api.state = async () => ({ok:true, engine:'Ollama', host:'localhost', models:[], ollama:{models:[], loaded:{}, error:'Could not load models from http://localhost:11434.'}, loaded:{}});
+        api.recommend_models = async () => ({ok:true, hardware:{gpus:[]}, recommendations:[]});
+        let answer = null;
+        api.shared_ai_models = () => new Promise(resolve => { answer = resolve; });   // a paired computer that is slow to answer
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'models.js'),'utf8'),{document,window,Map,Set,Error,String,Number,Boolean,Array});
+        await window.listeners.pywebviewready();
+        await elements.get('nav-models').listeners.click();
+        for (let i = 0; i < 6; i++) await new Promise(resolve => setImmediate(resolve));
+        const text = () => elements.get('models-installed').textContent;
+        assert.match(text(), /Ollama is not running on this computer, so its models are not listed\. Start Ollama/);   // not "nothing installed"
+        assert.match(elements.get('models-status').textContent, /Could not load models/);
+        answer({ok:true, computers:[{id:'pc', backend:'peer:pc', state:'offline', models:[]}]});
+        for (let i = 0; i < 6; i++) await new Promise(resolve => setImmediate(resolve));
+        assert.doesNotMatch(text(), /Chats can use your paired computer/);    // paired, but sharing nothing right now
+        """)
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_model_abilities_follow_the_language_and_a_failed_read_is_tried_again(self):
+        self.run_scenario(r"""
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'strings.js'),'utf8'),{document,window,Object,String,RegExp});
+        const api = window.pywebview.api;
+        api.state = async () => ({ok:true, engine:'Ollama', host:'localhost', models:['qwen3:8b'], ollama:{models:['qwen3:8b']}, loaded:{}});
+        let reads = 0;
+        api.model_capabilities = async () => { reads++; return reads === 1 ? {ok:false, error:'Ollama is busy.'} : {ok:true, metadata:{capabilities:['tools']}}; };
+        api.recommend_models = async () => ({ok:true, hardware:{gpus:[]}, recommendations:[]});
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'models.js'),'utf8'),{document,window,Map,Set,Error,String,Number,Boolean,Array});
+        await window.listeners.pywebviewready();
+        const settle = async () => { for (let i = 0; i < 8; i++) await new Promise(resolve => setImmediate(resolve)); };
+        await elements.get('nav-models').listeners.click(); await settle();
+        assert.doesNotMatch(elements.get('models-installed').textContent, /tools/);
+        await elements.get('nav-chats').listeners.click();
+        await elements.get('nav-models').listeners.click(); await settle();     // the next visit reads it again
+        assert.equal(reads, 2);
+        assert.match(elements.get('models-installed').textContent, /can use tools/);
+        window.i18n.setLanguage('it');
+        await elements.get('nav-chats').listeners.click();
+        await elements.get('nav-models').listeners.click(); await settle();
+        assert.match(elements.get('models-installed').textContent, /usa strumenti/);   // in today's language
+        assert.equal(reads, 2);
+        """)
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_a_model_change_the_chat_refuses_puts_the_old_model_back(self):
+        self.run_scenario(r"""
+        await window.listeners.pywebviewready();
+        const before = elements.get('model').value;
+        window.pywebview.api.set_chat_model = async () => ({ok:false, error:'Wait for the reply to finish.'});
+        await assert.rejects(window.app.selectModel('qwen3:32b', 'peer:pc'));
+        assert.equal(elements.get('model').value, before);        // the chat kept its model, and so does the box
+        """)
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_the_firewall_lock_offers_only_what_fits_its_state(self):
+        self.run_scenario(r"""
+        const api = window.pywebview.api;
+        let firewall = null;
         api.privacy_state = async () => ({ok:true, gate:{installed:true}, connections:[], firewall, busy:null});
         vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'security.js'),'utf8'),{document,window,Map,Set,Error,String,Number,Boolean,Array,Date,Math});
         const shown = () => ['firewall-on','firewall-off','firewall-relock','firewall-lift-row'].filter(id => !document.getElementById(id).hidden);
+        const check = async (summary, buttons) => { firewall = summary; await window.securityui.openSettings(); assert.deepEqual(shown(), buttons, summary.state); };
+        const soon = Date.now() / 1000 + 600, gone = Date.now() / 1000 - 60;
+        await check({state:'off', detail:'Off. No Ollama or colibri programs were found to lock.', can_turn_on:false, has_rules:false}, ['firewall-on']);  // install Ollama, then click
+        assert.equal(elements.get('firewall-status').textContent, 'Off. No Ollama or colibri programs were found to lock.');   // the lock's own words, once
+        await check({state:'on', detail:'On.', has_rules:true, ollama_locked:true}, ['firewall-off','firewall-lift-row']);
+        await check({state:'lifted', detail:'Lifted until 14:30. It turns back on by itself.', has_rules:true, lift_until:soon}, ['firewall-off','firewall-relock']);
+        await check({state:'lifted', detail:'Lifted until 14:30. It turns back on by itself.', has_rules:true, lift_until:gone}, ['firewall-off','firewall-relock','firewall-lift-row']);
+        assert.equal(elements.get('firewall-status').textContent, 'The lift has ended. Checking the lock again…');
+        await check({state:'disabled', detail:'Off: the rules are turned off.', has_rules:true}, ['firewall-off','firewall-relock']);
+        await check({state:'partial', detail:'Partly on.', has_rules:true, ollama_locked:true, can_turn_on:true}, ['firewall-on','firewall-off','firewall-lift-row']);
+        await check({state:'changed', detail:'Changed outside AI Assist.', has_rules:true, ollama_locked:false, can_turn_on:true}, ['firewall-on','firewall-off']);
+        await check({state:'firewall off', detail:'Windows Firewall is off for: Public.', has_rules:false}, []);
+        await check({state:'ignored', detail:'Group Policy ignores local rules.', has_rules:true}, ['firewall-off']);
+        await check({state:'unavailable', detail:'The firewall lock needs Windows.'}, []);
+        await check({state:'error', detail:"Could not read Windows Firewall: Command '['powershell.exe', '-NoProfile', '-Command', 'Get-NetFirewallRule …']' timed out after 90 seconds"}, ['firewall-on','firewall-off']);
+        assert.equal(elements.get('firewall-status').textContent, 'Could not read Windows Firewall right now.');   // never the raw command
+        """)
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_the_firewall_lock_explains_itself_in_italian(self):
+        self.run_scenario(r"""
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'strings.js'),'utf8'),{document,window,Object,String,RegExp});
+        window.i18n.setLanguage('it');
+        const api = window.pywebview.api;
+        let firewall = {state:'lifted', detail:'Lifted until 14:30. It turns back on by itself.', has_rules:true, lift_until:Date.now() / 1000 + 600};
+        api.privacy_state = async () => ({ok:true, gate:{installed:true}, connections:[], firewall, busy:null});
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'security.js'),'utf8'),{document,window,Map,Set,Error,String,Number,Boolean,Array,Date,Math});
         await window.securityui.openSettings();
-        assert.deepEqual(shown(), ['firewall-on']);
-        assert.match(elements.get('firewall-status').textContent, /Ollama can reach the internet by itself/);   // the lock's own explanation
-        firewall = {state:'on', detail:'On.', has_rules:true};
+        assert.equal(elements.get('firewall-status').textContent, 'Sospeso fino alle 14:30. Si riattiva da solo.');
+        firewall = {state:'partial', detail:'Partly on: 2 program(s) are not locked, for example after an Ollama update. Turn the lock on again to cover them.', has_rules:true};
         await window.securityui.openSettings();
-        assert.deepEqual(shown(), ['firewall-off','firewall-lift-row']);
-        firewall = {state:'lifted', detail:'Lifted until 14:30. It turns back on by itself.', has_rules:true};
-        await window.securityui.openSettings();
-        assert.deepEqual(shown(), ['firewall-off','firewall-relock']);
-        firewall = {state:'partial', detail:'Partly on.', has_rules:true, can_turn_on:true};
-        await window.securityui.openSettings();
-        assert.deepEqual(shown(), ['firewall-on']);
-        ''')
+        assert.match(elements.get('firewall-status').textContent, /^Attivo in parte: 2 programmi/);
+        """)
 
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
     def test_reading_sharing_settings_never_enables_the_listener(self):

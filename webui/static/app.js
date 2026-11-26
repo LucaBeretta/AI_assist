@@ -1296,11 +1296,12 @@ window.app = (() => {
   element("open-models").addEventListener("click", () => showView("models"));
 
   async function selectModel(name, backend = "Ollama") {
+    const before = element("model").value;
     element("model").value = modelValue(name, backend);
     controls();
     if (selected && window.pywebview?.api?.set_chat_model) {
       try { await call("set_chat_model", selected, name, backend); await reloadChat(selected); }
-      catch (error) { showError(error); throw error; }
+      catch (error) { element("model").value = before; controls(); showError(error); throw error; }  // the chat kept its model
     }
   }
 

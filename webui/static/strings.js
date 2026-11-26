@@ -481,7 +481,7 @@ window.i18n = (() => {
   "off": "disattivato",
   "partial": "parziale",
   "lifted": "sospeso",
-  "disabled": "disattivato",
+  "disabled": "regole spente",
   "changed": "modificato",
   "firewall off": "firewall disattivato",
   "ignored": "non applicabile",
@@ -691,13 +691,27 @@ window.i18n = (() => {
   "thinks before answering": "ragiona prima di rispondere",
   "Remembers up to {v0} tokens of a conversation.": "Ricorda fino a {v0} token di una conversazione.",
   "Nothing installed here. Chats use your paired computer.": "Niente installato qui. Le chat usano il tuo computer abbinato.",
-  "a paired computer": "un computer abbinato"
+  "a paired computer": "un computer abbinato",
+  "Could not read Windows Firewall right now.": "Non è stato possibile leggere Windows Firewall in questo momento.",
+  "The lift has ended. Checking the lock again…": "La sospensione è finita. Controllo di nuovo il blocco…",
+  "On. Windows Firewall blocks these programs from internet addresses. This computer and the local network still work.": "Attivo. Windows Firewall impedisce a questi programmi di raggiungere indirizzi internet. Questo computer e la rete locale continuano a funzionare.",
+  "Off. Ollama can reach the internet by itself, for example to check for updates.": "Disattivato. Ollama può raggiungere internet da solo, per esempio per cercare aggiornamenti.",
+  "Off. No Ollama or colibri programs were found to lock.": "Disattivato. Non sono stati trovati programmi Ollama o colibri da bloccare.",
+  "Off: the rules are turned off and no lift timer is running. Lock again.": "Disattivato: le regole sono spente e nessuna sospensione è in corso. Blocca di nuovo.",
+  "Changed outside AI Assist: a rule no longer blocks every internet address. Turn the lock on again.": "Modificato fuori da AI Assist: una regola non blocca più tutti gli indirizzi internet. Attiva di nuovo il blocco.",
+  "This PC's Group Policy ignores local firewall rules, so the lock cannot work here.": "I Criteri di gruppo di questo PC ignorano le regole firewall locali, quindi il blocco qui non può funzionare.",
+  "The firewall lock needs Windows.": "Il blocco firewall richiede Windows.",
+  "Ollama is not running on this computer, so its models are not listed. Chats can use your paired computer.": "Ollama non è in esecuzione su questo computer, quindi i suoi modelli non sono elencati. Le chat possono usare il tuo computer abbinato.",
+  "Ollama is not running on this computer, so its models are not listed. Start Ollama, then click Refresh models.": "Ollama non è in esecuzione su questo computer, quindi i suoi modelli non sono elencati. Avvia Ollama, poi fai clic su Aggiorna modelli."
 };
   const en = Object.fromEntries(Object.keys(it).map(key => [key, key]));
   const messages = {en, it};
   let preference = "system", language = String(window.navigator?.language || "en").toLowerCase().startsWith("it") ? "it" : "en";
   // Internet-gate texts come from Python in English and may carry a model or host name.
   const gatePatterns = {it: [
+    [/^Lifted until (\d{1,2}:\d{2})\. It turns back on by itself\.$/, "Sospeso fino alle $1. Si riattiva da solo."],
+    [/^Partly on: (\d+) program\(s\) are not locked, for example after an Ollama update\. Turn the lock on again to cover them\.$/, "Attivo in parte: $1 programmi non sono bloccati, per esempio dopo un aggiornamento di Ollama. Attiva di nuovo il blocco per includerli."],
+    [/^Windows Firewall is off for: (.+)\. Its rules do nothing until you turn it on in Windows Security > Firewall & network protection\.$/, "Windows Firewall è disattivato per: $1. Le sue regole non hanno effetto finché non lo riattivi in Sicurezza di Windows > Protezione firewall e della rete."],
     [/^Send your message to (.+)$/, "Inviare il tuo messaggio a $1"],
     [/^Run a developer agent step with (.+)$/, "Eseguire un passo dell'agente Developer con $1"],
     [/^Download (.+) through Ollama$/, "Scaricare $1 tramite Ollama"],

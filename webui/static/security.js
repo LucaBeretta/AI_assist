@@ -50,8 +50,7 @@ window.securityui = (() => {
     logs = state.connections || logs; renderLog();
     el("privacy-gate").textContent = state.gate.installed ? t("Internet locked; external requests need approval.") : t("Internet gate is not active.");
     const summary = state.firewall;
-    // The lock explains itself in summary.detail (for example "Lifted until 14:30. It turns back on by itself.").
-    el("firewall-status").textContent = state.busy ? t("Working…") : summary ? [t(summary.state), summary.detail || summary.message || summary.error || ""].filter(Boolean).join(" · ") : t("Checking firewall…");
+    el("firewall-status").textContent = state.busy ? t("Working…") : firewallText(summary);
     // One control that follows the lock: only the actions that make sense now are shown.
     const offer = firewallActions(summary);
     for (const id of ["firewall-on", "firewall-off", "firewall-relock"]) {
@@ -62,20 +61,40 @@ window.securityui = (() => {
     el("firewall-lift").disabled = Boolean(state.busy);
     if (state.approval) show(state.approval);
   }
+  // A lift that has run out: the lock turns back on by itself, but this summary was read before that.
+  const lapsed = summary => summary?.state === "lifted" && Boolean(summary.lift_until) && summary.lift_until * 1000 <= Date.now();
+  // What the lock does now, in plain words and in the person's language. A failed read shows no raw
+  // error: on a timeout it holds the whole PowerShell command.
+  function firewallText(summary) {
+    if (!summary) return t("Checking firewall…");
+    if (summary.state === "error") return t("Could not read Windows Firewall right now.");
+    if (lapsed(summary)) return t("The lift has ended. Checking the lock again…");
+    return summary.detail ? gate(summary.detail) : t(summary.state);
+  }
   function firewallActions(summary) {
     const state = summary?.state;
     if (!summary || state === "unavailable") return new Set();
     if (state === "on") return new Set(["firewall-lift", "firewall-off"]);
+    if (lapsed(summary)) return new Set(["firewall-relock", "firewall-lift", "firewall-off"]);
     if (state === "lifted" || state === "disabled") return new Set(["firewall-relock", "firewall-off"]);
-    if (state === "off" || state === "partial" || state === "changed") return new Set(summary.can_turn_on === false ? [] : ["firewall-on"]);
-    // Windows Firewall itself off or ignored, or the state could not be read: the lock's rules can still be added or removed.
-    return new Set(summary.has_rules ? ["firewall-on", "firewall-off"] : ["firewall-on"]);
+    // Off: offered even when no Ollama was found yet, since installing it later is enough for the lock to work.
+    if (state === "off") return new Set(["firewall-on"]);
+    // Partly on or changed: turn it on again to cover everything, but what still blocks can be lifted or turned off.
+    if (state === "partial" || state === "changed") {
+      return new Set(["firewall-on", ...(summary.ollama_locked ? ["firewall-lift"] : []), ...(summary.has_rules ? ["firewall-off"] : [])]);
+    }
+    // Windows Firewall off or ignored here: turning the lock on would do nothing, but its rules can be removed.
+    if (state === "firewall off" || state === "ignored") return new Set(summary.has_rules ? ["firewall-off"] : []);
+    return new Set(["firewall-on", "firewall-off"]);  // could not be read: both stay possible
   }
   async function openSettings() {
     try {
       const state = await call("privacy_state"); render(state);
       if (refreshTimer !== null) window.clearTimeout?.(refreshTimer);
-      if (state.busy) refreshTimer = window.setTimeout?.(() => { if (el("settings-dialog").open) openSettings(); }, 500) ?? null;
+      // While a change runs, look again soon; while a lift runs, look again when it ends (Settings re-reads the lock then).
+      const until = state.firewall?.state === "lifted" ? state.firewall.lift_until * 1000 - Date.now() : NaN;
+      const wait = state.busy ? 500 : until > 0 ? Math.min(until + 2000, 2 ** 31 - 1) : null;
+      if (wait !== null) refreshTimer = window.setTimeout?.(() => { if (el("settings-dialog").open) openSettings(); }, wait) ?? null;
     }
     catch (error) { el("privacy-gate").textContent = error.message; }
   }

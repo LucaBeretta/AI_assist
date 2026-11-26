@@ -154,7 +154,7 @@ Install Vercel CLI separately (`npm install -g vercel`) and sign in with `vercel
 
 ## Configuration
 
-`OLLAMA_HOST` selects the Ollama server, defaulting to `http://localhost:11434`. Select a model and requested context in the composer. Server/model support and available memory determine the actual allocation; Capabilities shows advertised limits separately from measured usage. Larger contexts need more memory.
+`OLLAMA_HOST` selects the Ollama server, defaulting to `http://localhost:11434`. Select a model and requested context in the composer. Server/model support and available memory determine the actual allocation; on Models, hovering a model's name shows its advertised limit, separately from the measured usage in the status bar. Larger contexts need more memory.
 
 ### Colibri backend
 
