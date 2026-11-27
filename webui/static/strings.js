@@ -164,7 +164,6 @@ window.i18n = (() => {
   "Describe the task…  (Ctrl+Enter to run)": "Descrivi il compito…  (Ctrl+Invio per avviare)",
   "Destination: ": "Destinazione: ",
   "Developer": "Developer",
-  "Developer currently requires an Ollama model.": "Developer richiede un modello Ollama.",
   "Discard": "Scarta",
   "Disk": "Disco",
   "Dismiss": "Chiudi avviso",
@@ -351,7 +350,6 @@ window.i18n = (() => {
   "Use in chat": "Usa nella chat",
   "Use shared memory": "Usa memoria condivisa",
   "Use the current model and context as the project setup": "Usa modello e contesto attuali come impostazioni del progetto",
-  "Uses the model and context chosen in Chats.": "Usa il modello e il contesto scelti in Chat.",
   "Waiting for your plan approval": "In attesa dell’approvazione del piano",
   "Waiting for your review": "In attesa della tua revisione",
   "Working…": "Al lavoro…",
@@ -732,7 +730,15 @@ window.i18n = (() => {
   "OpenCode is not installed on this computer. Install it from opencode.ai, then try again.": "OpenCode non è installato su questo computer. Installalo da opencode.ai, poi riprova.",
   "Install OpenCode from opencode.ai to use this button.": "Installa OpenCode da opencode.ai per usare questo pulsante.",
   "OpenCode opened in a new window.": "OpenCode è stato aperto in una nuova finestra.",
-  "No terminal program was found. Run OpenCode from a terminal in your project folder instead.": "Nessun terminale trovato. Avvia OpenCode da un terminale nella cartella del progetto."
+  "No terminal program was found. Run OpenCode from a terminal in your project folder instead.": "Nessun terminale trovato. Avvia OpenCode da un terminale nella cartella del progetto.",
+  "Choose a model in Chats first.": "Scegli prima un modello in Chat.",
+  "Model: {v0}, on this computer.": "Modello: {v0}, su questo computer.",
+  "Model: {v0}, an Ollama cloud model: the task leaves this computer.": "Modello: {v0}, un modello cloud di Ollama: l'attività esce da questo computer.",
+  "Model: {v0}, on a remote Ollama server: the task leaves this computer.": "Modello: {v0}, su un server Ollama remoto: l'attività esce da questo computer.",
+  "{v0} runs on a paired computer, which answers chats only. Developer needs a model on this computer.": "{v0} gira su un computer abbinato, che risponde solo alle chat. Developer ha bisogno di un modello su questo computer.",
+  "Developer needs an Ollama model on this computer, not {v0}.": "Developer ha bisogno di un modello Ollama su questo computer, non {v0}.",
+  "Choose a model": "Scegli un modello",
+  "Runs on a paired computer: it answers chats with text. Pictures and Developer tasks need a model on this computer.": "Gira su un computer abbinato: risponde alle chat con testo. Immagini e attività di Developer richiedono un modello su questo computer."
 };
   const en = Object.fromEntries(Object.keys(it).map(key => [key, key]));
   const messages = {en, it};
