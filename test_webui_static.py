@@ -149,6 +149,32 @@ class StaticTests(unittest.TestCase):
         ''')
 
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_open_in_opencode_uses_the_developer_folder_and_explains_when_missing(self):
+        self.run_scenario(r'''
+        const api=window.pywebview.api;
+        api.opencode_state=async()=>({ok:true,installed:false});
+        api.open_opencode=async (folder,model)=>{calls.push(['opencode',folder,model]);return {ok:true};};
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'opencode.js'),'utf8'),{document,window,String,Error});
+        await new Promise(resolve=>setImmediate(resolve));
+        assert.notEqual(elements.get('opencode-open').disabled,true);  // stays clickable: a click checks again
+        assert.match(elements.get('opencode-status').textContent,/opencode\.ai/);
+        api.opencode_state=async()=>({ok:true,installed:true});
+        await window.opencodeui.refresh();
+        assert.equal(elements.get('opencode-status').textContent,'');
+        document.getElementById('dev-project').value='  /home/luca/site  ';
+        document.getElementById('model').value='qwen3:8b';
+        await elements.get('opencode-open').listeners.click();
+        assert.equal(JSON.stringify(calls.at(-1)),'["opencode","/home/luca/site","qwen3:8b"]');
+        document.getElementById('model').value=JSON.stringify(['peer:pc','qwen3:32b']);
+        await elements.get('opencode-open').listeners.click();
+        assert.equal(JSON.stringify(calls.at(-1)),'["opencode","/home/luca/site",null]');  // only models on this computer
+        assert.equal(elements.get('opencode-status').textContent,'OpenCode opened in a new window.');
+        api.open_opencode=async()=>({ok:false,error:'Choose a project folder first.'});
+        await elements.get('opencode-open').listeners.click();
+        assert.equal(elements.get('opencode-status').textContent,'Choose a project folder first.');
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
     def test_reading_sharing_settings_never_enables_the_listener(self):
         self.run_scenario(r'''
         vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'sharing.js'),'utf8'),{document,window,Map,Set,Error,String,Number,Boolean,Array,Date,Object});
