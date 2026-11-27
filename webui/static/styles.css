@@ -139,12 +139,24 @@ code, kbd, pre, .mono { font-family: var(--mono); }
   transition: background var(--fast) var(--ease);
 }
 .chat-list { overflow-x: hidden; }
-.chat-item::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+/* Only the open chat gets the accent dot (an incognito chat keeps its dashed one). */
+.chat-item::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: transparent; }
+.chat-item[aria-current="true"]::before { background: var(--accent); }
 .chat-item:hover { background: var(--raised); }
 .chat-item[aria-current="true"] { background: var(--raised); color: var(--strong); }
 :root[data-theme="day"] .chat-item:hover, :root[data-theme="day"] .chat-item[aria-current="true"] { background: var(--raised-2); }
 .chat-item .working { font-size: 11px; color: var(--link); }
 .sidebar-spacer { flex: 1 1 auto; }
+/* Everything keeps its size; only the chat list gives way (it scrolls) when the window is short. */
+.sidebar > * { flex-shrink: 0; }
+.sidebar > .chat-list { flex-shrink: 1; }
+/* One row at the bottom: Settings, then Appearance, Mission Control and Refresh models as icons
+   (each says what it is on hover), so the chat list gets the room. */
+.sidebar-footer { display: flex; align-items: center; gap: 2px; padding-top: 10px; border-top: 1px solid var(--border); }
+.sidebar-footer #open-settings { flex: 1 1 auto; min-width: 0; }
+.sidebar-footer .footer-icon { flex: none; width: 32px; padding: 0; justify-content: center; color: var(--muted); }
+.sidebar-footer .footer-icon:hover:not(:disabled) { color: var(--text); }
+.sidebar-footer .footer-label { display: none; }
 
 /* ---------- buttons ---------- */
 .icon-btn {
@@ -258,9 +270,10 @@ code, kbd, pre, .mono { font-family: var(--mono); }
 .composer-bar .grow { flex: 1 1 auto; }
 .model-pick { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 4px 0 10px; border-radius: var(--r); color: var(--body-2); font-size: 13px; }
 .model-pick::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
-.model-pick select { height: 30px; max-width: 220px; border: 0; background: transparent; color: var(--body-2); }
+/* The list is as wide as the chosen model's name (up to 220px), so its arrow sits next to the name. */
+.model-pick select { height: 30px; max-width: 220px; field-sizing: content; border: 0; background: transparent; color: var(--body-2); }
 .model-pick select:hover { color: var(--strong); }
-.ctx-input { width: 84px; height: 30px; padding: 0 8px; border: 1px solid var(--border-2); border-radius: var(--r-sm); background: var(--raised); font: 12px var(--mono); }
+.ctx-input { width: 92px; height: 30px; padding: 0 8px; border: 1px solid var(--border-2); border-radius: var(--r-sm); background: var(--raised-2); color: var(--text); font: 12px var(--mono); }
 .send-btn, .stop-btn {
   display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px;
   border: 0; border-radius: var(--r-md);
@@ -293,6 +306,10 @@ code, kbd, pre, .mono { font-family: var(--mono); }
   display: flex; flex-direction: column; gap: 2px; padding: 6px; border: 1px solid var(--border-2);
   border-radius: var(--r-lg); background: var(--raised); box-shadow: var(--shadow);
 }
+/* Context length sits in the context popover, above its two actions. */
+.ctx-field { display: grid; grid-template-columns: 20px 1fr auto; align-items: center; gap: 10px; padding: 10px 10px 12px; border-bottom: 1px solid var(--border-2); color: var(--text); }
+.ctx-field svg { align-self: start; width: 16px; height: 16px; margin-top: 2px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.ctx-actions { display: flex; flex-direction: column; gap: 2px; padding-top: 4px; }
 .menu-item {
   display: grid; grid-template-columns: 20px 1fr; gap: 10px; align-items: start; width: 100%; padding: 10px;
   border: 0; border-radius: var(--r); background: transparent; color: var(--text); text-align: left;
@@ -962,6 +979,13 @@ html:not([data-platform="windows"]) .windows-only { display: none; }
   border-radius: var(--r);
 }
 .generate-panel .field input[type="file"] { height: auto; min-width: 0; padding: 8px 10px; }
+/* File pickers use the app's button style instead of the system's grey one. */
+input[type="file"] { color: var(--muted); font: 13px var(--sans); }
+input[type="file"]::file-selector-button {
+  height: 30px; margin-right: 12px; padding: 0 12px; border: 1px solid var(--border-2); border-radius: var(--r-sm);
+  background: var(--raised-2); color: var(--text); font: inherit; cursor: pointer; transition: background var(--fast) var(--ease);
+}
+input[type="file"]:hover::file-selector-button { background: var(--border-2); }
 .generate-panel progress { width: 100%; height: 6px; accent-color: var(--accent); }
 .generate-panel [role="status"] { overflow-wrap: anywhere; }
 .generate-panel [role="status"]:empty { margin: 0; }

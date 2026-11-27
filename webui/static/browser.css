@@ -52,6 +52,9 @@
 :root[data-look="browser"] .sidebar #open-mission-control,
 :root[data-look="browser"] .sidebar #open-settings,
 :root[data-look="browser"] .sidebar #new-chat { display: none; }
+/* Appearance is all that stays in the sidebar's bottom row here, so it shows its name. */
+:root[data-look="browser"] .sidebar-footer .footer-icon { width: auto; padding: 0 12px; }
+:root[data-look="browser"] .sidebar-footer .footer-label { display: inline; }
 
 @media (max-width: 760px) {
   .browser-tab { flex-basis: 44px; padding: 0 12px; }
