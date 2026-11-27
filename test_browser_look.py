@@ -76,6 +76,78 @@ for (const [button, target] of [['browser-new-tab', 'nav-chats'], ['browser-relo
 process.stdout.write('checked\n');
 '''
 
+# The web reader's bar (#web-toolbar) lives in the top bar in this look, so Web has one address bar.
+READER = r'''
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const observers = [];
+class Node {
+  constructor(id) { Object.assign(this, {id, attrs: {}, listeners: {}, dataset: {}, children: [], parentNode: null, textContent: '', disabled: false}); }
+  getAttribute(name) { return this.attrs[name] ?? null; }
+  setAttribute(name, value) { this.attrs[name] = String(value); }
+  addEventListener(type, fn) { this.listeners[type] = fn; }
+  click() { this.listeners.click?.(); }
+  insertBefore(child, before) {
+    if (before && before.parentNode !== this) throw new Error('NotFoundError');
+    if (document.activeElement && child.contains(document.activeElement)) document.activeElement = null;  // a move drops focus
+    child.parentNode?.children.splice(child.parentNode.children.indexOf(child), 1);
+    this.children.splice(before ? this.children.indexOf(before) : this.children.length, 0, child);
+    child.parentNode = this;
+    return child;
+  }
+  append(child) { this.insertBefore(child, null); }
+  contains(other) { for (let node = other; node; node = node.parentNode) if (node === this) return true; return false; }
+  focus() { document.activeElement = this; }
+}
+const nodes = new Map();
+const add = (id, parent) => { const node = new Node(id); nodes.set(id, node); parent?.append(node); return node; };
+const document = {documentElement: new Node('html'), activeElement: null, getElementById: id => nodes.get(id) || null, querySelectorAll: () => []};
+const chrome = add('browser-chrome');
+const bar = add('browser-toolbar', chrome);
+for (const id of ['browser-back', 'browser-forward', 'browser-reload', 'browser-address', 'browser-mission', 'browser-settings']) add(id, bar);
+const view = add('web-view');
+add('web-tabs', view);
+const reader = add('web-toolbar', view);
+const address = add('web-address', reader);
+add('web-progress', view);
+add('web-viewport', view);
+const navs = ['nav-chats', 'nav-web'];
+for (const id of navs) add(id).setAttribute('aria-current', id === 'nav-chats' ? 'page' : 'false');
+for (const nav of navs) nodes.get(nav).listeners.click = () => {
+  for (const id of navs) nodes.get(id).setAttribute('aria-current', id === nav ? 'page' : 'false');
+  observers.forEach(o => o());
+};
+class MutationObserver { constructor(fn) { observers.push(fn); } observe() {} }
+const look = name => { document.documentElement.setAttribute('data-look', name); observers.forEach(o => o()); };
+document.documentElement.setAttribute('data-look', 'classic');
+vm.runInNewContext(fs.readFileSync(process.argv.at(-1), 'utf8'), {window: {MutationObserver}, document, String, Object});
+const ids = parent => parent.children.map(child => child.id);
+
+// The other looks keep the reader's bar in Web, above its progress line.
+assert.deepEqual(ids(view), ['web-tabs', 'web-toolbar', 'web-progress', 'web-viewport']);
+assert.equal(chrome.getAttribute('data-section'), 'chats');
+// The browser look moves it into the top bar, before Mission Control; browser.css shows it only in Web.
+look('browser');
+assert.deepEqual(ids(bar), ['browser-back', 'browser-forward', 'browser-reload', 'browser-address', 'web-toolbar',
+                            'browser-mission', 'browser-settings']);
+assert.deepEqual(ids(view), ['web-tabs', 'web-progress', 'web-viewport']);
+nodes.get('nav-web').click();
+assert.equal(chrome.getAttribute('data-section'), 'web');
+assert.equal(reader.parentNode, bar);
+// Changing the look while typing an address: the bar goes back to Web and the address keeps the cursor.
+address.focus();
+look('classic');
+assert.deepEqual(ids(view), ['web-tabs', 'web-toolbar', 'web-progress', 'web-viewport']);
+assert.equal(document.activeElement, address);
+look('cockpit');
+assert.equal(reader.parentNode, view);
+look('browser');
+assert.equal(reader.parentNode, bar);
+assert.equal(document.activeElement, address);
+process.stdout.write('checked\n');
+'''
+
 
 class BrowserLookTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the browser look test")
@@ -83,6 +155,23 @@ class BrowserLookTests(unittest.TestCase):
         result = subprocess.run(["node", "-e", CHECK, "--", str(SCRIPT)], capture_output=True, text=True, timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         self.assertIn("checked", result.stdout)
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the browser look test")
+    def test_the_web_reader_bar_joins_the_top_bar(self):
+        result = subprocess.run(["node", "-e", READER, "--", str(SCRIPT)], capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertIn("checked", result.stdout)
+
+    def test_web_shows_one_address_bar(self):
+        css = (SCRIPT.parent / "browser.css").read_text(encoding="utf-8")
+        rule = '.browser-chrome:not([data-section="web"]) .web-toolbar { display: none; }'
+        self.assertIn(rule, css)
+        hidden_in_web = css.split(rule)[0].rsplit("}", 1)[-1]  # the selectors that share the rule
+        for control in ("#browser-back", "#browser-forward", "#browser-reload", "#browser-address"):
+            self.assertIn(f'.browser-chrome[data-section="web"] {control},', hidden_in_web)
+        page = (SCRIPT.parent / "index.html").read_text(encoding="utf-8")
+        self.assertIn('<div id="browser-toolbar" class="browser-toolbar">', page)
+        self.assertLess(page.index('id="web-toolbar"'), page.index('id="web-progress"'))
 
     def test_the_browser_bar_hides_in_the_other_looks(self):
         css = (SCRIPT.parent / "browser.css").read_text(encoding="utf-8")

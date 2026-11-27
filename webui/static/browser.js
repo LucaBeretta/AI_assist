@@ -1,6 +1,7 @@
 /* Browser look: the top bar drives the app's own buttons, so every action keeps one implementation.
    Tabs mirror the sidebar's sections; back and forward walk the sections you visited;
-   the address bar shows where you are and opens search (Ctrl K). */
+   the address bar shows where you are and opens search (Ctrl K).
+   In Web, the web reader's own bar takes their place in the top bar, so there is one address bar. */
 "use strict";
 window.browserui = (() => {
   const el = id => document.getElementById(id);
@@ -9,6 +10,9 @@ window.browserui = (() => {
   const slug = {"nav-chats": "chats", "nav-dev": "developer", "nav-models": "models", "nav-generate": "generate", "nav-web": "web"};
   const back = [], forward = [];
   let current = null, travelling = false;
+  const root = document.documentElement;
+  const reader = el("web-toolbar");       // the web reader's bar: back, forward, reload, address, reading view, Ask AI
+  const readerHome = el("web-progress");  // its place in the other looks: just above the reader's progress line
 
   const press = id => el(id)?.click?.();
   function activeNav() {
@@ -22,6 +26,7 @@ window.browserui = (() => {
   }
   function render() {
     const nav = activeNav();
+    el("browser-chrome")?.setAttribute?.("data-section", nav ? slug[nav] : "welcome");
     for (const tab of tabs) tab.setAttribute("aria-selected", String(tab.dataset.nav === nav));
     const text = el("browser-address-text");
     if (text) text.textContent = address();
@@ -46,6 +51,19 @@ window.browserui = (() => {
     press(target);
     sectionChanged();
   }
+  // In this look the web reader's bar lives in the top bar, before Mission Control; browser.css shows it only
+  // while Web is open, in place of back, forward, reload and the address. The other looks keep it in Web.
+  function placeReader() {
+    const bar = el("browser-toolbar");
+    if (!reader || !readerHome?.parentNode || !bar) return;
+    const top = root?.getAttribute?.("data-look") === "browser";
+    const parent = top ? bar : readerHome.parentNode;
+    if (reader.parentNode === parent) return;
+    const spot = el("browser-mission");
+    const focused = reader.contains?.(document.activeElement) ? document.activeElement : null;  // a move drops focus
+    parent.insertBefore(reader, top ? (spot?.parentNode === bar ? spot : null) : readerHome);
+    focused?.focus?.();
+  }
 
   for (const tab of tabs) tab.addEventListener("click", () => press(tab.dataset.nav));
   // New chat, then show it: the app's New chat button leaves the current section in front.
@@ -63,7 +81,10 @@ window.browserui = (() => {
     const watcher = new Watch(sectionChanged);
     for (const id of Object.keys(slug)) if (el(id)) watcher.observe(el(id), {attributes: true, attributeFilter: ["aria-current"]});
     if (el("chat-title")) watcher.observe(el("chat-title"), {childList: true, characterData: true, subtree: true});
+    // The master switch (cockpit.js) sets <html data-look>: the reader's bar follows it.
+    if (root && reader) new Watch(placeReader).observe(root, {attributes: true, attributeFilter: ["data-look"]});
   }
+  placeReader();
   sectionChanged();
   return {render, address, back: () => go(back, forward), forward: () => go(forward, back), sectionChanged, t};
 })();

@@ -45,6 +45,16 @@
 .browser-address-text { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .browser-address-hint { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); font-size: 13px; text-align: right; }
 
+/* Web has one address bar: browser.js moves the web reader's own bar (#web-toolbar) into the toolbar, and while
+   Web is open it takes the place of back, forward, reload and the address. Elsewhere it stays out of sight. */
+.browser-chrome[data-section="web"] #browser-back,
+.browser-chrome[data-section="web"] #browser-forward,
+.browser-chrome[data-section="web"] #browser-reload,
+.browser-chrome[data-section="web"] #browser-address,
+.browser-chrome:not([data-section="web"]) .web-toolbar { display: none; }
+.browser-toolbar .web-toolbar { flex: 1 1 auto; min-width: 0; gap: 6px; padding: 0; border: 0; background: none; }
+.browser-toolbar .web-address { height: 36px; margin: 0; background: var(--bg); }
+
 /* The sidebar becomes a side panel: what moved to the top bar leaves it. */
 :root[data-look="browser"] .sidebar .nav,
 :root[data-look="browser"] .sidebar #open-palette,
@@ -59,4 +69,8 @@
 @media (max-width: 760px) {
   .browser-tab { flex-basis: 44px; padding: 0 12px; }
   .browser-tab span, .browser-address-hint { display: none; }
+  /* The menu button (styles.css) sits at the top left: the tabs start after it instead of under it,
+     and the page header below no longer needs room for it. */
+  :root[data-look="browser"] .browser-tabs { padding-left: 52px; }
+  :root[data-look="browser"] .main .header { padding-left: 20px; }
 }
