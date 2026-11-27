@@ -52,6 +52,7 @@ from app_core.hourly_status import HourlyStatusReport
 from webui.sharing import SharingApi
 from webui.character import CharacterApi
 from webui.opencode import OpenCodeApi
+from webui.infinite import InfiniteApi
 import network_gate
 
 
@@ -94,7 +95,7 @@ def inference_message(message):
     return item
 
 
-class Api(FeedbackApi, SharingApi, PrivacyApi, ParityApi, CharacterApi, OpenCodeApi):
+class Api(FeedbackApi, SharingApi, PrivacyApi, ParityApi, CharacterApi, OpenCodeApi, InfiniteApi):
     def __init__(self, bridge, store=None, engine=None, hardware=None, desktop=None, colibri=None):
         self._bridge = bridge
         self._store = store if store is not None else ChatStore()

@@ -777,6 +777,95 @@ class StaticTests(unittest.TestCase):
         ''')
 
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_infinite_makes_a_clip_from_a_description_beside_the_other_sections(self):
+        self.run_scenario(r'''
+        await window.listeners.pywebviewready();
+        const el = id => document.getElementById(id);
+        const api = window.pywebview.api;
+        const root = require('node:path').dirname(process.argv[1]);
+        const settle = () => new Promise(resolve => setImmediate(resolve));
+        const modes = ['quick', 'wan', 'infinite'].map(name => el(`generate-${name}-mode`));
+        const pages = ['quick', 'wan', 'infinite'].map(name => el(`generate-${name}-panel`));
+        document.querySelectorAll = selector => selector === '.generate-modes button' ? modes : selector === '.generate-page' ? pages : [];
+        el('model').options = [{value: 'qwen3.5:9b'}, {value: '["Colibri","colibri-model"]'}, {value: 'llama3.2:3b'},
+                               {value: 'Not installed or no server available', disabled: true}];
+        el('model').value = 'llama3.2:3b';
+        window.i18n = {t: (message, values = {}) => message.replace(/\{(\w+)\}/g, (_, name) => String(values[name]))};
+        let quickPaused = false, wanPaused = false, infinitePaused = false;
+        window.quickAnimation = {pause() { quickPaused = true; }};
+        el('photo-video-preview').pause = () => { wanPaused = true; };
+        el('infinite-preview').pause = () => { infinitePaused = true; };
+        const calls = [];
+        let installed = true;
+        api.infinite_state = async () => ({ok: true, installed, making: false, lengths: [4, 8, 12]});
+        api.make_infinite_clip = async (...args) => { calls.push(['make', ...args]); return {ok: true, job_id: 'job-1', operation: 'infinite'}; };
+        api.infinite_clip = async clip => { calls.push(['clip', clip]); return {ok: true, video: 'Y2xpcA=='}; };
+        api.save_infinite_patch = async clip => { calls.push(['patch', clip]); return {ok: true, path: '/x/patch.inf'}; };
+        api.cancel_job = async id => { calls.push(['cancel', id]); return {ok: true, active: true}; };
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(root, 'infinite-studio.js'), 'utf8'), {
+          document, window, Blob, URL, atob, Uint8Array, Number, String, Error,
+        });
+
+        el('generate-infinite-mode').listeners.click();
+        await settle();
+        assert.equal(el('generate-infinite-panel').hidden, false);
+        assert.equal(el('generate-quick-panel').hidden, true);
+        assert.equal(el('generate-wan-panel').hidden, true);
+        assert.equal(el('generate-infinite-mode').attributes['aria-pressed'], 'true');
+        assert.equal(el('generate-quick-mode').attributes['aria-pressed'], 'false');
+        assert.equal(quickPaused && wanPaused, true);
+        assert.deepEqual(el('infinite-model').children.map(option => option.value), ['qwen3.5:9b', 'llama3.2:3b']);
+        assert.equal(el('infinite-model').value, 'llama3.2:3b');  // the chat's own model comes first
+        assert.equal(el('infinite-missing').hidden, true);
+        assert.equal(el('infinite-generate').disabled, false);
+
+        el('infinite-prompt').value = '  a star that spins  ';
+        el('infinite-length').value = '8';
+        await el('infinite-form').listeners.submit({preventDefault() {}});
+        assert.deepEqual(calls[0], ['make', 'a star that spins', 'llama3.2:3b', 8]);
+        assert.equal(el('infinite-generate').disabled, true);
+        assert.equal(el('infinite-stop').hidden, false);
+        assert.equal(el('infinite-progress').hidden, false);
+        window.app.onEvent([{type: 'job_progress', operation: 'infinite', job_id: 'job-1', stage: 'fixing', attempt: 1, rounds: 3}]);
+        assert.equal(el('infinite-status').textContent, 'Infinite found a problem. The model is fixing the patch (1 of 3)…');
+        window.app.onEvent([{type: 'job_progress', operation: 'infinite', job_id: 'other', stage: 'writing'}]);
+        assert.equal(el('infinite-status').textContent, 'Infinite found a problem. The model is fixing the patch (1 of 3)…');
+        el('infinite-stop').listeners.click();
+        assert.deepEqual(calls[1], ['cancel', 'job-1']);
+
+        window.app.onEvent([{type: 'job_done', operation: 'infinite', job_id: 'job-1', result: {
+          clip: 'c'.repeat(32), patch: 'infinite-patch 1\n', sound: false, warnings: ['a node is not wired'],
+          credit: 'Infinite, by Naman Soni (n1m21n), https://infinitedevices.org', seconds: 8}}]);
+        await settle(); await settle();
+        assert.deepEqual(calls[2], ['clip', 'c'.repeat(32)]);
+        assert.equal(el('infinite-preview').hidden, false);
+        assert.equal(el('infinite-empty').hidden, true);
+        assert.equal(el('infinite-actions').hidden, false);
+        assert.equal(el('infinite-patch').textContent, 'infinite-patch 1\n');
+        assert.equal(el('infinite-patch-details').hidden, false);
+        assert.equal(el('infinite-credit').textContent, 'Made with Infinite, by Naman Soni (n1m21n), https://infinitedevices.org');
+        assert.equal(el('infinite-status').textContent, 'Your clip is ready. It has no sound. Infinite says: a node is not wired');
+        assert.equal(el('infinite-generate').disabled, false);
+        assert.equal(el('infinite-stop').hidden, true);
+
+        await el('infinite-save-patch').listeners.click();
+        assert.deepEqual(calls[3], ['patch', 'c'.repeat(32)]);
+        assert.equal(el('infinite-status').textContent, 'Patch saved. Open it in Infinite to change it.');
+
+        el('generate-wan-mode').listeners.click();
+        assert.equal(el('generate-infinite-panel').hidden, true);
+        assert.equal(el('generate-infinite-mode').attributes['aria-pressed'], 'false');
+        assert.equal(infinitePaused, true);
+
+        installed = false;
+        el('generate-infinite-mode').listeners.click();
+        await settle();
+        assert.equal(el('infinite-missing').hidden, false);
+        assert.equal(el('infinite-generate').disabled, true);
+        URL.revokeObjectURL(el('infinite-preview').src);
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
     def test_quick_animation_loads_previews_and_saves_without_comfyui(self):
         self.run_scenario(r'''
         await window.listeners.pywebviewready();
