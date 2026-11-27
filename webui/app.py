@@ -52,6 +52,8 @@ import lan_devices
 from app_core.hourly_status import HourlyStatusReport
 from webui.sharing import SharingApi
 from webui.character import CharacterApi
+from webui.opencode import OpenCodeApi
+from webui.infinite import InfiniteApi
 import network_gate
 
 
@@ -94,7 +96,7 @@ def inference_message(message):
     return item
 
 
-class Api(FeedbackApi, SharingApi, PrivacyApi, ParityApi, CharacterApi):
+class Api(FeedbackApi, SharingApi, PrivacyApi, ParityApi, CharacterApi, OpenCodeApi, InfiniteApi):
     def __init__(self, bridge, store=None, engine=None, hardware=None, desktop=None, colibri=None):
         self._bridge = bridge
         self._store = store if store is not None else ChatStore()
@@ -394,7 +396,7 @@ class Api(FeedbackApi, SharingApi, PrivacyApi, ParityApi, CharacterApi):
         if peer is not None:
             # A paired computer answers: its address names it; this computer's Ollama is not involved.
             paired = self._shared_ai.store.client_record(peer) or {}
-            backend = f"Paired computer {paired.get('address', '?')}"
+            backend = f"Paired computer {paired.get('name') or paired.get('address', '?')}"
             details, connected, host, loaded_context = {}, True, self._engine.ollama_url(), None
         elif backend == "Colibri":
             colibri = self._colibri.availability()
@@ -498,9 +500,10 @@ class Api(FeedbackApi, SharingApi, PrivacyApi, ParityApi, CharacterApi):
         return {"ok": True}
 
     @_json_method
-    def recommend_models(self, refresh=False):
-        if type(refresh) is not bool:
-            raise ValueError("refresh must be true or false.")
+    def recommend_models(self, refresh=False, online=True):
+        # online=False (opening the Models screen) only shows what this session already read.
+        if type(refresh) is not bool or type(online) is not bool:
+            raise ValueError("refresh and online must be true or false.")
         hardware = self._hardware if self._hardware is not None else detect_hardware(self._engine.ollama_url())
         catalog, catalog_error = [], None
         if hardware.get("server_local", True):
@@ -508,7 +511,7 @@ class Api(FeedbackApi, SharingApi, PrivacyApi, ParityApi, CharacterApi):
             # Ollama's list, its families' sizes and Hugging Face's list are several pages on two sites:
             # one task that names both sites, so one approval.
             with self._catalog_lock:
-                if refresh or (self._catalog is None and self._catalog_error is None):
+                if online and (refresh or (self._catalog is None and self._catalog_error is None)):
                     try:
                         with network_gate.task("Read model lists from Ollama and Hugging Face",
                                                sends="Requests for a few pages of ollama.com and huggingface.co "
@@ -530,8 +533,10 @@ class Api(FeedbackApi, SharingApi, PrivacyApi, ParityApi, CharacterApi):
                         # Blocked by the internet gate or offline: this computer's hardware is still worth showing.
                         self._catalog, self._catalog_error = None, str(error)
                 recommendations, catalog_error = list(self._catalog or []), self._catalog_error
-            return {"ok": True, "hardware": hardware, "recommendations": recommendations, "catalog_error": catalog_error}
-        return {"ok": True, "hardware": hardware, "recommendations": [], "catalog_error": None}
+                checked = self._catalog is not None or self._catalog_error is not None
+            return {"ok": True, "hardware": hardware, "recommendations": recommendations, "catalog_error": catalog_error,
+                    "checked": checked}
+        return {"ok": True, "hardware": hardware, "recommendations": [], "catalog_error": None, "checked": True}
 
     @staticmethod
     def _model_name(name):

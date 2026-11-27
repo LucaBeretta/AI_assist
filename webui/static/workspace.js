@@ -16,7 +16,11 @@ window.workspaceui = (() => {
   };
   const show = id => { const dialog = el(id); if (dialog.showModal) dialog.showModal(); else dialog.open = true; };
   const close = id => { const dialog = el(id); if (dialog.close) dialog.close(); else dialog.open = false; };
-  const error = value => { el("status").textContent = value.message || String(value); };
+  const error = value => {
+    const text = value.message || String(value);
+    if (window.app?.notify) window.app.notify(text, {error: true});
+    else el("status").textContent = text;
+  };
   function button(text, action) {
     const item = node("button", text, "btn ghost"); item.type = "button";
     item.addEventListener("click", () => Promise.resolve().then(action).catch(error)); return item;
@@ -131,19 +135,27 @@ window.workspaceui = (() => {
     }
     return false;
   }
+  let lastStatus = null;
+  // "local only", "remote server" or "cloud model" for the model the status bar describes, else null.
+  const modelPlace = name => lastStatus && lastStatus.model_name === name ? lastStatus.privacy_kind || null : null;
   function renderStatus(value) {
     if (value.ok === false) return;
-    el("status").textContent = value.backend && value.engine_state ? value.backend.toLowerCase() + " " + t(value.engine_state) : value.engine;
+    lastStatus = value;
+    // A message or error the person has not read yet stays (see app.js status()).
+    if (!window.app?.statusHeld?.()) el("status").textContent = value.backend && value.engine_state ? value.backend.toLowerCase() + " " + t(value.engine_state) : value.engine;
     el("status-model").textContent = value.model_name || "";
     el("status-placement").textContent = value.gpu_fraction == null ? (value.backend === "Colibri" ? "ram + ssd" : "")
       : `${Math.round(value.gpu_fraction * 100)}% gpu · ${Math.round(value.cpu_fraction * 100)}% cpu`;
     el("status-vram").textContent = value.vram || "";
+    // How full the context is: Chats has its own meter by the message box, so the status bar shows it
+    // only elsewhere, for example during a Developer task.
+    el("status-context-box").hidden = !value.context || !el("chat-view").hidden;
     el("status-context").textContent = value.context || ""; el("status-meter").value = value.fraction || 0;
+    el("status-meter").className = value.fraction >= .95 ? "level-full" : value.fraction >= .8 ? "level-warn" : "";
     el("status-speed").textContent = value.speed || "";
     el("status-agent").textContent = value.agent ? t("Agent step {v0} / {v1}", {v0: value.agent_step, v1: value.agent_max_steps}) : "";
     el("status-privacy").textContent = window.securityui ? window.securityui.privacyText(value.privacy) : t(value.privacy_kind || value.privacy || "");
     el("status-privacy").className = "privacy" + (value.privacy_role === "amber" || value.privacy_kind && value.privacy_kind !== "local only" ? " is-remote" : "");
-    el("status-meter").className = value.fraction >= .95 ? "level-full" : value.fraction >= .8 ? "level-warn" : "";
     window.app?.syncContext?.(value);
   }
   function onEvent(event) {
@@ -163,5 +175,5 @@ window.workspaceui = (() => {
     catch (failure) { error(failure); }
   });
   window.addEventListener("languagechange", () => { if (el("settings-dialog").open) openSettings(); });
-  return {openSettings, openMemories, openInstructions, renderStatus, promptKey, onEvent, onState};
+  return {openSettings, openMemories, openInstructions, renderStatus, modelPlace, promptKey, onEvent, onState};
 })();

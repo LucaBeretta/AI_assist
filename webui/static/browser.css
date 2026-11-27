@@ -1,0 +1,59 @@
+/* Browser look: tabs along the top, a toolbar with back, forward, reload and an address bar,
+   and the sidebar as a side panel of projects and recent chats. Turned on by the master switch
+   (cockpit.js sets :root[data-look="browser"]); the other looks never show the browser bar. */
+
+:root:not([data-look="browser"]) .browser-chrome { display: none; }
+
+:root[data-look="browser"] .app { grid-template-rows: auto 1fr auto; }
+:root[data-look="browser"] .browser-chrome {
+  display: flex; flex-direction: column; background: var(--status-bg); border-bottom: 1px solid var(--border);
+}
+
+/* Tabs */
+.browser-tabs { display: flex; align-items: flex-end; gap: 2px; padding: 8px 10px 0; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.browser-tab {
+  position: relative; display: flex; align-items: center; gap: 8px; flex: 0 1 190px; min-width: 44px; height: 36px;
+  padding: 0 14px; border: 1px solid transparent; border-bottom: 0; border-radius: 10px 10px 0 0;
+  background: transparent; color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden;
+}
+.browser-tab svg { flex: none; width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.browser-tab span { overflow: hidden; text-overflow: ellipsis; }
+.browser-tab:hover { background: var(--raised); color: var(--text); }
+.browser-tab[aria-selected="true"] {
+  background: var(--panel); color: var(--strong); border-color: var(--border); z-index: 1;
+  box-shadow: 0 1px 0 var(--panel);  /* the active tab flows into the toolbar below */
+}
+.browser-tab:focus-visible { outline-offset: -2px; }
+.browser-new-tab {
+  display: grid; place-items: center; flex: none; width: 32px; height: 32px; margin: 0 0 2px 4px;
+  border: 0; border-radius: 8px; background: transparent; color: var(--muted);
+}
+.browser-new-tab:hover { background: var(--raised); color: var(--text); }
+.browser-new-tab svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+
+/* Toolbar */
+.browser-toolbar {
+  display: flex; align-items: center; gap: 6px; padding: 6px 10px; background: var(--panel); border-top: 1px solid var(--border);
+}
+.browser-toolbar .icon-btn:disabled { opacity: .35; }
+.browser-address {
+  display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; height: 36px; padding: 0 14px;
+  border: 1px solid var(--border-2); border-radius: 999px; background: var(--bg); color: var(--text); text-align: left;
+}
+.browser-address:hover { border-color: var(--accent); }
+.browser-lock { flex: none; width: 15px; height: 15px; fill: none; stroke: var(--green); stroke-width: 2; stroke-linecap: round; }
+.browser-address-text { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.browser-address-hint { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); font-size: 13px; text-align: right; }
+
+/* The sidebar becomes a side panel: what moved to the top bar leaves it. */
+:root[data-look="browser"] .sidebar .nav,
+:root[data-look="browser"] .sidebar #open-palette,
+:root[data-look="browser"] .sidebar #refresh,
+:root[data-look="browser"] .sidebar #open-mission-control,
+:root[data-look="browser"] .sidebar #open-settings,
+:root[data-look="browser"] .sidebar #new-chat { display: none; }
+
+@media (max-width: 760px) {
+  .browser-tab { flex-basis: 44px; padding: 0 12px; }
+  .browser-tab span, .browser-address-hint { display: none; }
+}

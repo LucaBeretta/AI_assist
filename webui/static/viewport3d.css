@@ -1,0 +1,127 @@
+/* The "3D viewport" look (viewport3d.js), chosen with the master look switch (cockpit.js).
+   Nothing here applies until <html data-look="viewport">. */
+
+:root,
+:root[data-theme="night"] {
+  --vp-sky: linear-gradient(180deg, #0E1114 0%, #181C22 30%, #242930 44%, #1A1D22 62%, #121417 100%);
+  --vp-grid-major: rgba(214, 222, 235, .14);
+  --vp-grid-minor: rgba(214, 222, 235, .055);
+  --vp-axis-x: #F0806F;
+  --vp-axis-y: #93CF6A;
+  --vp-axis-z: #7AA2FF;
+  --vp-axis-text: #0B0D10;
+  --vp-back: #161A20;
+  --vp-side: #1D232B;
+  --vp-top: #2C333D;
+  --vp-shadow: rgba(0, 0, 0, .55);
+  --vp-overlay: rgba(13, 15, 18, .86);
+}
+:root[data-theme="day"] {
+  --vp-sky: linear-gradient(180deg, #F1F3F6 0%, #E3E7EC 32%, #D3D9E0 44%, #DDE1E7 62%, #CFD5DC 100%);
+  --vp-grid-major: rgba(40, 52, 68, .18);
+  --vp-grid-minor: rgba(40, 52, 68, .07);
+  --vp-axis-x: #C8473A;
+  --vp-axis-y: #3F7A22;
+  --vp-axis-z: #2F5FD0;
+  --vp-axis-text: #FFFFFF;
+  --vp-back: #E4E8ED;
+  --vp-side: #D5DBE2;
+  --vp-top: #F4F6F8;
+  --vp-shadow: rgba(20, 30, 45, .28);
+  --vp-overlay: rgba(255, 255, 255, .9);
+}
+:root { --vp-depth: 18px; --vp-side-angle: 22deg; }
+
+:root:not([data-look="viewport"]) .vp-only { display: none !important; }
+/* The cube button in the chat header shows filled while a 3D look is on (cockpit.css has the cockpit rules). */
+:root[data-look="viewport"] .icon-btn .icon-cube-on { display: block; }
+:root[data-look="viewport"] .icon-btn .icon-cube-off { display: none; }
+
+/* ---------- the stage: the window is the 3D viewport, .shell is the scene ---------- */
+:root[data-look="viewport"] .app {
+  position: relative; grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden;
+  background: var(--vp-sky); perspective: 2000px; perspective-origin: 50% 50%; cursor: grab;
+}
+:root[data-look="viewport"] .shell {
+  position: relative; margin: 26px 122px 30px 34px; column-gap: 26px;
+  transform-style: preserve-3d; transform-origin: 50% 50%; transition: transform 650ms var(--ease);
+}
+:root[data-look="viewport"].vp-dragging .shell { transition: none; }
+:root[data-look="viewport"].vp-dragging, :root[data-look="viewport"].vp-dragging .app { cursor: grabbing; user-select: none; }
+:root[data-look="viewport"] .statusbar,
+:root[data-look="viewport"] .vp-bar { position: relative; z-index: 2; cursor: auto; }
+
+/* The panels are the front faces of solid blocks. Their front stays at depth 0, so Front view is pixel sharp. */
+:root[data-look="viewport"] .sidebar,
+:root[data-look="viewport"] .main {
+  position: relative; border: 1px solid var(--border-2); border-radius: 8px; cursor: auto;
+  backface-visibility: hidden; transition: box-shadow var(--fast) var(--ease);
+}
+:root[data-look="viewport"] .sidebar { transform-origin: 100% 50%; transform: rotateY(var(--vp-side-angle)); }
+:root[data-look="viewport"] .main { background: var(--bg); overflow: hidden; }
+:root[data-look="viewport"] .vp-selected { box-shadow: 0 0 0 2px var(--amber), 0 0 24px color-mix(in srgb, var(--amber) 28%, transparent); }
+
+.vp-slab { position: absolute; pointer-events: none; transform-style: preserve-3d; }
+.vp-slab[hidden] { display: none; }
+.vp-slab-side { transform-origin: 100% 50%; transform: rotateY(var(--vp-side-angle)); }
+.vp-slab > div { position: absolute; backface-visibility: hidden; }
+.vp-back { inset: 0; border-radius: 8px; background: var(--vp-back); transform: translateZ(calc(-1 * var(--vp-depth))) rotateY(180deg); }
+.vp-edge-left { top: 0; bottom: 0; left: calc(-1 * var(--vp-depth)); width: var(--vp-depth); background: var(--vp-side); transform-origin: 100% 50%; transform: rotateY(-90deg); }
+.vp-edge-right { top: 0; bottom: 0; left: 100%; width: var(--vp-depth); background: var(--vp-side); transform-origin: 0 50%; transform: rotateY(90deg); }
+.vp-edge-top { left: 0; right: 0; top: calc(-1 * var(--vp-depth)); height: var(--vp-depth); background: var(--vp-top); transform-origin: 50% 100%; transform: rotateX(90deg); }
+.vp-shadow {
+  left: -40px; right: -40px; top: 100%; height: 140px; margin-top: -70px;
+  background: radial-gradient(closest-side, var(--vp-shadow), transparent);
+  transform: translateZ(calc(-.5 * var(--vp-depth))) translateY(-1px) rotateX(90deg);
+}
+
+/* The floor: a grid through the panels' base, with the X (red) and Y (green) axes. */
+.vp-floor {
+  position: absolute; left: 50%; top: 100%; width: 2400px; height: 2400px; margin: -1200px 0 0 -1200px;
+  pointer-events: none; transform: rotateX(90deg);
+  background-image:
+    linear-gradient(var(--vp-grid-major) 0 2px, transparent 2px),
+    linear-gradient(90deg, var(--vp-grid-major) 0 2px, transparent 2px),
+    linear-gradient(var(--vp-grid-minor) 0 1px, transparent 1px),
+    linear-gradient(90deg, var(--vp-grid-minor) 0 1px, transparent 1px);
+  background-size: 200px 200px, 200px 200px, 40px 40px, 40px 40px;
+  -webkit-mask-image: radial-gradient(closest-side, #000 30%, transparent 100%);
+  mask-image: radial-gradient(closest-side, #000 30%, transparent 100%);
+}
+.vp-floor::before, .vp-floor::after { content: ""; position: absolute; opacity: .85; }
+.vp-floor::before { left: 0; right: 0; top: 50%; height: 3px; margin-top: -1px; background: var(--vp-axis-x); }
+.vp-floor::after { top: 0; bottom: 0; left: 50%; width: 3px; margin-left: -1px; background: var(--vp-axis-y); }
+:root.vp-grid-off .vp-floor { display: none; }
+
+/* ---------- viewport header ---------- */
+.vp-bar {
+  display: flex; align-items: center; gap: 2px; min-width: 0; min-height: 40px; padding: 0 10px;
+  border-bottom: 1px solid var(--border); background: var(--status-bg);
+}
+.vp-bar .btn { height: 30px; flex: none; }
+.vp-bar .btn[aria-pressed="true"] { background: var(--raised-2); color: var(--strong); }
+.vp-sep { flex: none; width: 1px; height: 20px; margin: 0 6px; background: var(--border-2); }
+.vp-info {
+  flex: 1 1 auto; min-width: 0; margin: 0 10px; overflow: hidden; text-align: right;
+  text-overflow: ellipsis; white-space: nowrap; font: 11px var(--mono); color: var(--muted);
+}
+
+/* ---------- navigation: axis gizmo and zoom, in the right-hand gutter ---------- */
+.vp-nav { position: absolute; z-index: 3; top: 56px; right: 16px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.vp-gizmo { position: relative; width: 92px; height: 92px; border: 1px solid var(--border-2); border-radius: 50%; background: var(--vp-overlay); }
+.vp-gizmo svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.vp-gizmo line { stroke-width: 2.5; stroke-linecap: round; }
+.vp-gizmo line[data-axis="x"] { stroke: var(--vp-axis-x); }
+.vp-gizmo line[data-axis="y"] { stroke: var(--vp-axis-y); }
+.vp-gizmo line[data-axis="z"] { stroke: var(--vp-axis-z); }
+.vp-axis {
+  position: absolute; display: grid; place-items: center; width: 24px; height: 24px; padding: 0;
+  border: 2px solid transparent; border-radius: 50%; font: 700 11px var(--sans); color: var(--vp-axis-text);
+}
+.vp-axis[data-axis="x"] { background: var(--vp-axis-x); border-color: var(--vp-axis-x); }
+.vp-axis[data-axis="y"] { background: var(--vp-axis-y); border-color: var(--vp-axis-y); }
+.vp-axis[data-axis="z"] { background: var(--vp-axis-z); border-color: var(--vp-axis-z); }
+.vp-axis.vp-negative { width: 18px; height: 18px; background: var(--vp-overlay); }
+.vp-axis:hover { filter: brightness(1.15); }
+.vp-zoom { display: flex; flex-direction: column; gap: 6px; }
+.vp-zoom .icon-btn { width: 36px; height: 36px; border: 1px solid var(--border-2); background: var(--vp-overlay); color: var(--text); }

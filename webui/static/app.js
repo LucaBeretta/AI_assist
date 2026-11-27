@@ -15,6 +15,7 @@ window.app = (() => {
   let selected = null;
   let connected = false;
   let engineReady = false;
+  const sharedNames = {};  // backend "peer:<id>" -> the paired computer's name, for the footnote
   let submitting = false;
   let openingChat = false;
   let selectionVersion = 0;
@@ -23,7 +24,23 @@ window.app = (() => {
   let lastState = null;
   let sidebarVersion = 0;
 
-  function status(text) { element("status").textContent = text; }
+  // One-off messages stay readable: the live status refresh (every 2 s) waits for them.
+  // A confirmation stays 6 s; an error stays, in red, until the next click or key press.
+  let statusHeldUntil = 0;
+  function status(text, {error = false} = {}) {
+    const node = element("status");
+    node.textContent = text;
+    node.classList?.toggle("is-error", error);
+    statusHeldUntil = error ? Infinity : Date.now() + 6000;
+  }
+  const statusHeld = () => Date.now() < statusHeldUntil;
+  function releaseError() {
+    if (statusHeldUntil !== Infinity) return;
+    statusHeldUntil = 0;
+    element("status").classList?.remove("is-error");
+  }
+  document.addEventListener?.("pointerdown", releaseError, true);
+  document.addEventListener?.("keydown", releaseError, true);
 
   async function call(method, ...args) {
     const result = await window.pywebview.api[method](...args);
@@ -40,6 +57,7 @@ window.app = (() => {
   }
 
   function controls() {
+    updateFootnote();
     const active = activeStream(selected);
     element("send").disabled = !connected || !engineReady || !selected || openingChat || !element("model").value || submitting || Boolean(active);
     element("prompt").disabled = openingChat;
@@ -181,7 +199,7 @@ window.app = (() => {
     const used = message.role === "assistant" && index === messages.length - 1 ? record?.last_response?.memories_used || [] : [];
     if (used.length) bar.append(memoriesUsed(used));
     if (message.role === "assistant") {
-      const feedback = button(t("Give feedback"), "icon-btn", () => window.parityui?.openFeedback(selected, index));
+      const feedback = button(t("Ask for changes…"), "icon-btn", () => window.parityui?.openFeedback(selected, index));
       feedback.disabled = busy; bar.append(feedback);
     }
     return bar;
@@ -408,7 +426,7 @@ window.app = (() => {
         working.textContent = t("working");
         node.append(working);
       }
-      node.addEventListener("click", () => openChat(record.id).catch(showError));
+      node.addEventListener("click", () => { showView("chat"); return openChat(record.id).catch(showError); });
       node.addEventListener("contextmenu", event => showMenu(event, [
         [t("Open"), () => { showView("chat"); openChat(record.id).catch(showError); }],
         [t("Rename…"), () => startRename(record.id)],
@@ -610,11 +628,15 @@ window.app = (() => {
     for (const [id, value] of rest) chats.set(id, value);
   }
 
-  async function newChat(incognito = false) {
+  // show: the person asked for it, so bring Chats to the front (from another section it would open hidden)
+  // and put the cursor in the message box. Replacing a deleted chat leaves the person where they are.
+  async function newChat(incognito = false, {show = true} = {}) {
+    if (show) showView("chat");
     const result = selectedProject || incognito ? await call("new_chat", incognito, selectedProject) : await call("new_chat");
     addChatFirst(result.chat);
     renderChats();
     await openChat(result.chat.id);
+    if (show) element("prompt").focus?.();
     if (incognito) status(t("Incognito chat: not saved, no memory."));
   }
 
@@ -660,10 +682,23 @@ window.app = (() => {
     controls();
   }
 
-  function showError(error) { status(error.message || String(error)); controls(); }
+  function showError(error) { status(error.message || String(error), {error: true}); controls(); }
 
   // Paired computers that share their AI with this one, each as its own group (local network only, pinned TLS).
   let wantedModel = "";
+  function updateFootnote() {
+    const note = element("footnote");
+    if (!note) return;
+    const backend = modelChoice().backend;
+    const computer = backend.startsWith("peer:") ? sharedNames[backend] || t("a paired computer") : null;
+    if (computer) {
+      note.removeAttribute?.("data-i18n");
+      note.textContent = t("Runs on {v0}, over your home network. Answers can be wrong.", {v0: computer});
+    } else {
+      note.setAttribute?.("data-i18n", "Everything runs on this computer. Answers can be wrong.");
+      note.textContent = t("Everything runs on this computer. Answers can be wrong.");
+    }
+  }
   async function addSharedComputers(previous) {
     if (!window.pywebview.api.shared_ai_models) return false;
     let computers = [];
@@ -675,8 +710,10 @@ window.app = (() => {
     for (const computer of computers) {
       if (computer.state !== "ready" || !computer.models.length) continue;
       const group = document.createElement("optgroup");
-      group.label = t("Paired computer {v0}", {v0: computer.address});
+      // The name comes from the other computer; its address tells two same-named computers apart.
+      group.label = t("Paired computer {v0}", {v0: computer.name ? `${computer.name} (${computer.address})` : computer.address});
       group.sharedComputer = computer.id;
+      sharedNames[computer.backend] = computer.name || computer.address;
       for (const name of computer.models) {
         const option = document.createElement("option");
         option.value = modelValue(name, computer.backend); option.textContent = name;
@@ -800,7 +837,7 @@ window.app = (() => {
         renderChats();
         if (event.chat_id === selected) {
           selected = null;
-          (chats.size ? openChat(chats.keys().next().value) : newChat()).catch(showError);
+          (chats.size ? openChat(chats.keys().next().value) : newChat(false, {show: false})).catch(showError);
         }
         return true;
       case "memories_changed":
@@ -828,6 +865,7 @@ window.app = (() => {
       }
       window.workspaceui?.onEvent(event);
       window.welcomeui?.onEvent(event);
+      if (window.infiniteui?.onEvent(event)) continue;
       if (window.sharingui?.onEvent(event)) continue;
       if (window.securityui?.onEvent(event)) continue;
       if (window.computeui?.onEvent(event)) continue;
@@ -867,7 +905,7 @@ window.app = (() => {
           stream.text = "";
           liveReplies.delete(stream);
         }
-        if (selected === event.chat_id) status(event.type === "error" ? event.error : `${t(event.type)}${event.metrics?.eval_count ? ` · ${event.metrics.eval_count} tokens${rate(event.metrics)}` : ""}`);
+        if (selected === event.chat_id) status(event.type === "error" ? event.error : `${t(event.type)}${event.metrics?.eval_count ? ` · ${event.metrics.eval_count} tokens${rate(event.metrics)}` : ""}`, {error: event.type === "error"});
         if (selected === event.chat_id) {
           window.app.refreshChat(event.chat_id).then(() => {
             if (selected === event.chat_id) {
@@ -941,21 +979,13 @@ window.app = (() => {
   // Windows-only controls (firewall lock, microphone check-ins) are hidden on other systems.
   if (root?.dataset) root.dataset.platform = /Windows/i.test(window.navigator?.userAgent || "") ? "windows" : /Mac/i.test(window.navigator?.userAgent || "") ? "mac" : "other";
 
+  // Loaded models are managed on the Models screen; Settings points there instead of repeating the list.
+  element("settings-open-models")?.addEventListener("click", () => { closeDialog("settings-dialog"); showView("models"); });
   async function openSettings() {
     showSettingsPane(settingsPane);
     try { await refreshModels(); } catch (error) { showError(error); }
     element("setting-theme").value = root?.getAttribute?.("data-theme") || "night";
     element("setting-idle").value = String(lastState?.settings?.idle_unload_minutes ?? 0);
-    const loaded = Object.entries(lastState?.loaded || {});
-    element("loaded-models").replaceChildren(...(loaded.length ? loaded.map(([name, details]) => {
-      const row = document.createElement("div");
-      row.className = "setting-row";
-      const label = document.createElement("span");
-      label.className = "mono";
-      label.textContent = `${name}${details?.size ? " · " + gigabytes(details.size) : ""}`;
-      row.append(label, button(t("Unload"), "btn", async () => { await unloadModel(name); openSettings(); }));
-      return row;
-    }) : [Object.assign(document.createElement("p"), {className: "setting-hint", textContent: t("No models are loaded right now.")})]));
     window.workspaceui?.openSettings();
     window.parityui?.openSettings();
     window.securityui?.openSettings();
@@ -1272,7 +1302,6 @@ window.app = (() => {
     dev: ["dev-view", "nav-dev"],
     models: ["models-view", "nav-models"],
     welcome: ["welcome-view", null],
-    capabilities: ["capabilities-view", "nav-capabilities"],
     generate: ["generate-view", "nav-generate"],
   };
   function showView(name) {
@@ -1291,12 +1320,10 @@ window.app = (() => {
     }
     if (name === "dev") window.devui?.onShow?.();
     if (name === "models") window.modelsui?.onShow?.();
-    if (name === "capabilities") window.parityui?.capabilities();
   }
   element("nav-chats").addEventListener("click", () => showView("chat"));
   element("nav-dev").addEventListener("click", () => showView("dev"));
   element("nav-models").addEventListener("click", () => showView("models"));
-  element("nav-capabilities").addEventListener("click", () => showView("capabilities"));
   element("nav-generate").addEventListener("click", () => showView("generate"));
 
   const generationModes = ["quick", "wan", "camera", "recent"];
@@ -1319,20 +1346,21 @@ window.app = (() => {
   // Mission Control opens the live Compute window (for a second screen); it is not a view in this window.
   const openMissionControl = () => call("open_compute_window").catch(showError);
   element("open-mission-control").addEventListener("click", openMissionControl);
-  element("open-models").addEventListener("click", () => showView("models"));
 
   async function selectModel(name, backend = "Ollama") {
+    const before = element("model").value;
     element("model").value = modelValue(name, backend);
     controls();
     if (selected && window.pywebview?.api?.set_chat_model) {
       try { await call("set_chat_model", selected, name, backend); await reloadChat(selected); }
-      catch (error) { showError(error); throw error; }
+      catch (error) { element("model").value = before; controls(); showError(error); throw error; }  // the chat kept its model
     }
   }
 
   function setPrompt(text) { element("prompt").value = text; fitPrompt(); scheduleDraft(); element("prompt").focus?.(); }
   window.addEventListener("languagechange", () => { renderMessages(); renderChats(); renderProjectBar(); });
-  return {onEvent, openSettings, showView, syncContext, selectModel, modelChoice, setPrompt,
+  return {onEvent, openSettings, showView, syncContext, selectModel, modelChoice, setPrompt, statusHeld,
+          notify: (text, options) => status(text, options),
           currentChat, refreshChat: async id => {
             if (selected !== id) return;
             await reloadChat(id);

@@ -1,6 +1,6 @@
 # AI Assist
 
-A local Ollama and Colibri workspace with saved chats, a developer agent, code previews, model capabilities, and hardware-aware downloads. The desktop interface uses HTML, CSS and JavaScript inside pywebview; the model engine remains Python.
+A local Ollama and Colibri workspace with saved chats, a developer agent, code previews, what each model can do, and hardware-aware downloads. The desktop interface uses HTML, CSS and JavaScript inside pywebview; the model engine remains Python.
 
 ## Requirements
 
@@ -33,7 +33,7 @@ The first-run page shows the computer's hardware and recommended models, offers 
 - **Chat** streams selectable Markdown and code. The composer selects the engine/model and context. Context usage stays visible; its menu compacts the conversation or starts a new chat with the same environment. Stop keeps the partial reply. Chats support drafts, recovery of interrupted replies, attachments, answer versions and incognito sessions. Incognito chats remain in memory and are excluded from exports.
 - **Developer** uses an existing project folder and an Ollama model with native tools. Browse for a folder, pin files and describe a task. Plan first asks for approval before actions; file diffs and shell commands have their own approvals. Activity distinguishes real tool results from model prose. Checkpoints can restore task changes. Colibri is available for chat and optional quality review; the web Developer tool executor currently requires Ollama.
 - **Models** shows hardware, installed/loaded Ollama models, recommendations and download progress. Its Colibri panel manages a known local Colibri installation.
-- **Capabilities** shows tools, vision, thinking and context metadata reported by the selected model. Unreported support remains unknown.
+- **Models** lists each installed model with what it can do, as its Ollama reports it (reads pictures, can use tools, thinks before answering), and a separate list of the models paired computers share, each with **Use in chat**.
 - **Settings** contains language, Night/Day appearance, idle model unloading, shared memory, saved prompts, update checks, Colibri quality review and chat export.
 
 The chat sidebar supports search, rename and deletion, date groups and projects. Projects share instructions, a folder and a default environment. Right-click a chat for instructions and memory selection. Existing chats keep their titles, messages and tool history; their storage format is unchanged. Attachments and pinned paths remain subject to the configured file limit and project access rules. Images require reported vision support; PDF text extraction uses the offline `pypdf` dependency.
@@ -68,8 +68,8 @@ Review is off by default. It adds at most one 768-token review request with a 12
 
 After a successfully saved chat answer or completed Developer task, AI Assist offers a small,
 non-modal **Was this useful?** prompt. **Yes** records a rating; **Not quite** allows a
-short correction. **Skip** dismisses the prompt. The existing manual **Give feedback**
-action still prepares a revised prompt without sending it.
+short correction. **Skip** dismisses the prompt. The separate **Ask for changes…** action
+under an answer still prepares a revised prompt without sending it.
 
 Ratings and corrections stay in the private local `task-feedback.json` journal.
 They do not trigger a model request, repeat any commands, modify project files,
@@ -85,7 +85,7 @@ has improved without subsequent evaluation.
 
 ### Feedback and verification
 
-**Give feedback** on an answer prepares a follow-up draft with your comments and optional success criteria. Review the draft before sending it. Feedback does not send a request or repeat edits automatically.
+**Ask for changes…** under an answer prepares a follow-up draft with your comments and optional success criteria (the **Ask for a better answer** dialog, then **Put in message box**). Review the draft before sending it. It does not send a request or repeat edits automatically.
 
 Developer commands run with your account's permissions from the chosen project directory; they are not an operating-system sandbox. Review the destination, diff and command before approving. Model file paths remain confined to the project, with secret, binary, dependency and generated paths excluded. Read sizes, context and tool execution are bounded. The saved agent file limit defaults to 64 KB and supports choices up to 1 MB; large text can be read in bounded line ranges.
 
@@ -115,7 +115,7 @@ History defaults to `%LOCALAPPDATA%\AI Assist\chats` on Windows or `~/.aiassist/
 
 ## Model downloads
 
-Open **Models** for hardware-based recommendations and installed models. Downloads show progress and can be stopped; a model can then be selected in the chat composer. Loaded models can be unloaded explicitly or after the configured idle period. Recommendations are estimates, not guarantees of speed or GPU placement. The status bar reports model placement, context, VRAM and measured token speed when available.
+Open **Models** for hardware-based recommendations and installed models. Downloads show progress and can be stopped; a model can then be selected in the chat composer. Loaded models can be unloaded explicitly or after the configured idle period. Recommendations are estimates, not guarantees of speed or GPU placement. The status bar reports model placement, VRAM and measured token speed when available, and how full the context is during Developer tasks (in Chats, the meter sits by the message box).
 
 Recommendations come from two public lists, read once per session after one approval that names both sites: Ollama's library on ollama.com, and Hugging Face's most downloaded GGUF chat models on huggingface.co. For each Hugging Face model, AI Assist picks the first quantization in the order Q4_K_M, Q5_K_M, Q4_K_S, Q6_K, Q8_0, IQ4_XS, Q3_K_M that fits this computer, using the same memory estimate as the Ollama suggestions, and shows up to three. Download counts show popularity, not quality. Nothing downloads until you click Download.
 
@@ -154,7 +154,7 @@ Install Vercel CLI separately (`npm install -g vercel`) and sign in with `vercel
 
 ## Configuration
 
-`OLLAMA_HOST` selects the Ollama server, defaulting to `http://localhost:11434`. Select a model and requested context in the composer. Server/model support and available memory determine the actual allocation; Capabilities shows advertised limits separately from measured usage. Larger contexts need more memory.
+`OLLAMA_HOST` selects the Ollama server, defaulting to `http://localhost:11434`. Select a model and requested context in the composer. Server/model support and available memory determine the actual allocation; on Models, hovering a model's name shows its advertised limit, separately from the measured usage in the status bar. Larger contexts need more memory.
 
 ### Colibri backend
 
@@ -183,6 +183,14 @@ The [macOS desktop checks](.github/workflows/macos.yml) workflow runs the headle
 ## Generate
 
 Open **Generate → Quick animation** to preview a slow zoom, side-to-side pan, or ripple on a JPEG or PNG. Quick animation uses WebGL 2 locally and can save a 3-second MP4 or WebM when the desktop webview supports canvas recording. It does not need ComfyUI or a model download.
+
+### Infinite
+
+[Infinite](https://github.com/n1m21n/Infinite) is a free, open-source app (MIT licence) that builds moving pictures, music and 3D from connected nodes. When it is installed, open **Generate → Infinite**, describe a clip (for example “a glowing star that pulses with a slow synth melody”), choose a model and a length of 4, 8 or 12 seconds, and click **Make clip**. A local Ollama model writes the clip as an Infinite patch, a small text file. Infinite checks the patch without opening a window. When it reports a problem, the model gets Infinite's message and the controls of the nodes it used, and tries again, up to three times. Infinite then renders the MP4, with sound when the patch makes any. **Save clip** saves the MP4; **Save patch** saves the `.inf` file, which opens in Infinite for further changes. The last eight clips stay in the app data folder (`infinite`).
+
+AI Assist looks for Infinite in `Applications` on macOS, in `Program Files\Infinite` or `%LOCALAPPDATA%\Infinite` on Windows, and on `PATH`. Set `AI_ASSIST_INFINITE` (or Infinite's own `INFINITE_BIN`) to choose a copy. The first clip reads Infinite's list of nodes, which takes about 20 seconds; the list is kept for that Infinite version.
+
+Infinite runs outside AI Assist's internet gate, so every patch is checked first. Patches that read or write files, use a camera, microphone or MIDI device, talk to other programs or the network (Syphon, NDI, OSC), load audio plugins or run JavaScript are refused before Infinite sees them. Thinking models (such as Qwen 3.5 or DeepSeek R1) are asked to answer without reasoning first, because their reasoning can take many minutes. Cloud models are not used. Developer also knows when Infinite is installed: it can check and render `.inf` patches in a project, with the usual approval for each command.
 
 ### AI video
 

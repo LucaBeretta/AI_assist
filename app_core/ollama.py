@@ -54,7 +54,7 @@ def list_models(base):
         with urllib.request.urlopen(f"{base}/api/tags", timeout=10) as response:
             result = json.loads(response.read().decode("utf-8"))
     except (urllib.error.URLError, TimeoutError) as error:
-        raise RuntimeError(f"Could not load models from {base}. Start Ollama, then click Refresh.") from error
+        raise RuntimeError(f"Could not load models from {base}. Start Ollama, then click Refresh models.") from error
     except json.JSONDecodeError as error:
         raise RuntimeError("Ollama returned an invalid model list.") from error
     return model_names(result)
@@ -161,15 +161,18 @@ def ensure_running(base, check, progress=lambda text: None, environ=None):
 
 
 def stream_chat(base, messages, model, context_length=None, on_chunk=None, on_metrics=None, keep_alive=-1,
-                cancel_event=None):
+                cancel_event=None, think=None):
     """Stream one chat answer from ``/api/chat``; returns the complete text.
 
     Each text chunk goes to ``on_chunk`` as it arrives, and Ollama's timing
     metadata to ``on_metrics`` at the end. An interrupted, oversized or empty
-    stream is an error, never a successful answer."""
+    stream is an error, never a successful answer. ``think`` (True or False)
+    turns a thinking model's reasoning on or off; None leaves Ollama's default."""
     payload = {"model": model, "messages": messages, "stream": True, "keep_alive": keep_alive}
     if context_length is not None:
         payload["options"] = {"num_ctx": context_length}
+    if think is not None:
+        payload["think"] = bool(think)
     request = urllib.request.Request(
         f"{base}/api/chat",
         data=json.dumps(payload).encode("utf-8"),
