@@ -705,7 +705,6 @@ window.i18n = (() => {
   "Choose Ollama, Colibri or a paired computer.": "Scegli Ollama, Colibri o un computer abbinato.",
   "This computer is no longer paired. Pair it again in Settings.": "Questo computer non è più abbinato. Abbinalo di nuovo nelle Impostazioni.",
   "3D look": "Aspetto 3D",
-  "Switch between the classic and the 3D look": "Passa dall'aspetto classico a quello 3D",
   "Look": "Aspetto",
   "Classic": "Classico",
   "3D cockpit": "Cabina 3D",
@@ -759,7 +758,13 @@ window.i18n = (() => {
   "This PC's Group Policy ignores local firewall rules, so the lock cannot work here.": "I Criteri di gruppo di questo PC ignorano le regole firewall locali, quindi il blocco qui non può funzionare.",
   "The firewall lock needs Windows.": "Il blocco firewall richiede Windows.",
   "Ollama is not running on this computer, so its models are not listed. Chats can use your paired computer.": "Ollama non è in esecuzione su questo computer, quindi i suoi modelli non sono elencati. Le chat possono usare il tuo computer abbinato.",
-  "Ollama is not running on this computer, so its models are not listed. Start Ollama, then click Refresh models.": "Ollama non è in esecuzione su questo computer, quindi i suoi modelli non sono elencati. Avvia Ollama, poi fai clic su Aggiorna modelli."
+  "Ollama is not running on this computer, so its models are not listed. Start Ollama, then click Refresh models.": "Ollama non è in esecuzione su questo computer, quindi i suoi modelli non sono elencati. Avvia Ollama, poi fai clic su Aggiorna modelli.",
+  "Browser": "Browser",
+  "Back": "Indietro",
+  "Forward": "Avanti",
+  "Ask anything or jump to a section": "Chiedi qualcosa o vai a una sezione",
+  "Search or run a command · Ctrl K": "Cerca o esegui un comando · Ctrl K",
+  "Switch the look: classic, 3D cockpit or browser": "Cambia aspetto: classico, cabina 3D o browser"
 };
   const en = Object.fromEntries(Object.keys(it).map(key => [key, key]));
   const messages = {en, it};

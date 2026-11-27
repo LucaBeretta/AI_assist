@@ -114,6 +114,9 @@ class StaticTests(unittest.TestCase):
         assert.equal(attributes['data-look'],'cockpit');  // the saved look is applied on start
         assert.equal(elements.get('setting-look').value,'cockpit');
         await elements.get('look').listeners.click();
+        assert.equal(attributes['data-look'],'browser');  // the cube steps: classic, cockpit, browser
+        assert.equal(JSON.stringify(saved.at(-1)),'{"look":"browser"}');
+        await elements.get('look').listeners.click();
         assert.equal(attributes['data-look'],'classic');
         assert.equal(elements.get('look').attributes['aria-pressed'],'false');
         assert.equal(JSON.stringify(saved.at(-1)),'{"look":"classic"}');

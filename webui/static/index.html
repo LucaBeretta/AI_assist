@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="feedback-loop.css">
   <link rel="stylesheet" href="cockpit.css">
+  <link rel="stylesheet" href="browser.css">
   <script defer src="strings.js"></script>
   <script defer src="markdown.js"></script>
   <script defer src="workspace.js"></script>
@@ -30,9 +31,31 @@
   <script defer src="opencode.js"></script>
   <script defer src="sidebar-toggle.js"></script>
   <script defer src="menus.js"></script>
+  <script defer src="browser.js"></script>
 </head>
 <body>
 <div class="app">
+  <div id="browser-chrome" class="browser-chrome">
+    <div class="browser-tabs" role="tablist" aria-label="Sections" data-i18n-aria-label="Sections">
+      <button class="browser-tab" type="button" role="tab" aria-selected="false" data-nav="nav-chats"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.4A8 8 0 1 1 21 12z"></path></svg><span data-i18n="Chats"></span></button>
+      <button class="browser-tab" type="button" role="tab" aria-selected="false" data-nav="nav-dev"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6l-6 6 6 6M16 6l6 6-6 6"></path></svg><span data-i18n="Developer"></span></button>
+      <button class="browser-tab" type="button" role="tab" aria-selected="false" data-nav="nav-models"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"></rect><rect x="9" y="9" width="6" height="6"></rect></svg><span data-i18n="Models"></span></button>
+      <button class="browser-tab" type="button" role="tab" aria-selected="false" data-nav="nav-generate"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M10 9l5 3-5 3z"></path></svg><span data-i18n="Generate"></span></button>
+      <button id="browser-new-tab" class="browser-new-tab" type="button" aria-label="New chat" title="New chat · Ctrl+N" data-i18n-aria-label="New chat" data-i18n-title="New chat · Ctrl+N"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></button>
+    </div>
+    <div class="browser-toolbar">
+      <button id="browser-back" class="icon-btn" type="button" disabled aria-label="Back" title="Back" data-i18n-aria-label="Back" data-i18n-title="Back"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"></path></svg></button>
+      <button id="browser-forward" class="icon-btn" type="button" disabled aria-label="Forward" title="Forward" data-i18n-aria-label="Forward" data-i18n-title="Forward"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"></path></svg></button>
+      <button id="browser-reload" class="icon-btn" type="button" aria-label="Reload the model list" title="Reload the model list" data-i18n-aria-label="Reload the model list" data-i18n-title="Reload the model list"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"></path></svg></button>
+      <button id="browser-address" class="browser-address" type="button" title="Search or run a command · Ctrl K" data-i18n-title="Search or run a command · Ctrl K">
+        <svg class="browser-lock" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path></svg>
+        <span id="browser-address-text" class="browser-address-text mono">aiassist://chats</span>
+        <span class="browser-address-hint" data-i18n="Ask anything or jump to a section"></span>
+      </button>
+      <button id="browser-mission" class="icon-btn" type="button" aria-label="Mission Control" title="Mission Control" data-i18n-aria-label="Mission Control" data-i18n-title="Mission Control"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18a8 8 0 1 1 16 0"></path><path d="M12 18l4-6"></path></svg></button>
+      <button id="browser-settings" class="icon-btn" type="button" aria-label="Settings" title="Settings · Ctrl+," data-i18n-aria-label="Settings" data-i18n-title="Settings · Ctrl+,"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"></path></svg></button>
+    </div>
+  </div>
   <div class="shell">
     <button id="open-sidebar" class="icon-btn bordered sidebar-toggle" type="button" aria-expanded="false" aria-label="Menu" title="Menu" data-i18n-aria-label="Menu" data-i18n-title="Menu">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
@@ -146,7 +169,7 @@
           <button id="delete-chat" class="icon-btn" type="button" hidden aria-label="Delete chat" title="Delete chat" data-i18n-aria-label="Delete chat" data-i18n-title="Delete chat">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"></path></svg>
           </button>
-          <button id="look" class="icon-btn" type="button" hidden aria-pressed="false" aria-label="3D look" title="Switch between the classic and the 3D look" data-i18n-aria-label="3D look" data-i18n-title="Switch between the classic and the 3D look">
+          <button id="look" class="icon-btn" type="button" hidden aria-pressed="false" aria-label="3D look" title="Switch the look: classic, 3D cockpit or browser" data-i18n-aria-label="3D look" data-i18n-title="Switch the look: classic, 3D cockpit or browser">
             <svg class="icon-cube-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"></path><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"></path></svg>
             <svg class="icon-cube-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z" fill="currentColor" fill-opacity=".25"></path><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"></path></svg>
           </button>
@@ -511,7 +534,7 @@
     <label class="setting-row"><span><span class="setting-title"><span data-i18n="Theme"></span></span><span class="setting-hint"><span data-i18n="Ctrl+Shift+L switches anywhere."></span></span></span>
       <select id="setting-theme"><option value="night" data-i18n="Night"></option><option value="day" data-i18n="Day"></option></select></label>
     <label class="setting-row"><span><span class="setting-title"><span data-i18n="Look"></span></span><span class="setting-hint"><span data-i18n="The Appearance button in the sidebar switches anywhere."></span></span></span>
-      <select id="setting-look"><option value="classic" data-i18n="Classic"></option><option value="cockpit" data-i18n="3D cockpit"></option></select></label>
+      <select id="setting-look"><option value="classic" data-i18n="Classic"></option><option value="cockpit" data-i18n="3D cockpit"></option><option value="browser" data-i18n="Browser"></option></select></label>
   </section>
   <section class="setting-group" data-pane="general"><h3 data-i18n="Updates"></h3>
     <div class="setting-row"><span><span class="setting-title"><span data-i18n="Check for updates"></span></span><span class="setting-hint" data-i18n="Looks on GitHub for a newer AI Assist. Nothing about your chats is sent."></span></span>
