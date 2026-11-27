@@ -199,7 +199,7 @@ window.app = (() => {
     const used = message.role === "assistant" && index === messages.length - 1 ? record?.last_response?.memories_used || [] : [];
     if (used.length) bar.append(memoriesUsed(used));
     if (message.role === "assistant") {
-      const feedback = button(t("Give feedback"), "icon-btn", () => window.parityui?.openFeedback(selected, index));
+      const feedback = button(t("Ask for changes…"), "icon-btn", () => window.parityui?.openFeedback(selected, index));
       feedback.disabled = busy; bar.append(feedback);
     }
     return bar;

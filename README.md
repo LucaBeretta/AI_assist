@@ -68,8 +68,8 @@ Review is off by default. It adds at most one 768-token review request with a 12
 
 After a successfully saved chat answer or completed Developer task, AI Assist offers a small,
 non-modal **Was this useful?** prompt. **Yes** records a rating; **Not quite** allows a
-short correction. **Skip** dismisses the prompt. The existing manual **Give feedback**
-action still prepares a revised prompt without sending it.
+short correction. **Skip** dismisses the prompt. The separate **Ask for changes…** action
+under an answer still prepares a revised prompt without sending it.
 
 Ratings and corrections stay in the private local `task-feedback.json` journal.
 They do not trigger a model request, repeat any commands, modify project files,
@@ -85,7 +85,7 @@ has improved without subsequent evaluation.
 
 ### Feedback and verification
 
-**Give feedback** on an answer prepares a follow-up draft with your comments and optional success criteria. Review the draft before sending it. Feedback does not send a request or repeat edits automatically.
+**Ask for changes…** under an answer prepares a follow-up draft with your comments and optional success criteria (the **Ask for a better answer** dialog, then **Put in message box**). Review the draft before sending it. It does not send a request or repeat edits automatically.
 
 Developer commands run with your account's permissions from the chosen project directory; they are not an operating-system sandbox. Review the destination, diff and command before approving. Model file paths remain confined to the project, with secret, binary, dependency and generated paths excluded. Read sizes, context and tool execution are bounded. The saved agent file limit defaults to 64 KB and supports choices up to 1 MB; large text can be read in bounded line ranges.
 

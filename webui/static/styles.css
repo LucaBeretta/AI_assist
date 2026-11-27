@@ -982,3 +982,14 @@ html:not([data-platform="windows"]) .windows-only { display: none; }
 
 /* Models: a heading with a small button beside it. */
 .models-h-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+/* "⋯" and Appearance menus (menus.js), styled like the right-click menu. */
+.quick-menu { position: fixed; z-index: 40; min-width: 200px; }
+.quick-menu[hidden] { display: none; }
+.quick-menu .popup-item { display: flex; align-items: center; gap: 2px; }
+.quick-menu-check { display: inline-block; width: 1.3em; flex: none; }
+.quick-menu .popup-item.danger { color: var(--red); }
+.quick-menu-head { padding: 6px 12px 2px; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--faint); }
+.quick-menu-line { border: 0; border-top: 1px solid var(--border); margin: 4px 0; }
+/* Developer: rarely changed options fold away. */
+.dev-more > summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.dev-more[open] > summary { margin-bottom: 10px; }
