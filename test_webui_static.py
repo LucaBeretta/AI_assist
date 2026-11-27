@@ -358,20 +358,6 @@ class StaticTests(unittest.TestCase):
         """)
 
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
-    def test_capabilities_explains_a_paired_computers_model_instead_of_failing(self):
-        self.run_scenario(r'''
-        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'parity.js'),'utf8'),
-          {document,window,Map,Set,Error,String,Number,Boolean,Array,Date,Math,JSON,Object,setTimeout,clearTimeout});
-        await window.listeners.pywebviewready();
-        window.pywebview.api.model_capabilities = async () => ({ok:false,error:'Choose Ollama or Colibri.'});
-        window.app.modelChoice = () => ({backend:'peer:pc1', name:'qwen3:32b'});
-        await window.parityui.capabilities();
-        const text = elements.get('capabilities-result').textContent;
-        assert.match(text,/paired computer: it answers chats with text/);
-        assert.doesNotMatch(text,/Choose Ollama or Colibri/);
-        ''')
-
-    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
     def test_models_screen_rereads_this_computer_offline_and_goes_online_only_from_its_button(self):
         self.run_scenario(r'''
         const asks = [];
@@ -480,6 +466,129 @@ class StaticTests(unittest.TestCase):
         downs[0]({target: new Element()});                          // a click elsewhere closes it
         assert.equal(classes.has('sidebar-open'),false);
         ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_models_show_what_each_model_can_do_and_the_paired_computers_models(self):
+        self.run_scenario(r'''
+        const api = window.pywebview.api;
+        api.state = async () => ({ok:true, engine:'Ollama', host:'localhost', models:['qwen3:8b','gemma3:4b'], ollama:{models:['qwen3:8b','gemma3:4b']}, loaded:{}});
+        api.model_capabilities = async name => ({ok:true, metadata: name === 'qwen3:8b'
+          ? {capabilities:['completion','tools','thinking'], context_length:40960} : {capabilities:['completion','vision'], context_length:131072}});
+        api.shared_ai_models = async () => ({ok:true, computers:[{id:'pc', backend:'peer:pc', name:'Studio-PC', address:'192.168.1.20', state:'ready', models:['qwen3:32b']}]});
+        api.recommend_models = async () => ({ok:true, hardware:{gpus:[]}, recommendations:[]});
+        const chosen = [];
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'models.js'),'utf8'),{document,window,Map,Set,Error,String,Number,Boolean,Array});
+        await window.listeners.pywebviewready();
+        window.app.selectModel = async (...args) => { chosen.push(args); };
+        await elements.get('nav-models').listeners.click();
+        for (let i = 0; i < 6; i++) await new Promise(resolve => setImmediate(resolve));
+        const rows = elements.get('models-installed').children.map(row => row.textContent);
+        assert.match(rows.find(text => text.includes('qwen3:8b')), /can use tools \(needed by Developer\).*thinks before answering/);
+        assert.match(rows.find(text => text.includes('gemma3:4b')), /reads pictures/);
+        assert.equal(elements.get('models-shared-section').hidden, false);
+        const sharedRow = elements.get('models-shared').children[0];
+        assert.match(sharedRow.textContent, /qwen3:32b.*Studio-PC/);
+        await sharedRow.children[1].children[0].listeners.click();      // Use in chat
+        assert.equal(JSON.stringify(chosen.at(-1)), '["qwen3:32b","peer:pc"]');
+        assert.equal(elements.get('chat-view').hidden, false);
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_models_screen_says_when_ollama_is_off_and_never_waits_for_paired_computers(self):
+        self.run_scenario(r"""
+        const api = window.pywebview.api;
+        api.state = async () => ({ok:true, engine:'Ollama', host:'localhost', models:[], ollama:{models:[], loaded:{}, error:'Could not load models from http://localhost:11434.'}, loaded:{}});
+        api.recommend_models = async () => ({ok:true, hardware:{gpus:[]}, recommendations:[]});
+        let answer = null;
+        api.shared_ai_models = () => new Promise(resolve => { answer = resolve; });   // a paired computer that is slow to answer
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'models.js'),'utf8'),{document,window,Map,Set,Error,String,Number,Boolean,Array});
+        await window.listeners.pywebviewready();
+        await elements.get('nav-models').listeners.click();
+        for (let i = 0; i < 6; i++) await new Promise(resolve => setImmediate(resolve));
+        const text = () => elements.get('models-installed').textContent;
+        assert.match(text(), /Ollama is not running on this computer, so its models are not listed\. Start Ollama/);   // not "nothing installed"
+        assert.match(elements.get('models-status').textContent, /Could not load models/);
+        answer({ok:true, computers:[{id:'pc', backend:'peer:pc', state:'offline', models:[]}]});
+        for (let i = 0; i < 6; i++) await new Promise(resolve => setImmediate(resolve));
+        assert.doesNotMatch(text(), /Chats can use your paired computer/);    // paired, but sharing nothing right now
+        """)
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_model_abilities_follow_the_language_and_a_failed_read_is_tried_again(self):
+        self.run_scenario(r"""
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'strings.js'),'utf8'),{document,window,Object,String,RegExp});
+        const api = window.pywebview.api;
+        api.state = async () => ({ok:true, engine:'Ollama', host:'localhost', models:['qwen3:8b'], ollama:{models:['qwen3:8b']}, loaded:{}});
+        let reads = 0;
+        api.model_capabilities = async () => { reads++; return reads === 1 ? {ok:false, error:'Ollama is busy.'} : {ok:true, metadata:{capabilities:['tools']}}; };
+        api.recommend_models = async () => ({ok:true, hardware:{gpus:[]}, recommendations:[]});
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'models.js'),'utf8'),{document,window,Map,Set,Error,String,Number,Boolean,Array});
+        await window.listeners.pywebviewready();
+        const settle = async () => { for (let i = 0; i < 8; i++) await new Promise(resolve => setImmediate(resolve)); };
+        await elements.get('nav-models').listeners.click(); await settle();
+        assert.doesNotMatch(elements.get('models-installed').textContent, /tools/);
+        await elements.get('nav-chats').listeners.click();
+        await elements.get('nav-models').listeners.click(); await settle();     // the next visit reads it again
+        assert.equal(reads, 2);
+        assert.match(elements.get('models-installed').textContent, /can use tools/);
+        window.i18n.setLanguage('it');
+        await elements.get('nav-chats').listeners.click();
+        await elements.get('nav-models').listeners.click(); await settle();
+        assert.match(elements.get('models-installed').textContent, /usa strumenti/);   // in today's language
+        assert.equal(reads, 2);
+        """)
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_a_model_change_the_chat_refuses_puts_the_old_model_back(self):
+        self.run_scenario(r"""
+        await window.listeners.pywebviewready();
+        const before = elements.get('model').value;
+        window.pywebview.api.set_chat_model = async () => ({ok:false, error:'Wait for the reply to finish.'});
+        await assert.rejects(window.app.selectModel('qwen3:32b', 'peer:pc'));
+        assert.equal(elements.get('model').value, before);        // the chat kept its model, and so does the box
+        """)
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_the_firewall_lock_offers_only_what_fits_its_state(self):
+        self.run_scenario(r"""
+        const api = window.pywebview.api;
+        let firewall = null;
+        api.privacy_state = async () => ({ok:true, gate:{installed:true}, connections:[], firewall, busy:null});
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'security.js'),'utf8'),{document,window,Map,Set,Error,String,Number,Boolean,Array,Date,Math});
+        const shown = () => ['firewall-on','firewall-off','firewall-relock','firewall-lift-row'].filter(id => !document.getElementById(id).hidden);
+        const check = async (summary, buttons) => { firewall = summary; await window.securityui.openSettings(); assert.deepEqual(shown(), buttons, summary.state); };
+        const soon = Date.now() / 1000 + 600, gone = Date.now() / 1000 - 60;
+        await check({state:'off', detail:'Off. No Ollama or colibri programs were found to lock.', can_turn_on:false, has_rules:false}, ['firewall-on']);  // install Ollama, then click
+        assert.equal(elements.get('firewall-status').textContent, 'Off. No Ollama or colibri programs were found to lock.');   // the lock's own words, once
+        await check({state:'on', detail:'On.', has_rules:true, ollama_locked:true}, ['firewall-off','firewall-lift-row']);
+        await check({state:'lifted', detail:'Lifted until 14:30. It turns back on by itself.', has_rules:true, lift_until:soon}, ['firewall-off','firewall-relock']);
+        await check({state:'lifted', detail:'Lifted until 14:30. It turns back on by itself.', has_rules:true, lift_until:gone}, ['firewall-off','firewall-relock','firewall-lift-row']);
+        assert.equal(elements.get('firewall-status').textContent, 'The lift has ended. Checking the lock again…');
+        await check({state:'disabled', detail:'Off: the rules are turned off.', has_rules:true}, ['firewall-off','firewall-relock']);
+        await check({state:'partial', detail:'Partly on.', has_rules:true, ollama_locked:true, can_turn_on:true}, ['firewall-on','firewall-off','firewall-lift-row']);
+        await check({state:'changed', detail:'Changed outside AI Assist.', has_rules:true, ollama_locked:false, can_turn_on:true}, ['firewall-on','firewall-off']);
+        await check({state:'firewall off', detail:'Windows Firewall is off for: Public.', has_rules:false}, []);
+        await check({state:'ignored', detail:'Group Policy ignores local rules.', has_rules:true}, ['firewall-off']);
+        await check({state:'unavailable', detail:'The firewall lock needs Windows.'}, []);
+        await check({state:'error', detail:"Could not read Windows Firewall: Command '['powershell.exe', '-NoProfile', '-Command', 'Get-NetFirewallRule …']' timed out after 90 seconds"}, ['firewall-on','firewall-off']);
+        assert.equal(elements.get('firewall-status').textContent, 'Could not read Windows Firewall right now.');   // never the raw command
+        """)
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_the_firewall_lock_explains_itself_in_italian(self):
+        self.run_scenario(r"""
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'strings.js'),'utf8'),{document,window,Object,String,RegExp});
+        window.i18n.setLanguage('it');
+        const api = window.pywebview.api;
+        let firewall = {state:'lifted', detail:'Lifted until 14:30. It turns back on by itself.', has_rules:true, lift_until:Date.now() / 1000 + 600};
+        api.privacy_state = async () => ({ok:true, gate:{installed:true}, connections:[], firewall, busy:null});
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'security.js'),'utf8'),{document,window,Map,Set,Error,String,Number,Boolean,Array,Date,Math});
+        await window.securityui.openSettings();
+        assert.equal(elements.get('firewall-status').textContent, 'Sospeso fino alle 14:30. Si riattiva da solo.');
+        firewall = {state:'partial', detail:'Partly on: 2 program(s) are not locked, for example after an Ollama update. Turn the lock on again to cover them.', has_rules:true};
+        await window.securityui.openSettings();
+        assert.match(elements.get('firewall-status').textContent, /^Attivo in parte: 2 programmi/);
+        """)
 
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
     def test_reading_sharing_settings_never_enables_the_listener(self):
@@ -721,13 +830,12 @@ class StaticTests(unittest.TestCase):
         ''')
 
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
-    def test_parity_feedback_capabilities_and_deploy_confirmation(self):
+    def test_parity_feedback_updates_and_deploy_confirmation(self):
         self.run_scenario(r'''
         vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'parity.js'),'utf8'), {document,window,Map,Set,Error,String,Number,Boolean,Array,URL});
         const api=window.pywebview.api;
         saved.messages=[{role:'assistant',content:'Old reply'}];
         api.prepare_feedback=async(...args)=>{calls.push(['feedback',...args]);return {ok:true,text:'Prepared follow-up'};};
-        api.model_capabilities=async()=>({ok:true,metadata:{capabilities:['tools'],context_length:32768}});
         api.check_updates=async()=>{
           window.app.onEvent([{type:'job_done',job_id:'u1',operation:'updates',result:{differences:[],download:'https://example.com/source.zip'}}]);
           return {ok:true,job_id:'u1'};
@@ -739,8 +847,6 @@ class StaticTests(unittest.TestCase):
         await elements.get('feedback-form').listeners.submit({preventDefault(){}});
         assert.equal(elements.get('prompt').value,'Prepared follow-up');
         assert(!calls.some(item=>item[0]==='chat-a'));
-        await window.parityui.capabilities();
-        assert.match(elements.get('capabilities-result').textContent,/Reported/);
         await elements.get('check-updates').listeners.click();
         assert.match(elements.get('update-result').textContent,/matches upstream/);
         assert.equal(elements.get('check-updates').disabled,false);

@@ -117,24 +117,6 @@ window.parityui = (() => {
     } catch (failure) { el("feedback-error").textContent = failure.message; }
   });
   el("feedback-cancel").addEventListener("click", () => close("feedback-dialog"));
-  async function capabilities() {
-    const box = el("capabilities-result"), selected = window.app.modelChoice();
-    if (!selected.name) { box.textContent = t("Choose a model in Chats first."); return; }
-    // A paired computer's model answers chats with text only, over the local network.
-    if (String(selected.backend).startsWith("peer:")) {
-      box.replaceChildren(node("div", selected.name, "model-row mono"),
-        node("p", t("Runs on a paired computer: it answers chats with text. Pictures and Developer tasks need a model on this computer."), "model-row"));
-      return;
-    }
-    box.textContent = t("Working…");
-    try {
-      const result = await call("model_capabilities", selected.name, selected.backend), data = result.metadata;
-      box.replaceChildren(node("div", selected.backend + " · " + selected.name, "model-row mono"),
-        ...["tools", "vision", "thinking"].map(name => {
-          const row = node("div", undefined, "model-row"); row.append(node("span", t(name)), node("span", (data.capabilities || []).includes(name) ? t("Reported") : t("Not reported"), "pill")); return row;
-        }), node("p", t("Advertised context: {v0}", {v0: data.context_length || "?"}), "model-row mono"));
-    } catch (failure) { box.textContent = failure.message; }
-  }
   function onState(state) {
     hybrid = state.hybrid || {enabled: false, review_model: "", manage_memory: true};
     if (!qualityDirty) el("dev-quality").checked = hybrid.enabled;
@@ -229,9 +211,7 @@ window.parityui = (() => {
     if (!el("deploy-confirm").checked) { el("deploy-output").textContent = t("Confirm the upload before deploying."); return; }
     start("deploy_vercel", [el("deploy-folder").value, el("deploy-project").value, el("deploy-scope").value, el("deploy-domain").value], "deploy");
   });
-  // The sidebar's Refresh models also checks again the screen that is open.
-  el("refresh")?.addEventListener("click", () => { if (!el("capabilities-view").hidden) capabilities(); });
-  window.addEventListener("languagechange", () => { if (!el("capabilities-view").hidden) capabilities(); modelDetails(); renderColibriState(); });
+  window.addEventListener("languagechange", () => { modelDetails(); renderColibriState(); });
   updateControls();
-  return {onEvent, onState, openSettings, openFeedback, capabilities};
+  return {onEvent, onState, openSettings, openFeedback};
 })();

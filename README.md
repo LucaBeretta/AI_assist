@@ -1,6 +1,6 @@
 # AI Assist
 
-A local Ollama and Colibri workspace with saved chats, a developer agent, code previews, model capabilities, and hardware-aware downloads. The desktop interface uses HTML, CSS and JavaScript inside pywebview; the model engine remains Python.
+A local Ollama and Colibri workspace with saved chats, a developer agent, code previews, what each model can do, and hardware-aware downloads. The desktop interface uses HTML, CSS and JavaScript inside pywebview; the model engine remains Python.
 
 ## Requirements
 
@@ -33,7 +33,7 @@ The first-run page shows the computer's hardware and recommended models, offers 
 - **Chat** streams selectable Markdown and code. The composer selects the engine/model and context. Context usage stays visible; its menu compacts the conversation or starts a new chat with the same environment. Stop keeps the partial reply. Chats support drafts, recovery of interrupted replies, attachments, answer versions and incognito sessions. Incognito chats remain in memory and are excluded from exports.
 - **Developer** uses an existing project folder and an Ollama model with native tools. Browse for a folder, pin files and describe a task. Plan first asks for approval before actions; file diffs and shell commands have their own approvals. Activity distinguishes real tool results from model prose. Checkpoints can restore task changes. Colibri is available for chat and optional quality review; the web Developer tool executor currently requires Ollama.
 - **Models** shows hardware, installed/loaded Ollama models, recommendations and download progress. Its Colibri panel manages a known local Colibri installation.
-- **Capabilities** shows tools, vision, thinking and context metadata reported by the selected model. Unreported support remains unknown.
+- **Models** lists each installed model with what it can do, as its Ollama reports it (reads pictures, can use tools, thinks before answering), and a separate list of the models paired computers share, each with **Use in chat**.
 - **Settings** contains language, Night/Day appearance, idle model unloading, shared memory, saved prompts, update checks, Colibri quality review and chat export.
 
 The chat sidebar supports search, rename and deletion, date groups and projects. Projects share instructions, a folder and a default environment. Right-click a chat for instructions and memory selection. Existing chats keep their titles, messages and tool history; their storage format is unchanged. Attachments and pinned paths remain subject to the configured file limit and project access rules. Images require reported vision support; PDF text extraction uses the offline `pypdf` dependency.
@@ -154,7 +154,7 @@ Install Vercel CLI separately (`npm install -g vercel`) and sign in with `vercel
 
 ## Configuration
 
-`OLLAMA_HOST` selects the Ollama server, defaulting to `http://localhost:11434`. Select a model and requested context in the composer. Server/model support and available memory determine the actual allocation; Capabilities shows advertised limits separately from measured usage. Larger contexts need more memory.
+`OLLAMA_HOST` selects the Ollama server, defaulting to `http://localhost:11434`. Select a model and requested context in the composer. Server/model support and available memory determine the actual allocation; on Models, hovering a model's name shows its advertised limit, separately from the measured usage in the status bar. Larger contexts need more memory.
 
 ### Colibri backend
 

@@ -1302,7 +1302,6 @@ window.app = (() => {
     dev: ["dev-view", "nav-dev"],
     models: ["models-view", "nav-models"],
     welcome: ["welcome-view", null],
-    capabilities: ["capabilities-view", "nav-capabilities"],
     generate: ["generate-view", "nav-generate"],
   };
   function showView(name) {
@@ -1316,23 +1315,22 @@ window.app = (() => {
     }
     if (name === "dev") window.devui?.onShow?.();
     if (name === "models") window.modelsui?.onShow?.();
-    if (name === "capabilities") window.parityui?.capabilities();
   }
   element("nav-chats").addEventListener("click", () => showView("chat"));
   element("nav-dev").addEventListener("click", () => showView("dev"));
   element("nav-models").addEventListener("click", () => showView("models"));
-  element("nav-capabilities").addEventListener("click", () => showView("capabilities"));
   element("nav-generate").addEventListener("click", () => showView("generate"));
   // Mission Control opens the live Compute window (for a second screen); it is not a view in this window.
   const openMissionControl = () => call("open_compute_window").catch(showError);
   element("open-mission-control").addEventListener("click", openMissionControl);
 
   async function selectModel(name, backend = "Ollama") {
+    const before = element("model").value;
     element("model").value = modelValue(name, backend);
     controls();
     if (selected && window.pywebview?.api?.set_chat_model) {
       try { await call("set_chat_model", selected, name, backend); await reloadChat(selected); }
-      catch (error) { showError(error); throw error; }
+      catch (error) { element("model").value = before; controls(); showError(error); throw error; }  // the chat kept its model
     }
   }
 
