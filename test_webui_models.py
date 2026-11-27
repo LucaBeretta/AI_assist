@@ -80,6 +80,19 @@ class ModelApiTests(unittest.TestCase):
             self.assertEqual(fetch.call_count, 2)
         self.assertFalse(self.api.recommend_models("yes")["ok"])
 
+    def test_opening_models_stays_offline_and_shows_what_was_already_read(self):
+        self.api._hardware = {"server_local": True, "gpus": []}
+        with patch("model_library.fetch_popular_models", return_value=[{"name": "family"}]) as fetch, \
+             patch("model_advisor.recommend_models", return_value=[{"name": "family:7b"}]):
+            first = self.api.recommend_models(False, False)
+            self.assertEqual(fetch.call_count, 0)
+            self.assertEqual((first["recommendations"], first["checked"]), ([], False))
+            self.api.recommend_models(True, True)  # "Check online for suggestions"
+            again = self.api.recommend_models(False, False)
+        self.assertEqual(fetch.call_count, 1)
+        self.assertEqual((again["recommendations"], again["checked"]), ([{"name": "family:7b"}], True))
+        self.assertFalse(self.api.recommend_models(False, "no")["ok"])
+
     def test_catalog_and_variant_pages_share_one_gated_task_and_are_cached(self):
         import network_gate
         self.api._hardware = {"server_local": True, "gpus": []}

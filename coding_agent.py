@@ -30,6 +30,7 @@ import uuid
 import blender_bridge
 import developer_tools as projects
 import diff_hunks
+import infinite_engine
 from task_checkpoints import CheckpointStore
 from response_metrics import metrics_summary, response_metrics
 import network_gate
@@ -82,6 +83,16 @@ def _blender_hint(path):
             "Commands stop after 120 seconds, so keep test renders small.")
 
 
+def _infinite_hint(path):
+    """How to use an installed Infinite without its window: a .inf text patch and approved commands."""
+    if not path:
+        return ""
+    call = f'& "{path}"' if os.name == "nt" else '"' + path.replace('"', '\\"') + '"'
+    return (" Infinite (node-based pictures, sound and 3D) is installed. For a clip, write a .inf patch in the "
+            f"project, then run_command: {call} --validate patch.inf. {call} --describe \"<node type>\" lists a "
+            f"node's controls; {call} --render patch.inf clip.mp4 --duration 4 --timeout 100 makes the video.")
+
+
 def _live_blender_hint(version):
     if not version:
         return ""
@@ -102,7 +113,12 @@ def _system_prompt(blender=None):
         # Looking for Blender must never stop a task; without it the hint is simply left out.
         log.debug("Could not look for Blender", exc_info=True)
         blender = None
-    return _SYSTEM + shell + _blender_hint(blender) + _live_blender_hint(live)
+    try:
+        infinite = infinite_engine.find_infinite()
+    except Exception:
+        log.debug("Could not look for Infinite", exc_info=True)
+        infinite = None
+    return _SYSTEM + shell + _blender_hint(blender) + _live_blender_hint(live) + _infinite_hint(infinite)
 
 
 def _schema(name, description, properties, required=()):

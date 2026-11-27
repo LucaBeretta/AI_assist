@@ -8,6 +8,10 @@ window.modelsui = (() => {
   let pull = null;            // {id, model, completed, total, status}
   let advice = null;          // last recommend_models result
   let installed = [];
+  let shared = [];            // paired computers that share their models with this one
+  let ollamaError = null;     // why this computer's Ollama could not list its models, if it could not
+  const abilities = new Map(); // model name -> {keys, context, failed} from this computer's Ollama (/api/show), or "reading"
+  const abilityLabels = {vision: "reads pictures", tools: "can use tools (needed by Developer)", thinking: "thinks before answering"};
   let loaded = {};
   const finishedPulls = new Set();
 
@@ -56,21 +60,53 @@ window.modelsui = (() => {
   }
 
   // ---------- installed ----------
+  // What a model can do, in plain words, read from this computer's Ollama (no internet).
+  async function readAbilities(name) {
+    if (abilities.has(name) || !window.pywebview?.api?.model_capabilities) return;
+    abilities.set(name, "reading");
+    try {
+      const data = (await call("model_capabilities", name, "Ollama")).metadata || {};
+      const reported = data.capabilities || [];
+      abilities.set(name, {keys: Object.keys(abilityLabels).filter(key => reported.includes(key)), context: data.context_length || null});
+    } catch (error) { abilities.set(name, {keys: [], context: null, failed: true}); }  // read again at the next refresh
+    renderInstalled();
+  }
+  // Use a model in the open chat; stay here and say why if the chat cannot change model right now.
+  async function use(name, backend = "Ollama") {
+    try {
+      if (backend !== "Ollama") await window.app?.refreshModels?.();  // the chat's list may predate the paired computer's sharing
+      await window.app?.selectModel(name, backend);
+      window.app?.showView("chat");
+    } catch (error) { note(error.message); }
+  }
+  const sharing = () => shared.some(computer => computer.state === "ready" && computer.models?.length);
   function renderInstalled() {
     const list = element("models-installed");
-    if (!installed.length) { list.replaceChildren(node("p", "dev-hint", t("No models installed yet. Pick one below to download it."))); return; }
+    if (!installed.length) {
+      // Ollama not running is not the same as nothing installed: the models are still on disk.
+      const text = ollamaError ? (sharing() ? t("Ollama is not running on this computer, so its models are not listed. Chats can use your paired computer.")
+                                            : t("Ollama is not running on this computer, so its models are not listed. Start Ollama, then click Refresh models."))
+        : sharing() ? t("Nothing installed here. Chats use your paired computer.") : t("No models installed yet. Pick one below to download it.");
+      list.replaceChildren(node("p", "dev-hint", text));
+      return;
+    }
     list.replaceChildren(...installed.map(name => {
       const row = node("div", "model-row");
       const info = node("div", "model-info");
       const title = node("span", "model-name mono", name);
       info.append(title);
+      const known = abilities.get(name);
+      if (known && known !== "reading") {
+        for (const key of known.keys) info.append(node("span", "pill", t(abilityLabels[key])));  // in today's language
+        if (known.context) title.title = t("Remembers up to {v0} tokens of a conversation.", {v0: known.context});
+      } else if (!known) readAbilities(name);
       const details = loaded[name];
       if (details) {
         const split = details.size_vram != null && details.size ? Math.round(details.size_vram / details.size * 100) : null;
         info.append(node("span", "pill ok", t("loaded") + (split != null ? ` · ${split}% gpu${split < 100 ? " · " + (100 - split) + "% cpu" : ""}` : "")));
       }
       const actions = node("div", "model-actions");
-      actions.append(btn(t("Use in chat"), "btn", () => { window.app?.selectModel(name); window.app?.showView("chat"); }));
+      actions.append(btn(t("Use in chat"), "btn", () => use(name)));
       if (details) actions.append(btn(t("Unload"), "btn ghost", async () => {
         try { await call("unload_model", name); note(t("{v0} unloaded.", {v0: (name)})); await refresh(); } catch (error) { note(error.message); }
       }));
@@ -95,6 +131,7 @@ window.modelsui = (() => {
     const list = element("models-recommended");
     if (!advice) { list.replaceChildren(node("p", "dev-hint", t("Checking which models fit this computer…"))); return; }
     const cards = advice.recommendations || [];
+    if (!cards.length && advice.checked === false) { list.replaceChildren(node("p", "dev-hint", t("To see models that fit this computer, click Check online for suggestions. It asks before going online."))); return; }
     if (!cards.length) { list.replaceChildren(node("p", "dev-hint", advice.catalog_error ? (window.i18n?.gate?.(advice.catalog_error) || advice.catalog_error) : t("No recommendations: the model catalog could not be read (offline?) or nothing fits."))); return; }
     list.replaceChildren(...cards.map(card => {
       const item = node("article", "model-card");
@@ -166,7 +203,7 @@ window.modelsui = (() => {
         Object.assign(pull, {completed: event.completed || 0, total: event.total || 0, status: event.status});
         renderRecommendations(); renderPullOther();
         return true;
-      case "pull_done": pull = null; note(t("{v0} downloaded.", {v0: event.model})); renderAll(); refresh(); return true;
+      case "pull_done": pull = null; abilities.delete(event.model); note(t("{v0} downloaded.", {v0: event.model})); renderAll(); refresh(); return true;
       case "pull_stopped": pull = null; note(t("Download stopped.")); renderAll(); return true;
       case "pull_error": pull = null; note(event.error || t("Download failed.")); renderAll(); return true;
       case "models_changed": refresh(); window.app?.refreshModels(); return true;
@@ -174,33 +211,60 @@ window.modelsui = (() => {
     }
   }
 
+  // Models a paired computer shares: chat only, so they are listed apart with "Use in chat".
+  function renderShared() {
+    const ready = shared.filter(computer => computer.state === "ready" && computer.models?.length);
+    element("models-shared-section").hidden = !ready.length;
+    element("models-shared").replaceChildren(...ready.flatMap(computer => computer.models.map(name => {
+      const row = node("div", "model-row");
+      const info = node("div", "model-info");
+      info.append(node("span", "model-name mono", name), node("span", "pill", computer.name || computer.address || t("a paired computer")));
+      const actions = node("div", "model-actions");
+      actions.append(btn(t("Use in chat"), "btn", () => use(name, computer.backend)));
+      row.append(info, actions);
+      return row;
+    })));
+  }
   async function refresh() {
+    for (const [name, known] of abilities) if (known?.failed) abilities.delete(name);
+    // This computer's list never waits for the paired computers (each can take seconds when it is off).
+    const paired = window.pywebview?.api?.shared_ai_models
+      ? call("shared_ai_models").then(result => result.computers || [], () => [])
+          .then(computers => { shared = computers; renderShared(); renderInstalled(); })
+      : null;
     try {
       const state = await call("state");
       installed = state.ollama?.models || (state.engine === "Ollama" ? state.models || [] : []);
       loaded = state.loaded || {};
-      renderInstalled();
-    } catch (error) { note(error.message); }
+      ollamaError = state.ollama?.error || null;
+    } catch (error) { installed = []; ollamaError = error.message; }
+    if (ollamaError) note(window.i18n?.gate?.(ollamaError) || ollamaError);
+    renderInstalled();
+    await paired;
   }
 
   async function loadAdvice(refresh = false) {
     renderHardware(advice?.hardware);
     renderRecommendations();
     try {
-      advice = await call("recommend_models", refresh);
+      advice = await call("recommend_models", refresh, refresh);  // only the button goes online
       renderHardware(advice.hardware);
       renderRecommendations();
     } catch (error) { note(error.message); element("models-recommended").replaceChildren(node("p", "dev-hint", error.message)); }
   }
 
-  function onShow() { refresh(); if (!advice) loadAdvice(); }
+  // Opening the screen re-reads this computer and the installed models, offline: it shows suggestions
+  // already read in this session, and going online is its own button.
+  function onShow() { refresh(); loadAdvice(); }
 
   element("pull-other").addEventListener("submit", event => {
     event.preventDefault();
     const name = element("pull-other-name").value.trim();
     if (name) start(name);
   });
-  element("models-refresh").addEventListener("click", () => { advice = null; refresh(); loadAdvice(true); });
+  element("models-check-online").addEventListener("click", () => { advice = null; refresh(); loadAdvice(true); });
+  // The one "Refresh models" button also refreshes this screen when it is open.
+  element("refresh")?.addEventListener("click", () => { if (!element("models-view").hidden) onShow(); });
   window.addEventListener("languagechange", () => { if (!element("models-view").hidden) { renderHardware(advice?.hardware); renderAll(); } });
   return {onEvent, onShow};
 })();

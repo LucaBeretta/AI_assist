@@ -57,7 +57,8 @@ class SharedAI:
         return isinstance(peer_id, str) and isinstance(self.store.client_record(peer_id), dict)
 
     def _models(self, peer_id, record, client_id):
-        row = {"id": peer_id, "backend": backend_for(peer_id), "address": record.get("address"), "models": []}
+        row = {"id": peer_id, "backend": backend_for(peer_id), "address": record.get("address"),
+               "name": record.get("name") or "", "models": []}
         try:
             response = open_shared_ai(record, client_id, "GET", "/api/tags", timeout=LIST_TIMEOUT)
             try:

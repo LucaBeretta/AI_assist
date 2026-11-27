@@ -55,5 +55,7 @@ class LookPreferenceTests(unittest.TestCase):
         restarted = fixtures.Api(self.events, self.store, self.engine, colibri=self.colibri)
         self.addCleanup(restarted._close)
         self.assertEqual(restarted.web_preferences()["settings"]["look"], "cockpit")
+        self.assertTrue(self.api.set_web_preferences({"look": "browser"})["ok"])
+        self.assertTrue(self.api.set_web_preferences({"look": "viewport"})["ok"])
         for look in ("3d", "", None, True):
             self.assertFalse(self.api.set_web_preferences({"look": look})["ok"])

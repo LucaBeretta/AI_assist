@@ -117,17 +117,6 @@ window.parityui = (() => {
     } catch (failure) { el("feedback-error").textContent = failure.message; }
   });
   el("feedback-cancel").addEventListener("click", () => close("feedback-dialog"));
-  async function capabilities() {
-    const box = el("capabilities-result"), selected = window.app.modelChoice();
-    box.textContent = t("Working…");
-    try {
-      const result = await call("model_capabilities", selected.name, selected.backend), data = result.metadata;
-      box.replaceChildren(node("div", selected.backend + " · " + selected.name, "model-row mono"),
-        ...["tools", "vision", "thinking"].map(name => {
-          const row = node("div", undefined, "model-row"); row.append(node("span", t(name)), node("span", (data.capabilities || []).includes(name) ? t("Reported") : t("Not reported"), "pill")); return row;
-        }), node("p", t("Advertised context: {v0}", {v0: data.context_length || "?"}), "model-row mono"));
-    } catch (failure) { box.textContent = failure.message; }
-  }
   function onState(state) {
     hybrid = state.hybrid || {enabled: false, review_model: "", manage_memory: true};
     if (!qualityDirty) el("dev-quality").checked = hybrid.enabled;
@@ -161,14 +150,31 @@ window.parityui = (() => {
     renderReviewerChoices();
     if (!hybrid) return;
     el("hybrid-enabled").checked = hybrid.enabled; el("hybrid-model").value = hybrid.review_model; el("hybrid-memory").checked = hybrid.manage_memory;
+    reviewWanted = hybrid.enabled;
+    syncReviewer();
   }
-  el("hybrid-form").addEventListener("submit", async event => {
-    event.preventDefault();
+  // Quality review saves as soon as something changes. It can only be on once a reviewer model is chosen:
+  // while the model field is empty (for example while picking another model) the box is greyed out,
+  // and the person's choice comes back with the next model.
+  let reviewWanted = false;
+  function syncReviewer() {
+    const box = el("hybrid-enabled");
+    const chosen = Boolean(el("hybrid-model").value.trim());
+    if (!box.disabled) reviewWanted = box.checked;
+    box.disabled = !chosen;
+    box.checked = chosen && reviewWanted;
+  }
+  async function saveReviewer() {
+    syncReviewer();
+    if (!hybrid) return;  // the saved settings have not been read yet: never overwrite them with an empty form
     try {
-      const result = await call("set_hybrid_settings", el("hybrid-enabled").checked, el("hybrid-model").value, el("hybrid-memory").checked);
+      const result = await call("set_hybrid_settings", el("hybrid-enabled").checked, el("hybrid-model").value.trim(), el("hybrid-memory").checked);
       hybrid = result.hybrid; qualityDirty = false; el("dev-quality").checked = hybrid.enabled; el("hybrid-status").textContent = t("Saved.");
     } catch (failure) { el("hybrid-status").textContent = failure.message; }
-  });
+  }
+  el("hybrid-form").addEventListener("submit", event => { event.preventDefault(); saveReviewer(); });
+  for (const id of ["hybrid-enabled", "hybrid-memory", "hybrid-model"]) el(id).addEventListener("change", saveReviewer);
+  el("hybrid-model").addEventListener("input", syncReviewer);
   el("dev-quality").addEventListener("change", () => { qualityDirty = true; });
   el("check-updates").addEventListener("click", () => start("check_updates", [], "updates"));
   el("install-update").addEventListener("click", () => start("install_update", [], "install_update"));
@@ -186,7 +192,6 @@ window.parityui = (() => {
     try { await call("create_shortcut"); el("shortcut-result").textContent = t("Desktop shortcut created."); }
     catch (error) { el("shortcut-result").textContent = error.message; }
   });
-  el("capabilities-refresh").addEventListener("click", capabilities);
   el("colibri-browse").addEventListener("click", async () => {
     try { const chosen = await call("choose_folder"); if (!chosen.cancelled) { await call("set_colibri_folder", chosen.path); el("colibri-folder").value = chosen.path; } }
     catch (failure) { el("colibri-output").textContent = failure.message; }
@@ -206,7 +211,7 @@ window.parityui = (() => {
     if (!el("deploy-confirm").checked) { el("deploy-output").textContent = t("Confirm the upload before deploying."); return; }
     start("deploy_vercel", [el("deploy-folder").value, el("deploy-project").value, el("deploy-scope").value, el("deploy-domain").value], "deploy");
   });
-  window.addEventListener("languagechange", () => { if (!el("capabilities-view").hidden) capabilities(); modelDetails(); renderColibriState(); });
+  window.addEventListener("languagechange", () => { modelDetails(); renderColibriState(); });
   updateControls();
-  return {onEvent, onState, openSettings, openFeedback, capabilities};
+  return {onEvent, onState, openSettings, openFeedback};
 })();

@@ -110,6 +110,17 @@ code, kbd, pre, .mono { font-family: var(--mono); }
   .shell { grid-template-columns: 1fr; }
   .sidebar { display: none; }
 }
+/* Narrow windows: the menu button opens the sidebar over the page (sidebar-toggle.js).
+   The selector outranks .icon-btn.bordered, which would otherwise show it at every width. */
+.shell > .icon-btn.sidebar-toggle { display: none; }
+@media (max-width: 760px) {
+  .shell > .icon-btn.sidebar-toggle { display: inline-flex; position: fixed; top: 10px; left: 10px; z-index: 31; }
+  .main .header { padding-left: 56px; }
+  .app.sidebar-open .sidebar {
+    display: flex; position: fixed; inset: 0 auto 0 0; z-index: 30;
+    width: min(var(--sidebar), 86vw); padding-top: 54px; box-shadow: var(--shadow);
+  }
+}
 
 /* ---------- sidebar ---------- */
 .brand { display: flex; align-items: center; justify-content: space-between; padding: 2px 6px; }
@@ -299,6 +310,9 @@ code, kbd, pre, .mono { font-family: var(--mono); }
 .statusbar .grow { flex: 1 1 auto; }
 .status-engine { display: inline-flex; align-items: center; gap: 7px; }
 .status-engine::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+.status-engine.is-error { color: var(--red); }
+/* An error is not told by colour alone: the dot becomes a "!". */
+.status-engine.is-error::before { content: "!"; width: auto; height: auto; border-radius: 0; background: none; font-weight: 700; }
 .privacy { color: var(--green); }
 .privacy.is-remote, .level-warn { color: var(--amber); accent-color: var(--amber); }
 .level-full { color: var(--red); accent-color: var(--red); }
@@ -965,3 +979,17 @@ html:not([data-platform="windows"]) .windows-only { display: none; }
 
 .sharing-clients { list-style: none; margin: 6px 0 10px; padding: 0; }
 .sharing-clients li { padding: 4px 0; }
+
+/* Models: a heading with a small button beside it. */
+.models-h-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+/* "⋯" and Appearance menus (menus.js), styled like the right-click menu. */
+.quick-menu { position: fixed; z-index: 40; min-width: 200px; }
+.quick-menu[hidden] { display: none; }
+.quick-menu .popup-item { display: flex; align-items: center; gap: 2px; }
+.quick-menu-check { display: inline-block; width: 1.3em; flex: none; }
+.quick-menu .popup-item.danger { color: var(--red); }
+.quick-menu-head { padding: 6px 12px 2px; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--faint); }
+.quick-menu-line { border: 0; border-top: 1px solid var(--border); margin: 4px 0; }
+/* Developer: rarely changed options fold away. */
+.dev-more > summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.dev-more[open] > summary { margin-bottom: 10px; }

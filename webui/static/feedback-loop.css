@@ -1,18 +1,21 @@
-/* Non-modal post-task check-in; never blocks the composer. */
+/* Non-modal post-task check-in: a slim line above the message box of its own page (Chats or Developer).
+   It sits in the page, so it never covers Send, Run or anything else. */
 .task-feedback {
-  position: fixed; right: 18px; bottom: 52px; z-index: 20;
-  width: min(360px, calc(100vw - 36px));
-  padding: 12px 14px; border-radius: var(--r-lg);
-  background: var(--raised); color: var(--text);
-  border: 1px solid var(--border-2); box-shadow: var(--shadow);
-  display: flex; flex-direction: column; gap: 10px;
+  width: 100%; max-width: var(--reading);
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px;
+  padding: 6px 8px 6px 14px; border-radius: var(--r-md);
+  background: var(--raised); color: var(--text); border: 1px solid var(--border);
+  font-size: 13px;
 }
 .task-feedback[hidden], .task-feedback [hidden] { display: none !important; }
-.task-feedback-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top: 8px; }
+.task-feedback > strong { font-weight: 600; }
+.task-feedback-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.task-feedback > .task-feedback-actions { margin-left: auto; }
+.task-feedback > div:not(.task-feedback-actions) { flex: 1 1 100%; }
 .task-feedback textarea {
-  width:100%; resize:vertical; min-height:60px; border-radius:var(--r-sm);
-  border:1px solid var(--border-2); background:var(--panel);
-  color:var(--text); padding:8px;
+  width: 100%; resize: vertical; min-height: 60px; border-radius: var(--r-sm);
+  border: 1px solid var(--border-2); background: var(--panel);
+  color: var(--text); padding: 8px;
 }
-.task-feedback small { display:block; color:var(--muted); margin:6px 0; }
-.task-feedback [role=alert] { color:var(--red); }
+.task-feedback small { display: block; color: var(--muted); margin: 6px 0; }
+.task-feedback [role=alert] { color: var(--red); }

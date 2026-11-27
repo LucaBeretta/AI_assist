@@ -2,11 +2,12 @@
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 import test_webui_app
 from app_core import shared_ai
-from peer_pairing import PairingHost, TrustStore, pair_with_host, verification_code
+from peer_pairing import PairingHost, TrustStore, pair_with_host, this_device_name, verification_code
 from test_shared_ai import FakeOllama
 
 
@@ -100,7 +101,7 @@ class SharedAIChatApiTests(unittest.TestCase):
         self.assertEqual(done["text"] if "text" in done else self.store.load(chat)["messages"][-1]["content"], "Ciao Luca")
         self.assertEqual(self.store.load(chat)["backend"], backend)
         self.assertEqual(self.calls, [])  # this computer's own Ollama was never asked
-        self.assertEqual(self.api.status_snapshot(chat)["engine"], "paired computer 127.0.0.1 ready")
+        self.assertEqual(self.api.status_snapshot(chat)["engine"], f"paired computer {(this_device_name() or '127.0.0.1').lower()} ready")
 
     def test_pictures_are_refused_for_a_paired_computer(self):
         chat = self.api.new_chat()["chat"]["id"]
@@ -112,3 +113,47 @@ class SharedAIChatApiTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DeviceNameTests(unittest.TestCase):
+    """Paired computers show people's names for them; the names never become identity or reach discovery."""
+
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.root = Path(folder.name)
+
+    def host(self):
+        host = PairingHost("127.0.0.1", self.root / "server")
+        host.start(advertise=False)
+        self.addCleanup(host.stop)
+        return host
+
+    def test_both_computers_learn_each_others_name_when_pairing(self):
+        host, client = self.host(), TrustStore(self.root / "client")
+        with patch("peer_pairing.socket.gethostname", return_value="Studio-PC.local"):
+            peer = pair_with_host("127.0.0.1", host.port, verification_code(host.fingerprint), host.window.open(), "mac1",
+                                  client, "Luca's MacBook\x07")
+        self.assertEqual(client.client_record(peer)["name"], "Studio-PC")
+        self.assertEqual(host.store.client_name("mac1"), "Luca's MacBook")  # control characters dropped
+        # A new address after rediscovery keeps the name; unpairing forgets it.
+        record = client.client_record(peer)
+        client.save_client(peer, record["fingerprint"], record["token"], "127.0.0.1", 4321)
+        self.assertEqual(client.client_record(peer)["name"], "Studio-PC")
+        host.store.revoke("mac1", server=True)
+        self.assertEqual(host.store.client_name("mac1"), "")
+
+    def test_an_older_client_without_a_name_still_pairs(self):
+        host, client = self.host(), TrustStore(self.root / "client")
+        peer = pair_with_host("127.0.0.1", host.port, verification_code(host.fingerprint), host.window.open(), "old1", client)
+        self.assertTrue(host.store.authenticate_client("old1", client.client_record(peer)["token"]))
+        self.assertEqual(host.store.client_name("old1"), "")
+
+    def test_names_are_short_printable_labels_and_discovery_keeps_the_generic_name(self):
+        from peer_pairing import device_name
+        self.assertEqual(device_name("x" * 100), "x" * 48)
+        self.assertLessEqual(len(device_name("\U0001F600" * 48).encode("utf-8")), 96)
+        self.assertEqual(device_name("  Mac\nmini  "), "Macmini")
+        for value in (None, 5, ["a"], "\x00\x01"):
+            self.assertEqual(device_name(value), "")
+        self.assertEqual(PairingHost("127.0.0.1", self.root / "other").name, "AI Assist")

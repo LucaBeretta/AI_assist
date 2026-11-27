@@ -80,6 +80,176 @@ vm.runInNewContext(fs.readFileSync(process.argv[1], 'utf8'), {
 '''
 
 
+VIEWPORT_CHECKS = r"""
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const folder = process.argv.at(-1);
+class Node {
+  constructor(tag) { this.tagName = tag; this.children = []; this.parent = null; this.attributes = {}; this.listeners = {}; this.style = {}; this.className = ''; this.textContent = ''; this.offsetLeft = 0; this.offsetTop = 0; this.offsetWidth = 0; this.offsetHeight = 0; }
+  get classList() {
+    const node = this, list = () => node.className.split(/\s+/).filter(Boolean);
+    return {
+      contains: name => list().includes(name),
+      add: name => { if (!list().includes(name)) node.className = [...list(), name].join(' '); },
+      remove: name => { node.className = list().filter(item => item !== name).join(' '); },
+      toggle: (name, force) => { const on = force ?? !list().includes(name); if (on) node.classList.add(name); else node.classList.remove(name); return on; },
+    };
+  }
+  append(...items) { for (const item of items) { item.parent = this; this.children.push(item); } }
+  prepend(...items) { for (const item of items.reverse()) { item.parent = this; this.children.unshift(item); } }
+  setAttribute(name, value) { this.attributes[name] = String(value); }
+  getAttribute(name) { return this.attributes[name] ?? null; }
+  removeAttribute(name) { delete this.attributes[name]; }
+  addEventListener(type, callback) { this.listeners[type] = callback; }
+  setPointerCapture(id) { this.captured = id; }
+  matches(selector) { return selector.split(',').map(item => item.trim()).some(item => item.startsWith('.') ? this.classList.contains(item.slice(1)) : this.tagName === item); }
+  closest(selector) { for (let node = this; node; node = node.parent) if (node.matches(selector)) return node; return null; }
+  querySelector(selector) { for (const child of this.children) { if (child.matches(selector)) return child; const found = child.querySelector(selector); if (found) return found; } return null; }
+  all(selector, out = []) { for (const child of this.children) { if (child.matches(selector)) out.push(child); child.all(selector, out); } return out; }
+}
+const make = (tag, className, box) => { const node = new Node(tag); node.className = className || ''; Object.assign(node, box || {}); return node; };
+
+// A fresh window with the real master switch (cockpit.js) and the viewport (viewport3d.js), in page order.
+function boot(items) {
+  const root = make('html'), observers = [];
+  root.setAttribute = (name, value) => {
+    const before = root.attributes[name];
+    root.attributes[name] = String(value);
+    if (before !== root.attributes[name]) for (const item of observers) if (item.filter.includes(name)) item.callback([{type: 'attributes', attributeName: name}]);
+  };
+  class MutationObserver {
+    constructor(callback) { this.callback = callback; }
+    observe(target, options) { assert.equal(target, root); this.filter = options.attributeFilter; observers.push(this); }
+  }
+  const app = make('div', 'app'), shell = make('div', 'shell', {clientWidth: 1300, clientHeight: 780});
+  const sidebar = make('aside', 'sidebar', {offsetLeft: 0, offsetTop: 0, offsetWidth: 264, offsetHeight: 780});
+  const main = make('main', 'main', {offsetLeft: 290, offsetTop: 0, offsetWidth: 1010, offsetHeight: 780});
+  const cube = make('button'), select = make('select');
+  shell.append(sidebar, main); app.append(shell); root.append(app);
+  const storage = new Map(items);
+  const saved = [];
+  const document = {
+    documentElement: root,
+    querySelector: selector => root.querySelector(selector),
+    getElementById: id => ({look: cube, 'setting-look': select})[id] || null,
+    createElement: tag => make(tag),
+    createElementNS: (_namespace, tag) => make(tag),
+  };
+  const window = {
+    localStorage: {getItem: key => storage.has(key) ? storage.get(key) : null, setItem: (key, value) => storage.set(key, String(value))},
+    requestAnimationFrame: callback => { callback(); return 1; },
+    addEventListener() {},
+    MutationObserver,
+    pywebview: {api: {set_web_preferences: async value => { saved.push(value); return {ok: true}; }}},
+  };
+  const context = vm.createContext({document, window, Math, Number, String, Object, JSON, Array, Boolean, Error, setTimeout});
+  for (const name of ['cockpit.js', 'viewport3d.js']) vm.runInContext(fs.readFileSync(path.join(folder, name), 'utf8'), context);
+  return {root, app, shell, sidebar, main, cube, select, storage, saved, view: window.viewport3d, lookui: window.lookui};
+}
+
+(async () => {
+  // Classic by default: nothing is tilted, the viewport controls are hidden and no camera is saved.
+  let page = boot([]);
+  const {root, app, shell, sidebar, main, cube, select, storage, saved, view} = page;
+  assert.equal(root.getAttribute('data-look'), 'classic');
+  assert.equal(view.look, 'classic');
+  assert.equal(shell.style.transform, '');
+  assert(!storage.has('aiassist-viewport-camera'));
+  assert.equal(app.children[0].className, 'vp-bar vp-only');
+  assert.equal(shell.all('.vp-slab').length, 2);
+
+  // Choosing "3D viewport" in Settings goes through the master switch, is saved like the other looks,
+  // and the stage gets the default camera. The cube shows as pressed.
+  select.value = 'viewport';
+  await select.listeners.change();
+  assert.equal(root.getAttribute('data-look'), 'viewport');
+  assert.equal(storage.get('aiassist-look'), 'viewport');
+  assert.equal(JSON.stringify(saved.at(-1)), '{"look":"viewport"}');
+  assert.equal(cube.attributes['aria-pressed'], 'true');
+  assert.equal(view.look, 'viewport');
+  assert.equal(shell.style.transform, 'scale3d(0.82,0.82,0.82) rotateX(-18deg) rotateY(14deg) translate3d(0px,0px,0px)');
+  assert(main.classList.contains('vp-selected'));
+  assert.equal(shell.querySelector('.vp-slab-side').style.width, '264px');
+
+  // The gizmo uses the same maths as the CSS: compare it with rotateX(-e) * rotateY(o) built from the CSS definitions.
+  const rad = degrees => degrees * Math.PI / 180;
+  const multiply = (a, b) => a.map(row => b[0].map((_, column) => row.reduce((sum, value, index) => sum + value * b[index][column], 0)));
+  const rotateX = a => [[1, 0, 0], [0, Math.cos(a), -Math.sin(a)], [0, Math.sin(a), Math.cos(a)]];
+  const rotateY = a => [[Math.cos(a), 0, Math.sin(a)], [0, 1, 0], [-Math.sin(a), 0, Math.cos(a)]];
+  for (const [yaw, elevation] of [[0, 0], [14, 18], [-90, 0], [37, 61], [180, 90]]) {
+    const matrix = multiply(rotateX(rad(-elevation)), rotateY(rad(yaw)));
+    const world = {x: [1, 0, 0], y: [0, 0, -1], z: [0, -1, 0]};
+    const axes = view.axes(yaw, elevation);
+    for (const name of ['x', 'y', 'z']) {
+      const expected = matrix.map(row => row.reduce((sum, value, index) => sum + value * world[name][index], 0));
+      axes[name].forEach((value, index) => assert(Math.abs(value - expected[index]) < 1e-9, name + ' ' + yaw + ' ' + elevation));
+    }
+  }
+
+  // The X ball shows the view from the right; Face selected squares the camera up to the sidebar.
+  const right = app.all('.vp-axis').find(item => item.getAttribute('data-axis') === 'x' && !item.classList.contains('vp-negative'));
+  right.listeners.click();
+  assert.equal(view.camera.view, 'right');
+  assert.equal(view.camera.yaw, -90);
+  sidebar.listeners.pointerdown({});
+  assert.equal(view.camera.panel, 'sidebar');
+  view.face();
+  assert.deepEqual([view.camera.view, view.camera.focus, view.camera.yaw, view.camera.elevation, view.camera.zoom], ['face', 'sidebar', -22, 0, 1]);
+  assert.match(shell.style.transform, /rotateY\(-22deg\) translate3d\(/);
+
+  // Dragging empty space orbits; dragging inside a panel never does.
+  view.show('front');
+  app.listeners.pointerdown({button: 0, target: main, pointerId: 1, clientX: 0, clientY: 0, preventDefault() {}});
+  app.listeners.pointermove({pointerId: 1, clientX: 200, clientY: 0});
+  assert.equal(view.camera.yaw, 0);
+  app.listeners.pointerdown({button: 0, target: shell, pointerId: 2, clientX: 0, clientY: 0, preventDefault() {}});
+  app.listeners.pointermove({pointerId: 2, clientX: 200, clientY: 100});
+  app.listeners.pointerup({pointerId: 2});
+  assert.deepEqual([view.camera.view, view.camera.yaw, view.camera.elevation], ['user', 50, 20]);
+  assert.equal(app.captured, 2);
+  assert.equal(JSON.parse(storage.get('aiassist-viewport-camera')).yaw, 50);
+
+  // A damaged saved camera falls back to safe values.
+  const restored = view.readCamera('{"view":"<b>","yaw":"x","elevation":-5,"zoom":99,"panel":"nav","grid":false}');
+  assert.deepEqual({...restored}, {view: 'perspective', yaw: 14, elevation: 0, zoom: 1.3, panel: 'main', focus: null, grid: false});
+  assert.equal(view.readCamera('not json').view, 'perspective');
+
+  // "Classic look" in the viewport bar goes back through the master switch and puts everything back.
+  await app.querySelector('.vp-bar').children.at(-1).listeners.click();
+  assert.equal(root.getAttribute('data-look'), 'classic');
+  assert.equal(JSON.stringify(saved.at(-1)), '{"look":"classic"}');
+  assert.equal(select.value, 'classic');
+  assert.equal(cube.attributes['aria-pressed'], 'false');
+  assert.equal(shell.style.transform, '');
+  assert(!sidebar.classList.contains('vp-selected') && !main.classList.contains('vp-selected'));
+  // Outside the viewport, clicks on empty space never orbit.
+  app.listeners.pointerdown({button: 0, target: shell, pointerId: 3, clientX: 0, clientY: 0, preventDefault() {}});
+  app.listeners.pointermove({pointerId: 3, clientX: 400, clientY: 0});
+  assert.equal(view.camera.yaw, 50);
+
+  // The cube's first step is the 3D cockpit, which leaves the stage alone. Back in the viewport the last
+  // camera is kept, and the cube's next step from there flattens the stage again.
+  await cube.listeners.click();
+  assert.equal(root.getAttribute('data-look'), 'cockpit');
+  assert.equal(shell.style.transform, '');
+  await page.lookui.setLook('viewport');
+  assert.match(shell.style.transform, /rotateY\(50deg\)/);
+  await cube.listeners.click();
+  assert.notEqual(root.getAttribute('data-look'), 'viewport');
+  assert.equal(shell.style.transform, '');
+
+  // After a restart the saved look and camera come back straight away.
+  page = boot([['aiassist-look', 'viewport'], ['aiassist-viewport-camera', '{"view":"top","yaw":0,"elevation":90,"zoom":0.8,"panel":"sidebar","grid":false}']]);
+  assert.equal(page.view.look, 'viewport');
+  assert.equal(page.shell.style.transform, 'scale3d(0.8,0.8,0.8) rotateX(-90deg) rotateY(0deg) translate3d(0px,0px,0px)');
+  assert(page.sidebar.classList.contains('vp-selected'));
+  assert(page.root.classList.contains('vp-grid-off'));
+  process.stdout.write('3D viewport checks passed\n');
+})().catch(error => { process.stderr.write(String(error && error.stack || error) + '\n'); process.exit(1); });
+"""
+
 class StaticTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
     def test_models_finish_reenables_download_and_fast_done_stays_finished(self):
@@ -114,6 +284,13 @@ class StaticTests(unittest.TestCase):
         assert.equal(attributes['data-look'],'cockpit');  // the saved look is applied on start
         assert.equal(elements.get('setting-look').value,'cockpit');
         await elements.get('look').listeners.click();
+        assert.equal(attributes['data-look'],'browser');  // the cube steps: classic, cockpit, browser, 3D viewport
+        assert.equal(JSON.stringify(saved.at(-1)),'{"look":"browser"}');
+        await elements.get('look').listeners.click();
+        assert.equal(attributes['data-look'],'viewport');
+        assert.equal(elements.get('look').attributes['aria-pressed'],'true');
+        assert.equal(JSON.stringify(saved.at(-1)),'{"look":"viewport"}');
+        await elements.get('look').listeners.click();
         assert.equal(attributes['data-look'],'classic');
         assert.equal(elements.get('look').attributes['aria-pressed'],'false');
         assert.equal(JSON.stringify(saved.at(-1)),'{"look":"classic"}');
@@ -142,7 +319,453 @@ class StaticTests(unittest.TestCase):
         elements.get('prompt').value='Hi';
         await elements.get('composer').listeners.submit({preventDefault(){}});
         assert.deepEqual(calls.at(-1).slice(1),['Hi','qwen3:32b',null,'peer:pc1']);
+        assert.equal(elements.get('footnote').textContent,'Runs on 192.168.1.20, over your home network. Answers can be wrong.');
+        elements.get('model').value='fake:7b';
+        await elements.get('model').listeners.change();
+        assert.equal(elements.get('footnote').textContent,'Everything runs on this computer. Answers can be wrong.');
         ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_open_in_opencode_uses_the_developer_folder_and_explains_when_missing(self):
+        self.run_scenario(r'''
+        const api=window.pywebview.api;
+        api.opencode_state=async()=>({ok:true,installed:false});
+        api.open_opencode=async (folder,model)=>{calls.push(['opencode',folder,model]);return {ok:true};};
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'opencode.js'),'utf8'),{document,window,String,Error});
+        await new Promise(resolve=>setImmediate(resolve));
+        assert.notEqual(elements.get('opencode-open').disabled,true);  // stays clickable: a click checks again
+        assert.match(elements.get('opencode-status').textContent,/opencode\.ai/);
+        api.opencode_state=async()=>({ok:true,installed:true});
+        await window.opencodeui.refresh();
+        assert.equal(elements.get('opencode-status').textContent,'');
+        document.getElementById('dev-project').value='  /home/luca/site  ';
+        document.getElementById('model').value='qwen3:8b';
+        await elements.get('opencode-open').listeners.click();
+        assert.equal(JSON.stringify(calls.at(-1)),'["opencode","/home/luca/site","qwen3:8b"]');
+        document.getElementById('model').value=JSON.stringify(['peer:pc','qwen3:32b']);
+        await elements.get('opencode-open').listeners.click();
+        assert.equal(JSON.stringify(calls.at(-1)),'["opencode","/home/luca/site",null]');  // only models on this computer
+        assert.equal(elements.get('opencode-status').textContent,'OpenCode opened in a new window.');
+        api.open_opencode=async()=>({ok:false,error:'Choose a project folder first.'});
+        await elements.get('opencode-open').listeners.click();
+        assert.equal(elements.get('opencode-status').textContent,'Choose a project folder first.');
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_new_chat_and_recent_chats_bring_the_chat_screen_to_the_front(self):
+        self.run_scenario(r'''
+        window.pywebview.api.new_chat = async () => ({ok:true,chat:{...structuredClone(saved),id:'chat-new',title:'New chat'}});
+        await window.listeners.pywebviewready();
+        await elements.get('nav-models').listeners.click();
+        assert.equal(elements.get('chat-view').hidden,true);
+        await elements.get('new-chat').listeners.click();
+        assert.equal(elements.get('chat-view').hidden,false);   // the new chat is on screen, not behind Models
+        assert.equal(elements.get('models-view').hidden,true);
+        await elements.get('nav-dev').listeners.click();
+        await elements.get('chats').children[0].children[0].listeners.click();
+        assert.equal(elements.get('chat-view').hidden,false);   // a recent chat opens on the Chats screen
+        assert.equal(elements.get('dev-view').hidden,true);
+        await elements.get('nav-models').listeners.click();
+        await elements.get('new-incognito').listeners.click();
+        assert.equal(elements.get('chat-view').hidden,false);
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_messages_and_errors_are_not_overwritten_by_the_live_status(self):
+        self.run_scenario(r'''
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'workspace.js'),'utf8'), {document,window,Map,Error,String,Number,Boolean,Array,Date,Math});
+        await window.listeners.pywebviewready();
+        const live = {ok:true,backend:'Ollama',engine_state:'ready',model_name:'fake:7b'};
+        window.app.notify('Chat deleted.');
+        window.workspaceui.renderStatus(live);
+        assert.equal(elements.get('status').textContent,'Chat deleted.');   // still readable after the 2-second refresh
+        assert.equal(window.app.statusHeld(),true);
+        window.app.notify('Ollama is not running.', {error:true});
+        window.workspaceui.renderStatus(live);
+        assert.equal(elements.get('status').textContent,'Ollama is not running.');
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_was_this_useful_sits_above_its_own_message_box_and_goes_away_when_moving_on(self):
+        self.run_scenario(r"""
+        // Each page's message-box area, with its form, as the real page has them.
+        const area = view => {
+          const wrap = new Element(), form = new Element('form');
+          wrap.children.push(form);
+          wrap.querySelector = selector => selector === 'form' ? form : null;
+          wrap.insertBefore = (node, before) => { wrap.children.splice(wrap.children.indexOf(before), 0, node); node.parentNode = wrap; };
+          document.getElementById(view).querySelector = selector => selector === '.composer-wrap' ? wrap : null;
+          return {wrap, form};
+        };
+        const chatArea = area('chat-view'), devArea = area('dev-view');
+        let titleChanged = null;
+        window.MutationObserver = class { constructor(callback) { titleChanged = callback; } observe() {} };
+        const conversation = document.getElementById('conversation');
+        Object.assign(conversation, {scrollHeight: 1000, scrollTop: 600, clientHeight: 400});
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'feedback-loop.js'),'utf8'),
+          {document,window,Set,Error,String,Number,Boolean,Array});
+        window.app.currentChat = () => ({id:'chat-a'});
+        document.getElementById('send').disabled = false;
+        document.getElementById('dev-run').disabled = false;
+        window.feedbackui.chat('chat-a', 1);
+        const chatLine = chatArea.wrap.children[0];
+        assert.equal(chatLine.id,'task-feedback');                // inside the chat page, just above its message box
+        assert.equal(chatArea.wrap.children[1],chatArea.form);
+        assert.equal(chatLine.hidden,false);
+        assert.equal(conversation.scrollTop,1000);                // the end of the answer stays in view
+        elements.get('prompt').value = 'Next question';
+        elements.get('composer').listeners.keydown({key:'Enter',shiftKey:false,isComposing:false,target:elements.get('prompt')});
+        assert.equal(chatLine.hidden,true);                       // sending with Enter moves on
+        window.feedbackui.chat('chat-a', 3);
+        assert.equal(chatLine.hidden,false);
+        window.feedbackui.developer('chat-a','task-1');
+        const devLine = devArea.wrap.children[0];
+        assert.equal(devLine.id,'task-feedback-dev');             // a Developer task asks above its own task box
+        assert.equal(devLine.hidden,false);
+        assert.equal(chatArea.wrap.children[0],chatLine);         // and leaves the Chats question where it is
+        assert.equal(chatLine.hidden,false);
+        document.getElementById('dev-task').value = 'Next task';
+        elements.get('dev-form').listeners.keydown({key:'Enter',ctrlKey:true,target:elements.get('dev-task')});
+        assert.equal(devLine.hidden,true);                        // running with Ctrl+Enter moves on
+        assert.equal(chatLine.hidden,false);
+        const [, notQuite] = chatLine.children[1].children;
+        notQuite.listeners.click();
+        window.feedbackui.chat('chat-a', 5);
+        assert.equal(chatLine.children[2].hidden,false);          // typing in "Not quite" is never interrupted
+        window.app.currentChat = () => ({id:'chat-b'});
+        titleChanged();
+        assert.equal(chatLine.hidden,true);                       // another chat: it no longer rates what is on screen
+        await elements.get('composer').listeners.submit({preventDefault(){}});
+        assert.equal(chatLine.hidden,true);
+        """)
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_new_chat_puts_the_cursor_in_the_message_box_and_a_deleted_chat_keeps_the_section(self):
+        self.run_scenario(r"""
+        let focused = 0;
+        elements.get('prompt').focus = () => { focused++; };
+        window.pywebview.api.new_chat = async () => ({ok:true,chat:{...structuredClone(saved),id:'chat-new',title:'New chat'}});
+        await window.listeners.pywebviewready();
+        await elements.get('nav-dev').listeners.click();
+        await elements.get('new-chat').listeners.click();
+        assert.equal(elements.get('chat-view').hidden,false);
+        assert.equal(focused,1);                                  // ready to type, also after Ctrl+N from another section
+        await elements.get('nav-models').listeners.click();
+        window.app.onEvent([{type:'chat_deleted',chat_id:'chat-a'},{type:'chat_deleted',chat_id:'chat-new'}]);
+        await new Promise(resolve => setImmediate(resolve));
+        await new Promise(resolve => setImmediate(resolve));
+        assert.equal(elements.get('models-view').hidden,false);   // replacing the last chat does not drag the person to Chats
+        assert.equal(elements.get('chat-view').hidden,true);
+        assert.equal(focused,1);
+        """)
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_an_error_that_ends_an_answer_stays_on_screen(self):
+        self.run_scenario(r"""
+        await window.listeners.pywebviewready();
+        const styles = new Set();
+        elements.get('status').classList = {toggle: (name, on) => { if (on) styles.add(name); else styles.delete(name); },
+                                            remove: name => styles.delete(name)};
+        elements.get('prompt').value = 'Hello';
+        await elements.get('composer').listeners.submit({preventDefault(){}});
+        window.app.onEvent([{type:'error',chat_id:'chat-a',stream_id:'stream-a',error:'Ollama stopped answering.'}]);
+        assert.equal(elements.get('status').textContent,'Ollama stopped answering.');
+        assert.equal(styles.has('is-error'),true);                // shown as an error: red, until the next click or key press
+        assert.equal(window.app.statusHeld(),true);
+        """)
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_developer_says_before_run_when_the_chosen_model_cannot_be_used(self):
+        self.run_scenario(r'''
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'developer.js'),'utf8'),
+          {document,window,Map,Set,Error,String,Number,Boolean,Array,Date,Math,JSON,Object,setTimeout,clearTimeout});
+        await window.listeners.pywebviewready();
+        let choice = {backend:'peer:pc1', name:'qwen3:32b'};
+        window.app.modelChoice = () => choice;
+        window.devui.onShow();
+        assert.match(elements.get('dev-status').textContent,/paired computer, which answers chats only/);
+        assert.equal(elements.get('dev-run').disabled,true);
+        assert.equal(elements.get('dev-choose-model').hidden,false);
+        await elements.get('dev-choose-model').listeners.click();
+        assert.equal(elements.get('chat-view').hidden,false);   // takes the person to the model list
+        choice = {backend:'Ollama', name:'qwen3:8b'};
+        window.devui.onShow();
+        assert.equal(elements.get('dev-status').textContent,'Model: qwen3:8b, on this computer.');
+        assert.equal(elements.get('dev-run').disabled,false);
+        assert.equal(elements.get('dev-choose-model').hidden,true);
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_developer_says_where_the_model_runs_and_why_run_is_greyed_out(self):
+        self.run_scenario(r"""
+        document.querySelector = () => null;
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'developer.js'),'utf8'),
+          {document,window,Map,Set,Error,String,Number,Boolean,Array,Date,Math,JSON,Object,setTimeout,clearTimeout});
+        const api = window.pywebview.api;
+        api.new_chat = async () => ({ok:true,chat:{id:'chat-a'}});
+        api.set_chat_model = async () => ({ok:true});
+        api.list_checkpoints = async () => ({ok:true,checkpoints:[]});
+        api.list_project_files = async () => ({ok:true,files:[]});
+        api.run_agent = async () => ({ok:true,task_id:'slow'});
+        await window.listeners.pywebviewready();
+        let choice = {backend:'Ollama', name:'gpt-oss:120b-cloud'};
+        let place = null;
+        window.app.modelChoice = () => choice;
+        window.workspaceui = {modelPlace: name => name === choice.name ? place : null, onEvent: () => false};
+        window.devui.onShow();
+        assert.equal(elements.get('dev-status').textContent,'Model: gpt-oss:120b-cloud, an Ollama cloud model: the task leaves this computer.');
+        choice = {backend:'Ollama', name:'qwen3:8b'};
+        place = 'remote server';
+        window.devui.onShow();
+        assert.equal(elements.get('dev-status').textContent,'Model: qwen3:8b, on a remote Ollama server: the task leaves this computer.');
+        place = 'local only';
+        window.devui.onShow();
+        assert.equal(elements.get('dev-status').textContent,'Model: qwen3:8b, on this computer.');
+        elements.get('dev-project').value = '/project';
+        elements.get('dev-task').value = 'Review project';
+        await elements.get('dev-form').listeners.submit({preventDefault(){}});
+        choice = {backend:'peer:pc1', name:'qwen3:32b'};         // the model changed in Chats while the task ran
+        window.app.onEvent([{type:'agent_done',task_id:'slow',chat_id:'chat-a',text:'Finished'}]);
+        assert.equal(elements.get('dev-run').disabled,true);
+        assert.match(elements.get('dev-status').textContent,/paired computer, which answers chats only/);
+        assert.equal(elements.get('dev-choose-model').hidden,false);
+        choice = {backend:'Ollama', name:'qwen3:8b'};
+        window.listeners.languagechange();                        // the note is written again in the new language
+        assert.equal(elements.get('dev-status').textContent,'Model: qwen3:8b, on this computer.');
+        """)
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_models_screen_rereads_this_computer_offline_and_goes_online_only_from_its_button(self):
+        self.run_scenario(r'''
+        const asks = [];
+        window.pywebview.api.recommend_models = async (refresh, online) => {
+          asks.push([refresh, online]);
+          return {ok:true,hardware:{gpus:[]},recommendations:[],checked:online === true};
+        };
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'models.js'),'utf8'),{document,window,Map,Set,Error,String,Number,Boolean,Array});
+        await window.listeners.pywebviewready();
+        await elements.get('nav-models').listeners.click();
+        await new Promise(resolve=>setImmediate(resolve));
+        await elements.get('nav-chats').listeners.click();
+        await elements.get('nav-models').listeners.click();
+        await new Promise(resolve=>setImmediate(resolve));
+        assert.deepEqual(asks,[[false,false],[false,false]]);   // each visit re-reads, never going online, not even the first
+        assert.match(elements.get('models-recommended').textContent,/click Check online for suggestions/);
+        await elements.get('models-check-online').listeners.click();
+        await new Promise(resolve=>setImmediate(resolve));
+        assert.deepEqual(asks.at(-1),[true,true]);              // only this button asks to go online
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_quality_review_saves_by_itself_and_needs_a_reviewer_first(self):
+        self.run_scenario(r'''
+        const saved = [];
+        window.pywebview.api.set_hybrid_settings = async (...args) => { saved.push(args); return {ok:true,hybrid:{enabled:args[0],review_model:args[1],manage_memory:args[2]}}; };
+        window.pywebview.api.update_status = async () => ({ok:true});
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'parity.js'),'utf8'),
+          {document,window,Map,Set,Error,String,Number,Boolean,Array,Date,Math,JSON,Object,setTimeout,clearTimeout});
+        await window.listeners.pywebviewready();
+        window.parityui.onState({hybrid:{enabled:false,review_model:'',manage_memory:true},colibri:{}});
+        await window.parityui.openSettings();
+        assert.equal(elements.get('hybrid-enabled').disabled,true);   // no reviewer model yet
+        elements.get('hybrid-model').value='colibri-8b';
+        elements.get('hybrid-model').listeners.input();
+        assert.equal(elements.get('hybrid-enabled').disabled,false);
+        elements.get('hybrid-enabled').checked=true;
+        await elements.get('hybrid-model').listeners.change();
+        assert.equal(JSON.stringify(saved.at(-1)),'[true,"colibri-8b",true]');
+        assert.equal(elements.get('hybrid-status').textContent,'Saved.');
+        // Picking another reviewer by clearing the field first keeps quality review on.
+        elements.get('hybrid-model').value='';
+        elements.get('hybrid-model').listeners.input();
+        assert.equal(elements.get('hybrid-enabled').disabled,true);
+        elements.get('hybrid-model').value='colibri-14b';
+        elements.get('hybrid-model').listeners.input();
+        assert.equal(elements.get('hybrid-enabled').checked,true);
+        await elements.get('hybrid-model').listeners.change();
+        assert.equal(JSON.stringify(saved.at(-1)),'[true,"colibri-14b",true]');
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_quality_review_never_saves_before_the_saved_settings_are_read(self):
+        self.run_scenario(r'''
+        const saved = [];
+        window.pywebview.api.set_hybrid_settings = async (...args) => { saved.push(args); return {ok:true,hybrid:{enabled:args[0],review_model:args[1],manage_memory:args[2]}}; };
+        window.pywebview.api.update_status = async () => ({ok:true});
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'parity.js'),'utf8'),
+          {document,window,Map,Set,Error,String,Number,Boolean,Array,Date,Math,JSON,Object,setTimeout,clearTimeout});
+        await window.parityui.openSettings();                     // the engine state has not arrived: the form is empty
+        elements.get('hybrid-memory').checked=false;
+        await elements.get('hybrid-memory').listeners.change();
+        assert.equal(saved.length,0);
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_status_bar_shows_how_full_the_context_is_outside_chats(self):
+        self.run_scenario(r"""
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'workspace.js'),'utf8'), {document,window,Map,Error,String,Number,Boolean,Array,Date,Math});
+        const value = {ok:true,backend:'Ollama',engine_state:'ready',model_name:'fake:7b',context:'2.1k / 8.2k',fraction:0.26};
+        document.getElementById('chat-view').hidden = false;
+        window.workspaceui.renderStatus(value);
+        assert.equal(elements.get('status-context-box').hidden,true);    // Chats has its own meter by the message box
+        document.getElementById('chat-view').hidden = true;
+        window.workspaceui.renderStatus(value);
+        assert.equal(elements.get('status-context-box').hidden,false);   // for example during a Developer task
+        assert.equal(elements.get('status-context').textContent,'2.1k / 8.2k');
+        """)
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_narrow_windows_open_the_sidebar_from_a_menu_button(self):
+        self.run_scenario(r'''
+        const classes = new Set();
+        const shell = {classList: {contains: name => classes.has(name), toggle: (name, on) => { if (on) classes.add(name); else classes.delete(name); }}};
+        const sidebar = new Element('aside');
+        sidebar.contains = node => node === sidebar || node === inside;
+        const inside = new Element('button');
+        const keys = [], downs = [];
+        const page = {...document, querySelector: selector => selector === '.app' ? shell : selector === '.sidebar' ? sidebar : null,
+          addEventListener: (type, callback) => (type === 'keydown' ? keys : downs).push(callback)};
+        const button = page.getElementById('open-sidebar');
+        button.contains = node => node === button;
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'sidebar-toggle.js'),'utf8'),
+          {document: page, window, String, Boolean});
+        await button.listeners.click();
+        assert.equal(classes.has('sidebar-open'),true);
+        assert.equal(button.attributes['aria-expanded'],'true');
+        sidebar.listeners.click({target: {closest: () => inside}});   // choosing Models (or anything) in it closes it
+        assert.equal(classes.has('sidebar-open'),false);
+        await button.listeners.click();
+        let stopped = false;
+        keys[0]({key:'Escape', preventDefault(){}, stopPropagation(){ stopped = true; }});
+        assert.equal(classes.has('sidebar-open'),false);
+        assert.equal(stopped,true);                                 // Escape does not also stop a running answer
+        await button.listeners.click();
+        downs[0]({target: new Element()});                          // a click elsewhere closes it
+        assert.equal(classes.has('sidebar-open'),false);
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_models_show_what_each_model_can_do_and_the_paired_computers_models(self):
+        self.run_scenario(r'''
+        const api = window.pywebview.api;
+        api.state = async () => ({ok:true, engine:'Ollama', host:'localhost', models:['qwen3:8b','gemma3:4b'], ollama:{models:['qwen3:8b','gemma3:4b']}, loaded:{}});
+        api.model_capabilities = async name => ({ok:true, metadata: name === 'qwen3:8b'
+          ? {capabilities:['completion','tools','thinking'], context_length:40960} : {capabilities:['completion','vision'], context_length:131072}});
+        api.shared_ai_models = async () => ({ok:true, computers:[{id:'pc', backend:'peer:pc', name:'Studio-PC', address:'192.168.1.20', state:'ready', models:['qwen3:32b']}]});
+        api.recommend_models = async () => ({ok:true, hardware:{gpus:[]}, recommendations:[]});
+        const chosen = [];
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'models.js'),'utf8'),{document,window,Map,Set,Error,String,Number,Boolean,Array});
+        await window.listeners.pywebviewready();
+        window.app.selectModel = async (...args) => { chosen.push(args); };
+        await elements.get('nav-models').listeners.click();
+        for (let i = 0; i < 6; i++) await new Promise(resolve => setImmediate(resolve));
+        const rows = elements.get('models-installed').children.map(row => row.textContent);
+        assert.match(rows.find(text => text.includes('qwen3:8b')), /can use tools \(needed by Developer\).*thinks before answering/);
+        assert.match(rows.find(text => text.includes('gemma3:4b')), /reads pictures/);
+        assert.equal(elements.get('models-shared-section').hidden, false);
+        const sharedRow = elements.get('models-shared').children[0];
+        assert.match(sharedRow.textContent, /qwen3:32b.*Studio-PC/);
+        await sharedRow.children[1].children[0].listeners.click();      // Use in chat
+        assert.equal(JSON.stringify(chosen.at(-1)), '["qwen3:32b","peer:pc"]');
+        assert.equal(elements.get('chat-view').hidden, false);
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_models_screen_says_when_ollama_is_off_and_never_waits_for_paired_computers(self):
+        self.run_scenario(r"""
+        const api = window.pywebview.api;
+        api.state = async () => ({ok:true, engine:'Ollama', host:'localhost', models:[], ollama:{models:[], loaded:{}, error:'Could not load models from http://localhost:11434.'}, loaded:{}});
+        api.recommend_models = async () => ({ok:true, hardware:{gpus:[]}, recommendations:[]});
+        let answer = null;
+        api.shared_ai_models = () => new Promise(resolve => { answer = resolve; });   // a paired computer that is slow to answer
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'models.js'),'utf8'),{document,window,Map,Set,Error,String,Number,Boolean,Array});
+        await window.listeners.pywebviewready();
+        await elements.get('nav-models').listeners.click();
+        for (let i = 0; i < 6; i++) await new Promise(resolve => setImmediate(resolve));
+        const text = () => elements.get('models-installed').textContent;
+        assert.match(text(), /Ollama is not running on this computer, so its models are not listed\. Start Ollama/);   // not "nothing installed"
+        assert.match(elements.get('models-status').textContent, /Could not load models/);
+        answer({ok:true, computers:[{id:'pc', backend:'peer:pc', state:'offline', models:[]}]});
+        for (let i = 0; i < 6; i++) await new Promise(resolve => setImmediate(resolve));
+        assert.doesNotMatch(text(), /Chats can use your paired computer/);    // paired, but sharing nothing right now
+        """)
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_model_abilities_follow_the_language_and_a_failed_read_is_tried_again(self):
+        self.run_scenario(r"""
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'strings.js'),'utf8'),{document,window,Object,String,RegExp});
+        const api = window.pywebview.api;
+        api.state = async () => ({ok:true, engine:'Ollama', host:'localhost', models:['qwen3:8b'], ollama:{models:['qwen3:8b']}, loaded:{}});
+        let reads = 0;
+        api.model_capabilities = async () => { reads++; return reads === 1 ? {ok:false, error:'Ollama is busy.'} : {ok:true, metadata:{capabilities:['tools']}}; };
+        api.recommend_models = async () => ({ok:true, hardware:{gpus:[]}, recommendations:[]});
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'models.js'),'utf8'),{document,window,Map,Set,Error,String,Number,Boolean,Array});
+        await window.listeners.pywebviewready();
+        const settle = async () => { for (let i = 0; i < 8; i++) await new Promise(resolve => setImmediate(resolve)); };
+        await elements.get('nav-models').listeners.click(); await settle();
+        assert.doesNotMatch(elements.get('models-installed').textContent, /tools/);
+        await elements.get('nav-chats').listeners.click();
+        await elements.get('nav-models').listeners.click(); await settle();     // the next visit reads it again
+        assert.equal(reads, 2);
+        assert.match(elements.get('models-installed').textContent, /can use tools/);
+        window.i18n.setLanguage('it');
+        await elements.get('nav-chats').listeners.click();
+        await elements.get('nav-models').listeners.click(); await settle();
+        assert.match(elements.get('models-installed').textContent, /usa strumenti/);   // in today's language
+        assert.equal(reads, 2);
+        """)
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_a_model_change_the_chat_refuses_puts_the_old_model_back(self):
+        self.run_scenario(r"""
+        await window.listeners.pywebviewready();
+        const before = elements.get('model').value;
+        window.pywebview.api.set_chat_model = async () => ({ok:false, error:'Wait for the reply to finish.'});
+        await assert.rejects(window.app.selectModel('qwen3:32b', 'peer:pc'));
+        assert.equal(elements.get('model').value, before);        // the chat kept its model, and so does the box
+        """)
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_the_firewall_lock_offers_only_what_fits_its_state(self):
+        self.run_scenario(r"""
+        const api = window.pywebview.api;
+        let firewall = null;
+        api.privacy_state = async () => ({ok:true, gate:{installed:true}, connections:[], firewall, busy:null});
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'security.js'),'utf8'),{document,window,Map,Set,Error,String,Number,Boolean,Array,Date,Math});
+        const shown = () => ['firewall-on','firewall-off','firewall-relock','firewall-lift-row'].filter(id => !document.getElementById(id).hidden);
+        const check = async (summary, buttons) => { firewall = summary; await window.securityui.openSettings(); assert.deepEqual(shown(), buttons, summary.state); };
+        const soon = Date.now() / 1000 + 600, gone = Date.now() / 1000 - 60;
+        await check({state:'off', detail:'Off. No Ollama or colibri programs were found to lock.', can_turn_on:false, has_rules:false}, ['firewall-on']);  // install Ollama, then click
+        assert.equal(elements.get('firewall-status').textContent, 'Off. No Ollama or colibri programs were found to lock.');   // the lock's own words, once
+        await check({state:'on', detail:'On.', has_rules:true, ollama_locked:true}, ['firewall-off','firewall-lift-row']);
+        await check({state:'lifted', detail:'Lifted until 14:30. It turns back on by itself.', has_rules:true, lift_until:soon}, ['firewall-off','firewall-relock']);
+        await check({state:'lifted', detail:'Lifted until 14:30. It turns back on by itself.', has_rules:true, lift_until:gone}, ['firewall-off','firewall-relock','firewall-lift-row']);
+        assert.equal(elements.get('firewall-status').textContent, 'The lift has ended. Checking the lock again…');
+        await check({state:'disabled', detail:'Off: the rules are turned off.', has_rules:true}, ['firewall-off','firewall-relock']);
+        await check({state:'partial', detail:'Partly on.', has_rules:true, ollama_locked:true, can_turn_on:true}, ['firewall-on','firewall-off','firewall-lift-row']);
+        await check({state:'changed', detail:'Changed outside AI Assist.', has_rules:true, ollama_locked:false, can_turn_on:true}, ['firewall-on','firewall-off']);
+        await check({state:'firewall off', detail:'Windows Firewall is off for: Public.', has_rules:false}, []);
+        await check({state:'ignored', detail:'Group Policy ignores local rules.', has_rules:true}, ['firewall-off']);
+        await check({state:'unavailable', detail:'The firewall lock needs Windows.'}, []);
+        await check({state:'error', detail:"Could not read Windows Firewall: Command '['powershell.exe', '-NoProfile', '-Command', 'Get-NetFirewallRule …']' timed out after 90 seconds"}, ['firewall-on','firewall-off']);
+        assert.equal(elements.get('firewall-status').textContent, 'Could not read Windows Firewall right now.');   // never the raw command
+        """)
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_the_firewall_lock_explains_itself_in_italian(self):
+        self.run_scenario(r"""
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'strings.js'),'utf8'),{document,window,Object,String,RegExp});
+        window.i18n.setLanguage('it');
+        const api = window.pywebview.api;
+        let firewall = {state:'lifted', detail:'Lifted until 14:30. It turns back on by itself.', has_rules:true, lift_until:Date.now() / 1000 + 600};
+        api.privacy_state = async () => ({ok:true, gate:{installed:true}, connections:[], firewall, busy:null});
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'security.js'),'utf8'),{document,window,Map,Set,Error,String,Number,Boolean,Array,Date,Math});
+        await window.securityui.openSettings();
+        assert.equal(elements.get('firewall-status').textContent, 'Sospeso fino alle 14:30. Si riattiva da solo.');
+        firewall = {state:'partial', detail:'Partly on: 2 program(s) are not locked, for example after an Ollama update. Turn the lock on again to cover them.', has_rules:true};
+        await window.securityui.openSettings();
+        assert.match(elements.get('firewall-status').textContent, /^Attivo in parte: 2 programmi/);
+        """)
 
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
     def test_reading_sharing_settings_never_enables_the_listener(self):
@@ -158,12 +781,14 @@ class StaticTests(unittest.TestCase):
         await elements.get('sharing-enabled').listeners.change();
         assert.deepEqual(calls.at(-1),['sharing',true,'192.168.1.10',false,false]);
         // Sharing AI is its own choice, and each paired device needs its own tick.
-        window.pywebview.api.sharing_state=async()=>({ok:true,enabled:true,usage:false,ai:true,host:null,peers:{},clients:[{id:'abcdef0123456789',ai:false}]});
+        window.pywebview.api.sharing_state=async()=>({ok:true,enabled:true,usage:false,ai:true,host:null,peers:{pc:{address:'192.168.1.20',port:1,name:'Studio-PC'}},clients:[{id:'abcdef0123456789',ai:false},{id:'fedcba9876543210',name:'Lucas-MacBook',ai:false}]});
         window.pywebview.api.allow_shared_ai=async (...args)=>{calls.push(['allow',...args]);return {ok:true,clients:[{id:'abcdef0123456789',ai:true}]};};
         await window.sharingui.openSettings();
         assert.equal(elements.get('sharing-ai').checked,true);
         assert.equal(elements.get('sharing-clients-box').hidden,false);
-        assert.match(elements.get('sharing-clients').textContent,/abcdef01/);
+        assert.match(elements.get('sharing-clients').textContent,/Device abcdef01 may use/);
+        assert.match(elements.get('sharing-clients').textContent,/Lucas-MacBook \(fedcba98\) may use/);
+        assert.match(elements.get('sharing-peers').textContent,/^Studio-PC \(pc\) · 192.168.1.20:1/);
         const tick=elements.get('sharing-clients').children[0].children[0].children[0];
         tick.checked=true;
         await tick.listeners.change();
@@ -382,13 +1007,12 @@ class StaticTests(unittest.TestCase):
         ''')
 
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
-    def test_parity_feedback_capabilities_and_deploy_confirmation(self):
+    def test_parity_feedback_updates_and_deploy_confirmation(self):
         self.run_scenario(r'''
         vm.runInNewContext(fs.readFileSync(require('node:path').join(require('node:path').dirname(process.argv[1]),'parity.js'),'utf8'), {document,window,Map,Set,Error,String,Number,Boolean,Array,URL});
         const api=window.pywebview.api;
         saved.messages=[{role:'assistant',content:'Old reply'}];
         api.prepare_feedback=async(...args)=>{calls.push(['feedback',...args]);return {ok:true,text:'Prepared follow-up'};};
-        api.model_capabilities=async()=>({ok:true,metadata:{capabilities:['tools'],context_length:32768}});
         api.check_updates=async()=>{
           window.app.onEvent([{type:'job_done',job_id:'u1',operation:'updates',result:{differences:[],download:'https://example.com/source.zip'}}]);
           return {ok:true,job_id:'u1'};
@@ -400,8 +1024,6 @@ class StaticTests(unittest.TestCase):
         await elements.get('feedback-form').listeners.submit({preventDefault(){}});
         assert.equal(elements.get('prompt').value,'Prepared follow-up');
         assert(!calls.some(item=>item[0]==='chat-a'));
-        await window.parityui.capabilities();
-        assert.match(elements.get('capabilities-result').textContent,/Reported/);
         await elements.get('check-updates').listeners.click();
         assert.match(elements.get('update-result').textContent,/matches upstream/);
         assert.equal(elements.get('check-updates').disabled,false);
@@ -742,6 +1364,95 @@ class StaticTests(unittest.TestCase):
         el('nav-chats').listeners.click();
         assert.equal(paused, true);
         URL.revokeObjectURL(el('photo-video-preview').src);
+        ''')
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_infinite_makes_a_clip_from_a_description_beside_the_other_sections(self):
+        self.run_scenario(r'''
+        await window.listeners.pywebviewready();
+        const el = id => document.getElementById(id);
+        const api = window.pywebview.api;
+        const root = require('node:path').dirname(process.argv[1]);
+        const settle = () => new Promise(resolve => setImmediate(resolve));
+        const modes = ['quick', 'wan', 'infinite'].map(name => el(`generate-${name}-mode`));
+        const pages = ['quick', 'wan', 'infinite'].map(name => el(`generate-${name}-panel`));
+        document.querySelectorAll = selector => selector === '.generate-modes button' ? modes : selector === '.generate-page' ? pages : [];
+        el('model').options = [{value: 'qwen3.5:9b'}, {value: '["Colibri","colibri-model"]'}, {value: 'llama3.2:3b'},
+                               {value: 'Not installed or no server available', disabled: true}];
+        el('model').value = 'llama3.2:3b';
+        window.i18n = {t: (message, values = {}) => message.replace(/\{(\w+)\}/g, (_, name) => String(values[name]))};
+        let quickPaused = false, wanPaused = false, infinitePaused = false;
+        window.quickAnimation = {pause() { quickPaused = true; }};
+        el('photo-video-preview').pause = () => { wanPaused = true; };
+        el('infinite-preview').pause = () => { infinitePaused = true; };
+        const calls = [];
+        let installed = true;
+        api.infinite_state = async () => ({ok: true, installed, making: false, lengths: [4, 8, 12]});
+        api.make_infinite_clip = async (...args) => { calls.push(['make', ...args]); return {ok: true, job_id: 'job-1', operation: 'infinite'}; };
+        api.infinite_clip = async clip => { calls.push(['clip', clip]); return {ok: true, video: 'Y2xpcA=='}; };
+        api.save_infinite_patch = async clip => { calls.push(['patch', clip]); return {ok: true, path: '/x/patch.inf'}; };
+        api.cancel_job = async id => { calls.push(['cancel', id]); return {ok: true, active: true}; };
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(root, 'infinite-studio.js'), 'utf8'), {
+          document, window, Blob, URL, atob, Uint8Array, Number, String, Error,
+        });
+
+        el('generate-infinite-mode').listeners.click();
+        await settle();
+        assert.equal(el('generate-infinite-panel').hidden, false);
+        assert.equal(el('generate-quick-panel').hidden, true);
+        assert.equal(el('generate-wan-panel').hidden, true);
+        assert.equal(el('generate-infinite-mode').attributes['aria-pressed'], 'true');
+        assert.equal(el('generate-quick-mode').attributes['aria-pressed'], 'false');
+        assert.equal(quickPaused && wanPaused, true);
+        assert.deepEqual(el('infinite-model').children.map(option => option.value), ['qwen3.5:9b', 'llama3.2:3b']);
+        assert.equal(el('infinite-model').value, 'llama3.2:3b');  // the chat's own model comes first
+        assert.equal(el('infinite-missing').hidden, true);
+        assert.equal(el('infinite-generate').disabled, false);
+
+        el('infinite-prompt').value = '  a star that spins  ';
+        el('infinite-length').value = '8';
+        await el('infinite-form').listeners.submit({preventDefault() {}});
+        assert.deepEqual(calls[0], ['make', 'a star that spins', 'llama3.2:3b', 8]);
+        assert.equal(el('infinite-generate').disabled, true);
+        assert.equal(el('infinite-stop').hidden, false);
+        assert.equal(el('infinite-progress').hidden, false);
+        window.app.onEvent([{type: 'job_progress', operation: 'infinite', job_id: 'job-1', stage: 'fixing', attempt: 1, rounds: 3}]);
+        assert.equal(el('infinite-status').textContent, 'Infinite found a problem. The model is fixing the patch (1 of 3)…');
+        window.app.onEvent([{type: 'job_progress', operation: 'infinite', job_id: 'other', stage: 'writing'}]);
+        assert.equal(el('infinite-status').textContent, 'Infinite found a problem. The model is fixing the patch (1 of 3)…');
+        el('infinite-stop').listeners.click();
+        assert.deepEqual(calls[1], ['cancel', 'job-1']);
+
+        window.app.onEvent([{type: 'job_done', operation: 'infinite', job_id: 'job-1', result: {
+          clip: 'c'.repeat(32), patch: 'infinite-patch 1\n', sound: false, warnings: ['a node is not wired'],
+          credit: 'Infinite, by Naman Soni (n1m21n), https://infinitedevices.org', seconds: 8}}]);
+        await settle(); await settle();
+        assert.deepEqual(calls[2], ['clip', 'c'.repeat(32)]);
+        assert.equal(el('infinite-preview').hidden, false);
+        assert.equal(el('infinite-empty').hidden, true);
+        assert.equal(el('infinite-actions').hidden, false);
+        assert.equal(el('infinite-patch').textContent, 'infinite-patch 1\n');
+        assert.equal(el('infinite-patch-details').hidden, false);
+        assert.equal(el('infinite-credit').textContent, 'Made with Infinite, by Naman Soni (n1m21n), https://infinitedevices.org');
+        assert.equal(el('infinite-status').textContent, 'Your clip is ready. It has no sound. Infinite says: a node is not wired');
+        assert.equal(el('infinite-generate').disabled, false);
+        assert.equal(el('infinite-stop').hidden, true);
+
+        await el('infinite-save-patch').listeners.click();
+        assert.deepEqual(calls[3], ['patch', 'c'.repeat(32)]);
+        assert.equal(el('infinite-status').textContent, 'Patch saved. Open it in Infinite to change it.');
+
+        el('generate-wan-mode').listeners.click();
+        assert.equal(el('generate-infinite-panel').hidden, true);
+        assert.equal(el('generate-infinite-mode').attributes['aria-pressed'], 'false');
+        assert.equal(infinitePaused, true);
+
+        installed = false;
+        el('generate-infinite-mode').listeners.click();
+        await settle();
+        assert.equal(el('infinite-missing').hidden, false);
+        assert.equal(el('infinite-generate').disabled, true);
+        URL.revokeObjectURL(el('infinite-preview').src);
         ''')
 
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
@@ -1088,6 +1799,13 @@ class StaticTests(unittest.TestCase):
                                 capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_the_viewport_look_follows_the_master_switch_and_matches_the_css_camera(self):
+        folder = Path(__file__).parent / "webui" / "static"
+        result = subprocess.run([shutil.which("node"), "-e", VIEWPORT_CHECKS, str(folder)],
+                                capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 if __name__ == "__main__":
     unittest.main()
