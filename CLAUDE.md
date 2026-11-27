@@ -67,11 +67,11 @@ This repository is public: keep secrets and personal details out of this file.
   - LucaBeretta/AI_assist#53: the LAN pairing buttons reach the app.
   - Branch `viewport-look`, merged without a pull request at the owner's request: a fourth look, the 3D viewport (`viewport3d.css`, `viewport3d.js`), with Perspective, Front, Top and Right views, orbit and zoom.
     The saved `look` is now `classic`, `cockpit`, `browser` or `viewport` (`webui/settings.py`).
-- Open on 27 November, for the owner to open as pull requests from the compare links:
-  - `clean-look`: a tidier chat screen. The sidebar's bottom buttons become one row, the context length moves into the context popover, and file pickers use the app's style.
+- Also merged on 27 November, on the owner's yes and without pull requests, after the full Windows suite on the combined result:
+  - `clean-look`: a tidier chat screen. The sidebar's bottom buttons are one row (Settings, then Appearance, Mission Control and Refresh models as icons), the context length sits in the context meter's popover, only the open chat has the accent dot, and file pickers use the app's style.
   - `3d-camera-recent-clips`: 3D Camera and Recent clips in Generate.
-  - `in-app-browser`: Web, a reading browser that opens pages through the internet popup.
-  - `3d-camera-recent-clips` and `in-app-browser` change the same line of `app.js`, so whichever is merged second needs a quick update.
+  - `in-app-browser`: Web, a reading browser that opens pages through the internet popup. Possible follow-up: in the browser look its own address bar sits under the look's top bar; one shared bar would look cleaner.
+  - `notes-2026-11-27`: these notes.
 - Waiting for Luigi's agreement: `review-long-functions` and `review-pairing-and-logging` (code tidy-ups). The second conflicts with #45 in `peer_pairing.py`.
 - `zencoder-work` belongs to Zencoder on the owner's PC.
 - Waiting on the owner: try the AI network on the real PC and Mac (steps in #41 and #42). Nothing has been checked between two real computers yet.
@@ -122,7 +122,7 @@ The design is local-network only: no cloud relay and no router port-forwarding. 
   - a `src/` and `tests/` layout;
   - splitting `webui/app.py` and `app.js`;
   - branch protection that requires the **Tests** and **macOS desktop checks** workflows to pass before merging into `main`.
-- A plain-language explainer page made for the owner: https://claude.ai/artifact/1UxAFvr1TBtcK1K6YjB6Q6. Last updated early on 24 November (Hugging Face, Blender, Generate, Mission Control, and the network's see / monitor / use steps). It does not yet cover #24, #28 or #31 to #53.
+- A plain-language explainer page made for the owner: https://claude.ai/artifact/1UxAFvr1TBtcK1K6YjB6Q6. Last updated early on 24 November (Hugging Face, Blender, Generate, Mission Control, and the network's see / monitor / use steps). It does not yet cover #24, #28, #31 to #53, or the branches merged on 27 November.
 
 ## Running the app in a cloud Linux container
 
