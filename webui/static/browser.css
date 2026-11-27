@@ -69,4 +69,8 @@
 @media (max-width: 760px) {
   .browser-tab { flex-basis: 44px; padding: 0 12px; }
   .browser-tab span, .browser-address-hint { display: none; }
+  /* The menu button (styles.css) sits at the top left: the tabs start after it instead of under it,
+     and the page header below no longer needs room for it. */
+  :root[data-look="browser"] .browser-tabs { padding-left: 52px; }
+  :root[data-look="browser"] .main .header { padding-left: 20px; }
 }
