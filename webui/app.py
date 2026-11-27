@@ -38,6 +38,7 @@ from webui.status import StatusPush
 from status_values import snapshot_values, generation_rate, is_cloud_model, is_local
 from webui.local_files import write_bytes
 from webui.prompts import PromptStore
+from webui.recent_clips import RecentClips, video_header_matches
 from webui.colibri import ColibriService
 from webui.api_utils import json_method as _json_method
 from webui.jobs import Jobs
@@ -124,6 +125,9 @@ class Api(FeedbackApi, SharingApi, PrivacyApi, ParityApi, CharacterApi, OpenCode
         self._status_chat = None
         self._status = StatusPush(self.status_snapshot, self._bridge.emit)
         self._prompts = PromptStore(self._store.directory)
+        self._recent_clips = RecentClips(self._store.directory)
+        self._video_jobs_lock = threading.Lock()
+        self._video_jobs = {}
         self._colibri = colibri if colibri is not None else ColibriService(self._store.directory)
         self._jobs = Jobs(self._bridge.emit)
         self._hybrid = hybrid_settings(self._store.directory)
@@ -142,14 +146,51 @@ class Api(FeedbackApi, SharingApi, PrivacyApi, ParityApi, CharacterApi, OpenCode
 
     @_json_method
     def start_photo_video(self, photo, prompt, portrait=False):
-        return {"ok": True, "job": photo_video.start(photo, prompt, portrait)}
+        job = photo_video.start(photo, prompt, portrait)
+        with self._video_jobs_lock:
+            if len(self._video_jobs) >= 64:
+                self._video_jobs.pop(next(iter(self._video_jobs)))
+            self._video_jobs[job] = (prompt.strip(), portrait is True)
+        return {"ok": True, "job": job}
 
     @_json_method
     def photo_video_status(self, job):
-        return {"ok": True, **photo_video.status(job)}
+        result = photo_video.status(job)
+        if result["ready"]:
+            with self._video_jobs_lock:
+                generation = self._video_jobs.get(job)
+                if generation is not None:
+                    try:
+                        self._recent_clips.remember_wan(job, result, *generation)
+                    except (OSError, ValueError, RuntimeError):
+                        log.warning("Could not add generated video to Recent clips.", exc_info=True)
+                        result["history_error"] = True
+                    else:
+                        self._video_jobs.pop(job)
+        return {"ok": True, **result}
+
+    @_json_method
+    def list_recent_clips(self):
+        return {"ok": True, "clips": self._recent_clips.list()}
+
+    @_json_method
+    def load_recent_clip(self, clip_id):
+        return {"ok": True, **self._recent_clips.load(clip_id)}
+
+    @_json_method
+    def open_recent_clip(self, clip_id):
+        self._recent_clips.open(clip_id, self._desktop.open_file)
+        return {"ok": True}
 
     @_json_method
     def save_quick_animation(self, video_base64, mime_type):
+        return self._save_recorded_video(video_base64, mime_type, "quick-animation", "quick")
+
+    @_json_method
+    def save_camera_clip(self, video_base64, mime_type):
+        return self._save_recorded_video(video_base64, mime_type, "camera-scene", "camera")
+
+    def _save_recorded_video(self, video_base64, mime_type, filename, kind):
         if not isinstance(mime_type, str) or mime_type not in {"video/mp4", "video/webm"}:
             raise ValueError("Choose an MP4 or WebM animation.")
         limit = photo_video.MAX_VIDEO_BYTES
@@ -162,15 +203,10 @@ class Api(FeedbackApi, SharingApi, PrivacyApi, ParityApi, CharacterApi, OpenCode
         if len(data) > limit:
             raise ValueError("The animation must be 24 MiB or smaller.")
 
-        if mime_type == "video/mp4":
-            suffix = ".mp4"
-            valid = data[4:8] == b"ftyp" and 16 <= int.from_bytes(data[:4], "big") <= len(data)
-        else:
-            suffix = ".webm"
-            valid = data.startswith(b"\x1a\x45\xdf\xa3") and b"\x42\x82\x84webm" in data[:64]
-        if not valid:
+        if not video_header_matches(data, len(data), mime_type):
             raise ValueError("The recording does not match the selected video format.")
-        return self._save_local_file(f"quick-animation{suffix}", data, suffix=suffix)
+        suffix = ".mp4" if mime_type == "video/mp4" else ".webm"
+        return self._save_local_file(f"{filename}{suffix}", data, suffix=suffix, clip_kind=kind)
 
     def _hourly_context(self):
         with self._lock:
@@ -591,7 +627,7 @@ class Api(FeedbackApi, SharingApi, PrivacyApi, ParityApi, CharacterApi, OpenCode
             raise ValueError("Choose a file name without a directory or special characters.")
         return self._save_local_file(suggested_name, data)
 
-    def _save_local_file(self, suggested_name, data, *, suffix=None):
+    def _save_local_file(self, suggested_name, data, *, suffix=None, clip_kind=None):
         with self._lock:
             if self._closed:
                 raise RuntimeError("The web UI is closing.")
@@ -601,11 +637,18 @@ class Api(FeedbackApi, SharingApi, PrivacyApi, ParityApi, CharacterApi, OpenCode
         path = Path(selection[0] if isinstance(selection, (tuple, list)) else selection).expanduser().absolute()
         if suffix is not None and path.suffix.lower() != suffix:
             raise ValueError(f"Use a file name ending in {suffix}.")
+        result = {"ok": True, "path": str(path)}
         with self._lock:
             if self._closed:
                 raise RuntimeError("The web UI is closing.")
             write_bytes(path, data)
-        return {"ok": True, "path": str(path)}
+            if clip_kind is not None:
+                try:
+                    self._recent_clips.remember_recording(result["path"], kind=clip_kind)
+                except (OSError, ValueError, RuntimeError):
+                    log.warning("Could not add saved animation to Recent clips.", exc_info=True)
+                    result["history_error"] = True
+        return result
 
     @_json_method
     def preview_file(self, project, path):

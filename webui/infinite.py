@@ -107,7 +107,7 @@ class InfiniteApi:
     @json_method
     def save_infinite_clip(self, clip):
         data = self._infinite_file(clip, "clip.mp4", infinite_engine.MAX_VIDEO_BYTES)
-        return self._save_local_file("infinite-clip.mp4", data, suffix=".mp4")
+        return self._save_local_file("infinite-clip.mp4", data, suffix=".mp4", clip_kind="infinite")
 
     @json_method
     def save_infinite_patch(self, clip):

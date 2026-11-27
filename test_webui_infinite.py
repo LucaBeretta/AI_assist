@@ -82,6 +82,8 @@ class InfiniteApiTests(unittest.TestCase):
             self.api._desktop.save_file = lambda name: (str(target),)
             self.assertEqual(self.api.save_infinite_clip(result["clip"])["path"], str(target))
             self.assertEqual(target.read_bytes(), MP4)
+            [recent] = self.api.list_recent_clips()["clips"]  # Generate > Recent clips lists it too
+            self.assertEqual((recent["kind"], recent["name"]), ("infinite", "mine.mp4"))
             self.api._desktop.save_file = lambda name: (str(Path(folder) / "mine.inf"),)
             self.api.save_infinite_patch(result["clip"])
             self.assertEqual((Path(folder) / "mine.inf").read_text(encoding="utf-8"), "infinite-patch 1\n")

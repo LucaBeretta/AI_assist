@@ -63,6 +63,8 @@
       el("empty").hidden = true;
       preview.hidden = false;
       status.textContent = `${t("Saved in ComfyUI’s output/ai-assist folder.")} ${result.name}`;
+      if (result.history_error) status.textContent += ` ${t("Recent clips could not be updated.")}`;
+      window.recentClips?.refreshIfVisible();
     } catch (error) {
       status.textContent = t(error.message);
     } finally {

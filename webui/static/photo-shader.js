@@ -45,41 +45,12 @@ void main() {
   color = vec4(pixel.rgb + vec3(0.06) * (1.0 - pixel.a), 1.0);
 }`;
 
-  function compile(gl, type, source) {
-    const shader = gl.createShader(type);
-    if (!shader) throw new Error("Could not create a WebGL shader.");
-    gl.shaderSource(shader, source);
-    gl.compileShader(shader);
-    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-      gl.deleteShader(shader);
-      throw new Error("Could not compile the photo animation shader.");
-    }
-    return shader;
-  }
-
-  function makeProgram(gl) {
-    const program = gl.createProgram();
-    if (!program) throw new Error("Could not create a WebGL program.");
-    let vertex;
-    let fragment;
-    try {
-      vertex = compile(gl, gl.VERTEX_SHADER, vertexSource);
-      fragment = compile(gl, gl.FRAGMENT_SHADER, fragmentSource);
-      gl.attachShader(program, vertex);
-      gl.attachShader(program, fragment);
-      gl.linkProgram(program);
-      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-        throw new Error("Could not link the photo animation shader.");
-      }
-      return program;
-    } catch (error) {
-      gl.deleteProgram(program);
-      throw error;
-    } finally {
-      if (vertex) gl.deleteShader(vertex);
-      if (fragment) gl.deleteShader(fragment);
-    }
-  }
+  const programErrors = {
+    shader: "Could not create a WebGL shader.",
+    compile: "Could not compile the photo animation shader.",
+    program: "Could not create a WebGL program.",
+    link: "Could not link the photo animation shader.",
+  };
 
   function create(canvas) {
     const gl = canvas.getContext("webgl2", {
@@ -90,7 +61,7 @@ void main() {
     });
     if (!gl) throw new Error("WebGL 2 is required for Quick animation.");
 
-    const program = makeProgram(gl);
+    const program = window.webglProgram.create(gl, vertexSource, fragmentSource, programErrors);
     const texture = gl.createTexture();
     if (!texture) {
       gl.deleteProgram(program);

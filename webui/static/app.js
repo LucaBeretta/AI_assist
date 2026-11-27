@@ -1309,9 +1309,14 @@ window.app = (() => {
       element(view).hidden = key !== name;
       if (nav) element(nav).setAttribute("aria-current", key === name ? "page" : "false");
     }
-    if (name !== "generate") {
+    if (name === "generate") {
+      window.cameraStudio?.showIfVisible();
+      window.recentClips?.refreshIfVisible();
+    } else {
       element("photo-video-preview").pause?.();
       window.quickAnimation?.pause();
+      window.cameraStudio?.pause();
+      window.recentClips?.pause();
     }
     if (name === "dev") window.devui?.onShow?.();
     if (name === "models") window.modelsui?.onShow?.();
@@ -1320,6 +1325,24 @@ window.app = (() => {
   element("nav-dev").addEventListener("click", () => showView("dev"));
   element("nav-models").addEventListener("click", () => showView("models"));
   element("nav-generate").addEventListener("click", () => showView("generate"));
+
+  const generationModes = ["quick", "wan", "camera", "recent"];
+  function showGenerationMode(name) {
+    for (const mode of generationModes) {
+      const active = mode === name;
+      element(`generate-${mode}-mode`).setAttribute("aria-pressed", String(active));
+      element(`generate-${mode}-panel`).hidden = !active;
+    }
+    if (name !== "quick") window.quickAnimation?.pause();
+    if (name !== "wan") element("photo-video-preview").pause?.();
+    if (name === "camera") window.cameraStudio?.showIfVisible();
+    else window.cameraStudio?.pause();
+    if (name === "recent") window.recentClips?.refreshIfVisible();
+    else window.recentClips?.pause();
+  }
+  for (const mode of generationModes) {
+    element(`generate-${mode}-mode`).addEventListener("click", () => showGenerationMode(mode));
+  }
   // Mission Control opens the live Compute window (for a second screen); it is not a view in this window.
   const openMissionControl = () => call("open_compute_window").catch(showError);
   element("open-mission-control").addEventListener("click", openMissionControl);
