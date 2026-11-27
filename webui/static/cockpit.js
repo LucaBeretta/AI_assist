@@ -1,9 +1,9 @@
-/* Master switch between the looks: classic, the 3D cockpit and the browser look.
+/* Master switch between the looks: classic, the 3D cockpit, the browser look and the 3D viewport (viewport3d.js).
    Saved in AI Assist's settings file (webui.settings), with a per-window copy so the page opens in the right look. */
 "use strict";
 window.lookui = (() => {
   const root = document.documentElement;
-  const looks = ["classic", "cockpit", "browser"];
+  const looks = ["classic", "cockpit", "browser", "viewport"];
   const el = id => document.getElementById(id);
   const api = () => window.pywebview?.api;
   function show(name) {
@@ -21,7 +21,7 @@ window.lookui = (() => {
     return look;
   }
   const current = () => looks.includes(root?.getAttribute?.("data-look")) ? root.getAttribute("data-look") : "classic";
-  // The cube steps through the looks: classic, 3D cockpit, browser, then classic again.
+  // The cube steps through the looks in order, then back to classic.
   const toggle = () => setLook(looks[(looks.indexOf(current()) + 1) % looks.length]);
   async function loadSaved() {
     try {

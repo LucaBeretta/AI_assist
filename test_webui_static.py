@@ -80,6 +80,176 @@ vm.runInNewContext(fs.readFileSync(process.argv[1], 'utf8'), {
 '''
 
 
+VIEWPORT_CHECKS = r"""
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const folder = process.argv.at(-1);
+class Node {
+  constructor(tag) { this.tagName = tag; this.children = []; this.parent = null; this.attributes = {}; this.listeners = {}; this.style = {}; this.className = ''; this.textContent = ''; this.offsetLeft = 0; this.offsetTop = 0; this.offsetWidth = 0; this.offsetHeight = 0; }
+  get classList() {
+    const node = this, list = () => node.className.split(/\s+/).filter(Boolean);
+    return {
+      contains: name => list().includes(name),
+      add: name => { if (!list().includes(name)) node.className = [...list(), name].join(' '); },
+      remove: name => { node.className = list().filter(item => item !== name).join(' '); },
+      toggle: (name, force) => { const on = force ?? !list().includes(name); if (on) node.classList.add(name); else node.classList.remove(name); return on; },
+    };
+  }
+  append(...items) { for (const item of items) { item.parent = this; this.children.push(item); } }
+  prepend(...items) { for (const item of items.reverse()) { item.parent = this; this.children.unshift(item); } }
+  setAttribute(name, value) { this.attributes[name] = String(value); }
+  getAttribute(name) { return this.attributes[name] ?? null; }
+  removeAttribute(name) { delete this.attributes[name]; }
+  addEventListener(type, callback) { this.listeners[type] = callback; }
+  setPointerCapture(id) { this.captured = id; }
+  matches(selector) { return selector.split(',').map(item => item.trim()).some(item => item.startsWith('.') ? this.classList.contains(item.slice(1)) : this.tagName === item); }
+  closest(selector) { for (let node = this; node; node = node.parent) if (node.matches(selector)) return node; return null; }
+  querySelector(selector) { for (const child of this.children) { if (child.matches(selector)) return child; const found = child.querySelector(selector); if (found) return found; } return null; }
+  all(selector, out = []) { for (const child of this.children) { if (child.matches(selector)) out.push(child); child.all(selector, out); } return out; }
+}
+const make = (tag, className, box) => { const node = new Node(tag); node.className = className || ''; Object.assign(node, box || {}); return node; };
+
+// A fresh window with the real master switch (cockpit.js) and the viewport (viewport3d.js), in page order.
+function boot(items) {
+  const root = make('html'), observers = [];
+  root.setAttribute = (name, value) => {
+    const before = root.attributes[name];
+    root.attributes[name] = String(value);
+    if (before !== root.attributes[name]) for (const item of observers) if (item.filter.includes(name)) item.callback([{type: 'attributes', attributeName: name}]);
+  };
+  class MutationObserver {
+    constructor(callback) { this.callback = callback; }
+    observe(target, options) { assert.equal(target, root); this.filter = options.attributeFilter; observers.push(this); }
+  }
+  const app = make('div', 'app'), shell = make('div', 'shell', {clientWidth: 1300, clientHeight: 780});
+  const sidebar = make('aside', 'sidebar', {offsetLeft: 0, offsetTop: 0, offsetWidth: 264, offsetHeight: 780});
+  const main = make('main', 'main', {offsetLeft: 290, offsetTop: 0, offsetWidth: 1010, offsetHeight: 780});
+  const cube = make('button'), select = make('select');
+  shell.append(sidebar, main); app.append(shell); root.append(app);
+  const storage = new Map(items);
+  const saved = [];
+  const document = {
+    documentElement: root,
+    querySelector: selector => root.querySelector(selector),
+    getElementById: id => ({look: cube, 'setting-look': select})[id] || null,
+    createElement: tag => make(tag),
+    createElementNS: (_namespace, tag) => make(tag),
+  };
+  const window = {
+    localStorage: {getItem: key => storage.has(key) ? storage.get(key) : null, setItem: (key, value) => storage.set(key, String(value))},
+    requestAnimationFrame: callback => { callback(); return 1; },
+    addEventListener() {},
+    MutationObserver,
+    pywebview: {api: {set_web_preferences: async value => { saved.push(value); return {ok: true}; }}},
+  };
+  const context = vm.createContext({document, window, Math, Number, String, Object, JSON, Array, Boolean, Error, setTimeout});
+  for (const name of ['cockpit.js', 'viewport3d.js']) vm.runInContext(fs.readFileSync(path.join(folder, name), 'utf8'), context);
+  return {root, app, shell, sidebar, main, cube, select, storage, saved, view: window.viewport3d, lookui: window.lookui};
+}
+
+(async () => {
+  // Classic by default: nothing is tilted, the viewport controls are hidden and no camera is saved.
+  let page = boot([]);
+  const {root, app, shell, sidebar, main, cube, select, storage, saved, view} = page;
+  assert.equal(root.getAttribute('data-look'), 'classic');
+  assert.equal(view.look, 'classic');
+  assert.equal(shell.style.transform, '');
+  assert(!storage.has('aiassist-viewport-camera'));
+  assert.equal(app.children[0].className, 'vp-bar vp-only');
+  assert.equal(shell.all('.vp-slab').length, 2);
+
+  // Choosing "3D viewport" in Settings goes through the master switch, is saved like the other looks,
+  // and the stage gets the default camera. The cube shows as pressed.
+  select.value = 'viewport';
+  await select.listeners.change();
+  assert.equal(root.getAttribute('data-look'), 'viewport');
+  assert.equal(storage.get('aiassist-look'), 'viewport');
+  assert.equal(JSON.stringify(saved.at(-1)), '{"look":"viewport"}');
+  assert.equal(cube.attributes['aria-pressed'], 'true');
+  assert.equal(view.look, 'viewport');
+  assert.equal(shell.style.transform, 'scale3d(0.82,0.82,0.82) rotateX(-18deg) rotateY(14deg) translate3d(0px,0px,0px)');
+  assert(main.classList.contains('vp-selected'));
+  assert.equal(shell.querySelector('.vp-slab-side').style.width, '264px');
+
+  // The gizmo uses the same maths as the CSS: compare it with rotateX(-e) * rotateY(o) built from the CSS definitions.
+  const rad = degrees => degrees * Math.PI / 180;
+  const multiply = (a, b) => a.map(row => b[0].map((_, column) => row.reduce((sum, value, index) => sum + value * b[index][column], 0)));
+  const rotateX = a => [[1, 0, 0], [0, Math.cos(a), -Math.sin(a)], [0, Math.sin(a), Math.cos(a)]];
+  const rotateY = a => [[Math.cos(a), 0, Math.sin(a)], [0, 1, 0], [-Math.sin(a), 0, Math.cos(a)]];
+  for (const [yaw, elevation] of [[0, 0], [14, 18], [-90, 0], [37, 61], [180, 90]]) {
+    const matrix = multiply(rotateX(rad(-elevation)), rotateY(rad(yaw)));
+    const world = {x: [1, 0, 0], y: [0, 0, -1], z: [0, -1, 0]};
+    const axes = view.axes(yaw, elevation);
+    for (const name of ['x', 'y', 'z']) {
+      const expected = matrix.map(row => row.reduce((sum, value, index) => sum + value * world[name][index], 0));
+      axes[name].forEach((value, index) => assert(Math.abs(value - expected[index]) < 1e-9, name + ' ' + yaw + ' ' + elevation));
+    }
+  }
+
+  // The X ball shows the view from the right; Face selected squares the camera up to the sidebar.
+  const right = app.all('.vp-axis').find(item => item.getAttribute('data-axis') === 'x' && !item.classList.contains('vp-negative'));
+  right.listeners.click();
+  assert.equal(view.camera.view, 'right');
+  assert.equal(view.camera.yaw, -90);
+  sidebar.listeners.pointerdown({});
+  assert.equal(view.camera.panel, 'sidebar');
+  view.face();
+  assert.deepEqual([view.camera.view, view.camera.focus, view.camera.yaw, view.camera.elevation, view.camera.zoom], ['face', 'sidebar', -22, 0, 1]);
+  assert.match(shell.style.transform, /rotateY\(-22deg\) translate3d\(/);
+
+  // Dragging empty space orbits; dragging inside a panel never does.
+  view.show('front');
+  app.listeners.pointerdown({button: 0, target: main, pointerId: 1, clientX: 0, clientY: 0, preventDefault() {}});
+  app.listeners.pointermove({pointerId: 1, clientX: 200, clientY: 0});
+  assert.equal(view.camera.yaw, 0);
+  app.listeners.pointerdown({button: 0, target: shell, pointerId: 2, clientX: 0, clientY: 0, preventDefault() {}});
+  app.listeners.pointermove({pointerId: 2, clientX: 200, clientY: 100});
+  app.listeners.pointerup({pointerId: 2});
+  assert.deepEqual([view.camera.view, view.camera.yaw, view.camera.elevation], ['user', 50, 20]);
+  assert.equal(app.captured, 2);
+  assert.equal(JSON.parse(storage.get('aiassist-viewport-camera')).yaw, 50);
+
+  // A damaged saved camera falls back to safe values.
+  const restored = view.readCamera('{"view":"<b>","yaw":"x","elevation":-5,"zoom":99,"panel":"nav","grid":false}');
+  assert.deepEqual({...restored}, {view: 'perspective', yaw: 14, elevation: 0, zoom: 1.3, panel: 'main', focus: null, grid: false});
+  assert.equal(view.readCamera('not json').view, 'perspective');
+
+  // "Classic look" in the viewport bar goes back through the master switch and puts everything back.
+  await app.querySelector('.vp-bar').children.at(-1).listeners.click();
+  assert.equal(root.getAttribute('data-look'), 'classic');
+  assert.equal(JSON.stringify(saved.at(-1)), '{"look":"classic"}');
+  assert.equal(select.value, 'classic');
+  assert.equal(cube.attributes['aria-pressed'], 'false');
+  assert.equal(shell.style.transform, '');
+  assert(!sidebar.classList.contains('vp-selected') && !main.classList.contains('vp-selected'));
+  // Outside the viewport, clicks on empty space never orbit.
+  app.listeners.pointerdown({button: 0, target: shell, pointerId: 3, clientX: 0, clientY: 0, preventDefault() {}});
+  app.listeners.pointermove({pointerId: 3, clientX: 400, clientY: 0});
+  assert.equal(view.camera.yaw, 50);
+
+  // The cube's first step is the 3D cockpit, which leaves the stage alone. Back in the viewport the last
+  // camera is kept, and the cube's next step from there flattens the stage again.
+  await cube.listeners.click();
+  assert.equal(root.getAttribute('data-look'), 'cockpit');
+  assert.equal(shell.style.transform, '');
+  await page.lookui.setLook('viewport');
+  assert.match(shell.style.transform, /rotateY\(50deg\)/);
+  await cube.listeners.click();
+  assert.notEqual(root.getAttribute('data-look'), 'viewport');
+  assert.equal(shell.style.transform, '');
+
+  // After a restart the saved look and camera come back straight away.
+  page = boot([['aiassist-look', 'viewport'], ['aiassist-viewport-camera', '{"view":"top","yaw":0,"elevation":90,"zoom":0.8,"panel":"sidebar","grid":false}']]);
+  assert.equal(page.view.look, 'viewport');
+  assert.equal(page.shell.style.transform, 'scale3d(0.8,0.8,0.8) rotateX(-90deg) rotateY(0deg) translate3d(0px,0px,0px)');
+  assert(page.sidebar.classList.contains('vp-selected'));
+  assert(page.root.classList.contains('vp-grid-off'));
+  process.stdout.write('3D viewport checks passed\n');
+})().catch(error => { process.stderr.write(String(error && error.stack || error) + '\n'); process.exit(1); });
+"""
+
 class StaticTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
     def test_models_finish_reenables_download_and_fast_done_stays_finished(self):
@@ -114,8 +284,12 @@ class StaticTests(unittest.TestCase):
         assert.equal(attributes['data-look'],'cockpit');  // the saved look is applied on start
         assert.equal(elements.get('setting-look').value,'cockpit');
         await elements.get('look').listeners.click();
-        assert.equal(attributes['data-look'],'browser');  // the cube steps: classic, cockpit, browser
+        assert.equal(attributes['data-look'],'browser');  // the cube steps: classic, cockpit, browser, 3D viewport
         assert.equal(JSON.stringify(saved.at(-1)),'{"look":"browser"}');
+        await elements.get('look').listeners.click();
+        assert.equal(attributes['data-look'],'viewport');
+        assert.equal(elements.get('look').attributes['aria-pressed'],'true');
+        assert.equal(JSON.stringify(saved.at(-1)),'{"look":"viewport"}');
         await elements.get('look').listeners.click();
         assert.equal(attributes['data-look'],'classic');
         assert.equal(elements.get('look').attributes['aria-pressed'],'false');
@@ -1625,6 +1799,13 @@ class StaticTests(unittest.TestCase):
                                 capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+
+    @unittest.skipUnless(shutil.which("node"), "Node is needed only for the frontend test")
+    def test_the_viewport_look_follows_the_master_switch_and_matches_the_css_camera(self):
+        folder = Path(__file__).parent / "webui" / "static"
+        result = subprocess.run([shutil.which("node"), "-e", VIEWPORT_CHECKS, str(folder)],
+                                capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 if __name__ == "__main__":
     unittest.main()
