@@ -88,7 +88,7 @@ class BrowserLookTests(unittest.TestCase):
         css = (SCRIPT.parent / "browser.css").read_text(encoding="utf-8")
         self.assertIn(':root:not([data-look="browser"]) .browser-chrome { display: none; }', css)
         page = (SCRIPT.parent / "index.html").read_text(encoding="utf-8")
-        for target in ("nav-chats", "nav-dev", "nav-models", "nav-generate"):
+        for target in ("nav-chats", "nav-dev", "nav-models", "nav-generate", "nav-web"):
             self.assertIn(f'data-nav="{target}"', page)
 
 
