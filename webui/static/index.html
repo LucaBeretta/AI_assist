@@ -105,18 +105,20 @@
       <span id="chats-label" class="section-label"><span data-i18n="Recent"></span></span>
       <ul id="chats" class="chat-list"></ul>
       <div class="sidebar-spacer"></div>
-      <button id="refresh" class="btn ghost" type="button" title="Reload the model list" data-i18n-title="Reload the model list">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"></path></svg><span data-i18n="Refresh models"></span>
-      </button>
-      <button id="open-mission-control" class="btn ghost" type="button" title="Live CPU, memory and models in their own window, for a second screen" data-i18n-title="Live CPU, memory and models in their own window, for a second screen">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18a8 8 0 1 1 16 0"></path><path d="M12 18l4-6"></path></svg><span data-i18n="Mission Control"></span>
-      </button>
-      <button id="open-appearance" class="btn ghost" type="button" aria-haspopup="menu" aria-expanded="false" title="Look and Night/Day" data-i18n-title="Look and Night/Day">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor" stroke="none"></path></svg><span data-i18n="Appearance"></span>
-      </button>
-      <button id="open-settings" class="btn ghost" type="button" title="Settings · Ctrl+," data-i18n-title="Settings · Ctrl+,">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"></path></svg><span data-i18n="Settings"></span>
-      </button>
+      <div class="sidebar-footer">
+        <button id="open-settings" class="btn ghost" type="button" title="Settings · Ctrl+," data-i18n-title="Settings · Ctrl+,">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"></path></svg><span data-i18n="Settings"></span>
+        </button>
+        <button id="open-appearance" class="btn ghost footer-icon" type="button" aria-label="Appearance" data-i18n-aria-label="Appearance" aria-haspopup="menu" aria-expanded="false" title="Look and Night/Day" data-i18n-title="Look and Night/Day">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor" stroke="none"></path></svg><span class="footer-label" data-i18n="Appearance"></span>
+        </button>
+        <button id="open-mission-control" class="btn ghost footer-icon" type="button" aria-label="Mission Control" data-i18n-aria-label="Mission Control" title="Live CPU, memory and models in their own window, for a second screen" data-i18n-title="Live CPU, memory and models in their own window, for a second screen">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18a8 8 0 1 1 16 0"></path><path d="M12 18l4-6"></path></svg><span class="footer-label" data-i18n="Mission Control"></span>
+        </button>
+        <button id="refresh" class="btn ghost footer-icon" type="button" aria-label="Refresh models" data-i18n-aria-label="Refresh models" title="Reload the model list" data-i18n-title="Reload the model list">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"></path></svg><span class="footer-label" data-i18n="Refresh models"></span>
+        </button>
+      </div>
     </aside>
 
     <main class="main">
@@ -226,22 +228,28 @@
             </button>
             <input id="attach-input" class="sr-only" type="file" multiple tabindex="-1" aria-hidden="true">
             <label class="model-pick"><span class="sr-only"><span data-i18n="Model"></span></span><select id="model" aria-label="Model" data-i18n-aria-label="Model"></select></label>
-            <label title="Context length in tokens (empty = automatic)" data-i18n-title="Context length in tokens (empty = automatic)"><span class="sr-only"><span data-i18n="Context length"></span></span><input id="context" class="ctx-input" type="number" min="2048" max="1048576" step="1" value="16384" placeholder="auto"></label>
             <span class="grow"></span>
             <details id="context-menu" class="ctx">
-              <summary title="Context: compact or start a new chat with the same setup" data-i18n-title="Context: compact or start a new chat with the same setup">
+              <summary title="Context: its length, compact, or a new chat with the same setup" data-i18n-title="Context: its length, compact, or a new chat with the same setup">
                 <meter id="context-meter" min="0" max="1" low="0.8" high="0.95" optimum="0" value="0"></meter>
                 <span id="context-usage">–</span>
               </summary>
-              <div class="ctx-panel" role="menu">
-                <button id="compact" class="menu-item" type="button" role="menuitem" disabled>
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M7 12h10M10 17h4"></path></svg>
-                  <span><span class="menu-title"><span data-i18n="Compact conversation"></span></span><span class="menu-hint"><span data-i18n="Summarize older messages with this model; the latest stay as they are. Originals remain viewable."></span></span></span>
-                </button>
-                <button id="same-environment" class="menu-item" type="button" role="menuitem" disabled>
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"></rect><path d="M12 8v8M8 12h8"></path></svg>
-                  <span><span class="menu-title"><span data-i18n="New chat, same environment"></span></span><span class="menu-hint"><span data-i18n="Same model, context, instructions, pinned files and memory, empty conversation."></span></span></span>
-                </button>
+              <div class="ctx-panel">
+                <label class="ctx-field" title="Context length in tokens (empty = automatic)" data-i18n-title="Context length in tokens (empty = automatic)">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4H6v16h3M15 4h3v16h-3"></path></svg>
+                  <span><span class="menu-title" data-i18n="Context length"></span><span class="menu-hint" data-i18n="How much of the chat the model reads at once. Empty: automatic."></span></span>
+                  <input id="context" class="ctx-input" type="number" min="2048" max="1048576" step="1" value="16384" placeholder="auto">
+                </label>
+                <div class="ctx-actions" role="menu">
+                  <button id="compact" class="menu-item" type="button" role="menuitem" disabled>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M7 12h10M10 17h4"></path></svg>
+                    <span><span class="menu-title"><span data-i18n="Compact conversation"></span></span><span class="menu-hint"><span data-i18n="Summarize older messages with this model; the latest stay as they are. Originals remain viewable."></span></span></span>
+                  </button>
+                  <button id="same-environment" class="menu-item" type="button" role="menuitem" disabled>
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"></rect><path d="M12 8v8M8 12h8"></path></svg>
+                    <span><span class="menu-title"><span data-i18n="New chat, same environment"></span></span><span class="menu-hint"><span data-i18n="Same model, context, instructions, pinned files and memory, empty conversation."></span></span></span>
+                  </button>
+                </div>
               </div>
             </details>
             <button id="stop" class="stop-btn" type="button" aria-label="Stop" title="Stop · Esc" disabled data-i18n-aria-label="Stop" data-i18n-title="Stop · Esc"></button>
