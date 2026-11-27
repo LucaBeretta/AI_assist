@@ -70,7 +70,7 @@ class SharingTests(unittest.TestCase):
         state = self.api.sharing_state()
         self.assertNotIn("secret-token", json.dumps(state))
         self.assertNotIn("fingerprint", json.dumps(state))
-        self.assertEqual(self.api._paired_records()["peer"], {"address": "192.168.1.20", "port": 1234})
+        self.assertEqual(self.api._paired_records()["peer"], {"address": "192.168.1.20", "port": 1234, "name": ""})
         with patch("webui.sharing.pair_with_host", return_value="peer") as pair, patch("webui.sharing.network_gate.allow_external", return_value=True):
             self.assertEqual(self.finish(self.api.pair_device("192.168.1.20", 1234, "A" * 16, "123456"))["type"], "job_done")
             self.assertEqual(pair.call_args.args[:4], ("192.168.1.20", 1234, "A" * 16, "123456"))
@@ -156,8 +156,8 @@ class SharedAiSwitchTests(unittest.TestCase):
         self.assertFalse(self.api.allow_shared_ai("mac", True)["ok"])  # not paired yet
         store.save_server("mac", "secret-token")
         store.save_server("laptop", "other-token")
-        self.assertEqual(self.api.sharing_state()["clients"], [{"id": "laptop", "ai": False}, {"id": "mac", "ai": False}])
-        self.assertEqual(self.api.allow_shared_ai("mac", True)["clients"], [{"id": "laptop", "ai": False}, {"id": "mac", "ai": True}])
+        self.assertEqual(self.api.sharing_state()["clients"], [{"id": "laptop", "name": "", "ai": False}, {"id": "mac", "name": "", "ai": False}])
+        self.assertEqual(self.api.allow_shared_ai("mac", True)["clients"], [{"id": "laptop", "name": "", "ai": False}, {"id": "mac", "name": "", "ai": True}])
         self.assertTrue(store.ai_allowed("mac"))
         self.assertNotIn("token", json.dumps(self.api.sharing_state()))
         self.api.allow_shared_ai("mac", False)

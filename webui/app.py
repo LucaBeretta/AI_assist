@@ -358,7 +358,7 @@ class Api(FeedbackApi, SharingApi, PrivacyApi, ParityApi, CharacterApi):
         if peer is not None:
             # A paired computer answers: its address names it; this computer's Ollama is not involved.
             paired = self._shared_ai.store.client_record(peer) or {}
-            backend = f"Paired computer {paired.get('address', '?')}"
+            backend = f"Paired computer {paired.get('name') or paired.get('address', '?')}"
             details, connected, host, loaded_context = {}, True, self._engine.ollama_url(), None
         elif backend == "Colibri":
             colibri = self._colibri.availability()

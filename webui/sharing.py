@@ -17,7 +17,8 @@ from concurrent.futures import ThreadPoolExecutor
 import ipaddress
 import urllib.parse
 
-from peer_pairing import PairingError, PeerOffline, TrustStore, UsageUnavailable, _safe_id, fetch_usage, permitted_ipv4, pair_with_host
+from peer_pairing import (PairingError, PeerOffline, TrustStore, UsageUnavailable, _safe_id, fetch_usage, permitted_ipv4,
+                          pair_with_host, this_device_name)
 from sharing_control import ManualSharingController
 from webui.api_utils import json_method
 
@@ -178,7 +179,7 @@ class SharingApi:
         while Compute is visible (the poller's caller), at most every five seconds."""
         store = TrustStore(self._sharing_directory)
         records = {key: value for key, value in store._read("paired_servers.json").items() if isinstance(value, dict)}
-        rows = {key: {"address": value.get("address"), "port": value.get("port"), "state": "paired"}
+        rows = {key: {"address": value.get("address"), "port": value.get("port"), "name": value.get("name", ""), "state": "paired"}
                 for key, value in records.items()}
         client_id = self._client_id()
         if not records or client_id is None:
@@ -204,12 +205,13 @@ class SharingApi:
     def _ai_clients(self):
         """Devices that paired with this computer, and whether each may use its AI. IDs only, never tokens."""
         store = TrustStore(self._sharing_directory)
-        return [{"id": key, "ai": store.ai_allowed(key)} for key in sorted(store._read("paired_clients.json"))]
+        return [{"id": key, "name": store.client_name(key), "ai": store.ai_allowed(key)}
+                for key in sorted(store._read("paired_clients.json"))]
 
     def _paired_records(self):
         # TrustStore owns the format; expose metadata only, without contacting peers.
         records = TrustStore(self._sharing_directory)._read("paired_servers.json")
-        return {key: {"address": value.get("address"), "port": value.get("port")}
+        return {key: {"address": value.get("address"), "port": value.get("port"), "name": value.get("name", "")}
                 for key, value in records.items() if isinstance(value, dict)}
 
     @json_method
@@ -291,7 +293,7 @@ class SharingApi:
         # The core validates the address, port, certificate code and PIN before connecting.
         def work(progress, cancel):
             if not network_gate.allow_external("Pair LAN device", str(address),
-                    "The six-digit PIN and this device's random ID, sent only after checking the target TLS code.",
+                    "The six-digit PIN, this device's random ID and its name, sent only after checking the target TLS code.",
                     "Pair the device you selected; no chat content is sent.") or cancel.is_set():
                 raise RuntimeError("Pairing was blocked.")
             with self._sharing_lock:
@@ -301,7 +303,8 @@ class SharingApi:
                 path = self._sharing_directory / "client.json"
                 identity = settings.read_json(path).get("id") or uuid.uuid4().hex
                 settings.write_json(path, {"id": identity})
-                peer = pair_with_host(address, port, verification_code, pin, identity, TrustStore(self._sharing_directory))
+                peer = pair_with_host(address, port, verification_code, pin, identity, TrustStore(self._sharing_directory),
+                                      this_device_name())
                 return {"ok": True, "peer_id": peer, "peers": self._paired_records()}
         with self._lock:
             if self._closed or self._sharing_closed:
