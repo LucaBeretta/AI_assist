@@ -204,4 +204,4 @@ Open **Generate → 3D Camera** to orbit an animated 3D scene and switch between
 
 ### Recent clips
 
-Open **Generate → Recent clips** to play your last 12 clips, open their files, or reuse an AI video's prompt and orientation. Quick animations and 3D Camera recordings stay where you saved them. AI Assist also keeps its own copy of each new AI video in the app data directory, so you can replay it after ComfyUI closes; the copy is deleted when the video drops off the list, and ComfyUI's original stays in its output folder.
+Open **Generate → Recent clips** to play your last 12 clips, open their files, or reuse an AI video's prompt and orientation. Quick animations, Infinite clips and 3D Camera recordings stay where you saved them. AI Assist also keeps its own copy of each new AI video in the app data directory, so you can replay it after ComfyUI closes; the copy is deleted when the video drops off the list, and ComfyUI's original stays in its output folder.

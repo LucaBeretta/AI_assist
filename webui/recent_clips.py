@@ -82,7 +82,7 @@ class RecentClips:
         records = json.loads(payload)
         fields = ("id", "name", "kind", "prompt", "created_at", "path")
         if (not isinstance(records, list) or len(records) > MAX_RECENT
-                or any(not isinstance(item, dict) or item.get("kind") not in ("quick", "wan", "camera")
+                or any(not isinstance(item, dict) or item.get("kind") not in ("quick", "wan", "camera", "infinite")
                        or type(item.get("portrait")) is not bool
                        or any(not isinstance(item.get(key), str) for key in fields)
                        for item in records)):

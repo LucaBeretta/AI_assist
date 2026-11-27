@@ -7,7 +7,7 @@
   const preview = el("preview");
   const status = el("status");
   const buttons = new Map();
-  const sources = {quick: "Quick animation", wan: "AI video", camera: "3D Camera"};
+  const sources = {quick: "Quick animation", wan: "AI video", camera: "3D Camera", infinite: "Infinite"};
   let selected = null;
   let clipUrl = null;
   let loadVersion = 0;
