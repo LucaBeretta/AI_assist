@@ -1241,6 +1241,7 @@ window.app = (() => {
     [t("Developer"), "", () => showView("dev")],
     [t("Models"), "", () => showView("models")],
     [t("Generate"), "", () => showView("generate")],
+    [t("Web"), "", () => showView("web")],
     [t("Mission Control"), "", () => openMissionControl()],
     [t("Settings"), t("Ctrl+,"), () => openSettings()],
     [t("Switch theme"), t("Ctrl+Shift+L"), () => toggleTheme()],
@@ -1303,6 +1304,7 @@ window.app = (() => {
     models: ["models-view", "nav-models"],
     welcome: ["welcome-view", null],
     generate: ["generate-view", "nav-generate"],
+    web: ["web-view", "nav-web"],
   };
   function showView(name) {
     for (const [key, [view, nav]] of Object.entries(views)) {
@@ -1320,11 +1322,13 @@ window.app = (() => {
     }
     if (name === "dev") window.devui?.onShow?.();
     if (name === "models") window.modelsui?.onShow?.();
+    if (name === "web") window.webbrowser?.onShow?.();
   }
   element("nav-chats").addEventListener("click", () => showView("chat"));
   element("nav-dev").addEventListener("click", () => showView("dev"));
   element("nav-models").addEventListener("click", () => showView("models"));
   element("nav-generate").addEventListener("click", () => showView("generate"));
+  element("nav-web").addEventListener("click", () => showView("web"));
 
   const generationModes = ["quick", "wan", "camera", "recent"];
   function showGenerationMode(name) {
@@ -1359,7 +1363,7 @@ window.app = (() => {
 
   function setPrompt(text) { element("prompt").value = text; fitPrompt(); scheduleDraft(); element("prompt").focus?.(); }
   window.addEventListener("languagechange", () => { renderMessages(); renderChats(); renderProjectBar(); });
-  return {onEvent, openSettings, showView, syncContext, selectModel, modelChoice, setPrompt, statusHeld,
+  return {onEvent, openSettings, showView, syncContext, selectModel, modelChoice, setPrompt, newChat, attachFiles, statusHeld,
           notify: (text, options) => status(text, options),
           currentChat, refreshChat: async id => {
             if (selected !== id) return;

@@ -6,7 +6,7 @@ window.browserui = (() => {
   const el = id => document.getElementById(id);
   const t = (key, vars = {}) => window.i18n ? window.i18n.t(key, vars) : key.replace(/\{(\w+)\}/g, (_, name) => String(vars[name] ?? ""));
   const tabs = [...(document.querySelectorAll?.(".browser-tab") || [])];
-  const slug = {"nav-chats": "chats", "nav-dev": "developer", "nav-models": "models", "nav-generate": "generate"};
+  const slug = {"nav-chats": "chats", "nav-dev": "developer", "nav-models": "models", "nav-generate": "generate", "nav-web": "web"};
   const back = [], forward = [];
   let current = null, travelling = false;
 

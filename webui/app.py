@@ -21,6 +21,7 @@ from model_advisor import detect_hardware
 import model_advisor
 import model_library
 from webui.bridge import Bridge
+from webui.web_browser import WebBrowserApi
 from webui.developer import DeveloperTasks
 from app_core import photo_video
 from app_core.chat_service import ChatService
@@ -96,7 +97,7 @@ def inference_message(message):
     return item
 
 
-class Api(FeedbackApi, SharingApi, PrivacyApi, ParityApi, CharacterApi, OpenCodeApi, InfiniteApi):
+class Api(FeedbackApi, SharingApi, PrivacyApi, ParityApi, CharacterApi, OpenCodeApi, InfiniteApi, WebBrowserApi):
     def __init__(self, bridge, store=None, engine=None, hardware=None, desktop=None, colibri=None):
         self._bridge = bridge
         self._store = store if store is not None else ChatStore()
