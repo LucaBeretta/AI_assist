@@ -70,7 +70,7 @@ This repository is public: keep secrets and personal details out of this file.
 - Also merged on 27 November, on the owner's yes and without pull requests, after the full Windows suite on the combined result:
   - `clean-look`: a tidier chat screen. The sidebar's bottom buttons are one row (Settings, then Appearance, Mission Control and Refresh models as icons), the context length sits in the context meter's popover, only the open chat has the accent dot, and file pickers use the app's style.
   - `3d-camera-recent-clips`: 3D Camera and Recent clips in Generate.
-  - `in-app-browser`: Web, a reading browser that opens pages through the internet popup. Possible follow-up: in the browser look its own address bar sits under the look's top bar; one shared bar would look cleaner.
+  - `in-app-browser`: Web, a reading browser that opens pages through the internet popup. In the browser look, its own bar moves into the look's top bar while Web is open (`browser.js`), so there is one address bar.
   - `notes-2026-11-27`: these notes.
 - Waiting for Luigi's agreement: `review-long-functions` and `review-pairing-and-logging` (code tidy-ups). The second conflicts with #45 in `peer_pairing.py`.
 - `zencoder-work` belongs to Zencoder on the owner's PC.
