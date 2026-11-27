@@ -28,8 +28,10 @@ This repository is public: keep secrets and personal details out of this file.
 
 - `gh` is not installed. `git push` works. Read pull requests and check runs through the public REST API with `curl`. The owner opens a new pull request from a link like `https://github.com/LucaBeretta/AI_assist/compare/main...BRANCH?expand=1`.
 - Keep the owner's checkout on `main` and work on pull request branches in separate worktrees.
+- Branches can be deleted from here (`git push origin --delete BRANCH`), unlike in cloud sessions.
+- To look at the screens without the desktop app: serve a copy of `webui/static` on 127.0.0.1 with an extra script that defines a fake `window.pywebview.api` (sample chats and models) and fires `pywebviewready`, then take screenshots with Edge headless (`msedge --headless=new --window-size=1280,800 --screenshot=FILE URL`, with its own `--user-data-dir`). On this PC Edge's program is under `C:\Program Files (x86)\Microsoft\EdgeCore\<version>\`.
 
-## State on 2026-11-24 (evening)
+## State on 2026-11-27
 
 - Merged on 21 November:
   - LucaBeretta/AI_assist#11 (Luigi): chat streaming moved into `app_core/chat_service.py`; settings reorganised.
@@ -53,10 +55,28 @@ This repository is public: keep secrets and personal details out of this file.
   - LucaBeretta/AI_assist#26, #32, #35, #41 and #42: the network's **use** layer (see below).
   - LucaBeretta/AI_assist#39: optional 3D sound for Quick animation clips (`spatial-sound.js`: Web Audio HRTF, recorded as a stereo track).
   - LucaBeretta/AI_assist#43: a master switch between the classic look and a 3D "cockpit" (`cockpit.css`, `cockpit.js`, the cube button, Settings > Look), saved as `look` in `webui.settings` and read through `web_preferences()`. It is direction B of the owner's design canvas https://claude.ai/artifact/EoqVDsFwyNNjE8pZbunhCH.
-- Waiting on the owner:
-  - Delete leftover branches on GitHub (cloud sessions cannot): `live-check-huggingface`, `ai-network-use` (an earlier copy of #42), and any merged branch.
-  - Try the AI network on the real PC and Mac (steps in #41 and #42); nothing has been checked between two real computers yet.
-- Five old branches that were never merged are archived as tags under `archive/`: `modernization/web-workstation`, `integration/compute-dashboard-web`, `code-quality-pass`, `feature/continuous-user-feedback` (closed: no feedback prompt after replies and tasks; #24 later restored the idea on current `main`) and `mac-mission-control` (split into #11 and `mac-mission-control-only`). Each tag's message says why. Restore one with `git push origin "archive/NAME^{commit}:refs/heads/NAME"`.
+- Merged on 27 November, all at once after checking that they work together (the full Windows suite and CI on the combined result):
+  - LucaBeretta/AI_assist#44: these notes as of 24 November.
+  - LucaBeretta/AI_assist#45: paired computers shown by name, and the chat says where an answer runs.
+  - LucaBeretta/AI_assist#46: "Open in OpenCode" in Developer, locked to local models (`opencode_launcher.py`, `opencode.js`).
+  - LucaBeretta/AI_assist#47: a browser look (`browser.css`, `browser.js`) as a third choice of the master switch.
+  - LucaBeretta/AI_assist#48: Infinite clips in Generate (`infinite_engine.py`, `webui/infinite.py`, `infinite-studio.js`).
+  - LucaBeretta/AI_assist#49 and #50: buttons that seemed to do nothing or got in the way fixed, and buttons that repeated another one removed.
+  - LucaBeretta/AI_assist#51: a tidier chat header and sidebar. The cube button is hidden; the sidebar's **Appearance** menu (`menus.js`) switches the look and Night/Day.
+  - LucaBeretta/AI_assist#52: Models shows what each model can do (the separate Capabilities screen is gone), and the firewall lock is one control.
+  - LucaBeretta/AI_assist#53: the LAN pairing buttons reach the app.
+  - Branch `viewport-look`, merged without a pull request at the owner's request: a fourth look, the 3D viewport (`viewport3d.css`, `viewport3d.js`), with Perspective, Front, Top and Right views, orbit and zoom.
+    The saved `look` is now `classic`, `cockpit`, `browser` or `viewport` (`webui/settings.py`).
+- Also merged on 27 November, on the owner's yes and without pull requests, after the full Windows suite on the combined result:
+  - `clean-look`: a tidier chat screen. The sidebar's bottom buttons are one row (Settings, then Appearance, Mission Control and Refresh models as icons), the context length sits in the context meter's popover, only the open chat has the accent dot, and file pickers use the app's style.
+  - `3d-camera-recent-clips`: 3D Camera and Recent clips in Generate.
+  - `in-app-browser`: Web, a reading browser that opens pages through the internet popup. Possible follow-up: in the browser look its own address bar sits under the look's top bar; one shared bar would look cleaner.
+  - `notes-2026-11-27`: these notes.
+- Waiting for Luigi's agreement: `review-long-functions` and `review-pairing-and-logging` (code tidy-ups). The second conflicts with #45 in `peer_pairing.py`.
+- `zencoder-work` belongs to Zencoder on the owner's PC.
+- Waiting on the owner: try the AI network on the real PC and Mac (steps in #41 and #42). Nothing has been checked between two real computers yet.
+- On 27 November every merged or replaced branch was deleted on GitHub.
+- Old branches that were never merged are archived as tags under `archive/`: `ai-network-use` (an earlier copy of #42), `modernization/web-workstation`, `integration/compute-dashboard-web`, `code-quality-pass`, `feature/continuous-user-feedback` (closed: no feedback prompt after replies and tasks; #24 later restored the idea on current `main`) and `mac-mission-control` (split into #11 and `mac-mission-control-only`). Each tag's message says why. Restore one with `git push origin "archive/NAME^{commit}:refs/heads/NAME"`.
 - `docs/modernization-backlog.md` is marked historical. The other milestone documents (`architecture-audit.md`, `architecture-decision.md`) also predate the removal of Tk.
 
 ## Hugging Face models
@@ -102,7 +122,7 @@ The design is local-network only: no cloud relay and no router port-forwarding. 
   - a `src/` and `tests/` layout;
   - splitting `webui/app.py` and `app.js`;
   - branch protection that requires the **Tests** and **macOS desktop checks** workflows to pass before merging into `main`.
-- A plain-language explainer page made for the owner: https://claude.ai/artifact/1UxAFvr1TBtcK1K6YjB6Q6. Last updated early on 24 November (Hugging Face, Blender, Generate, Mission Control, and the network's see / monitor / use steps). It does not yet cover #24, #28 or #31 to #43.
+- A plain-language explainer page made for the owner: https://claude.ai/artifact/1UxAFvr1TBtcK1K6YjB6Q6. Last updated early on 24 November (Hugging Face, Blender, Generate, Mission Control, and the network's see / monitor / use steps). It does not yet cover #24, #28, #31 to #53, or the branches merged on 27 November.
 
 ## Running the app in a cloud Linux container
 
