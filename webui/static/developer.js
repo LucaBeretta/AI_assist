@@ -490,7 +490,6 @@ window.devui = (() => {
     if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) run(event);
   });
   element("dev-stop").addEventListener("click", stop);
-  element("dev-refresh-checkpoints").addEventListener("click", loadCheckpoints);
   controls();
   return {onEvent, onShow, setProject, syncTask, isRunning: () => Boolean(task?.running), stop};
 })();

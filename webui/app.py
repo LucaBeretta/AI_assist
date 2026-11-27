@@ -464,9 +464,10 @@ class Api(FeedbackApi, SharingApi, PrivacyApi, ParityApi, CharacterApi, OpenCode
         return {"ok": True}
 
     @_json_method
-    def recommend_models(self, refresh=False):
-        if type(refresh) is not bool:
-            raise ValueError("refresh must be true or false.")
+    def recommend_models(self, refresh=False, online=True):
+        # online=False (opening the Models screen) only shows what this session already read.
+        if type(refresh) is not bool or type(online) is not bool:
+            raise ValueError("refresh and online must be true or false.")
         hardware = self._hardware if self._hardware is not None else detect_hardware(self._engine.ollama_url())
         catalog, catalog_error = [], None
         if hardware.get("server_local", True):
@@ -474,7 +475,7 @@ class Api(FeedbackApi, SharingApi, PrivacyApi, ParityApi, CharacterApi, OpenCode
             # Ollama's list, its families' sizes and Hugging Face's list are several pages on two sites:
             # one task that names both sites, so one approval.
             with self._catalog_lock:
-                if refresh or (self._catalog is None and self._catalog_error is None):
+                if online and (refresh or (self._catalog is None and self._catalog_error is None)):
                     try:
                         with network_gate.task("Read model lists from Ollama and Hugging Face",
                                                sends="Requests for a few pages of ollama.com and huggingface.co "
@@ -496,8 +497,10 @@ class Api(FeedbackApi, SharingApi, PrivacyApi, ParityApi, CharacterApi, OpenCode
                         # Blocked by the internet gate or offline: this computer's hardware is still worth showing.
                         self._catalog, self._catalog_error = None, str(error)
                 recommendations, catalog_error = list(self._catalog or []), self._catalog_error
-            return {"ok": True, "hardware": hardware, "recommendations": recommendations, "catalog_error": catalog_error}
-        return {"ok": True, "hardware": hardware, "recommendations": [], "catalog_error": None}
+                checked = self._catalog is not None or self._catalog_error is not None
+            return {"ok": True, "hardware": hardware, "recommendations": recommendations, "catalog_error": catalog_error,
+                    "checked": checked}
+        return {"ok": True, "hardware": hardware, "recommendations": [], "catalog_error": None, "checked": True}
 
     @staticmethod
     def _model_name(name):

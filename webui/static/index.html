@@ -28,10 +28,14 @@
   <script defer src="feedback-loop.js"></script>
   <script defer src="cockpit.js"></script>
   <script defer src="opencode.js"></script>
+  <script defer src="sidebar-toggle.js"></script>
 </head>
 <body>
 <div class="app">
   <div class="shell">
+    <button id="open-sidebar" class="icon-btn bordered sidebar-toggle" type="button" aria-expanded="false" aria-label="Menu" title="Menu" data-i18n-aria-label="Menu" data-i18n-title="Menu">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
+    </button>
     <aside class="sidebar" aria-label="Chats" data-i18n-aria-label="Chats">
       <div class="brand">
         <span class="brand-name"><svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 9-8 9-8-9z"></path></svg>AI Assist</span>
@@ -193,7 +197,6 @@
             </button>
             <input id="attach-input" class="sr-only" type="file" multiple tabindex="-1" aria-hidden="true">
             <label class="model-pick"><span class="sr-only"><span data-i18n="Model"></span></span><select id="model" aria-label="Model" data-i18n-aria-label="Model"></select></label>
-            <button id="open-models" class="btn ghost small-btn" type="button" title="See all models, your hardware and downloads" data-i18n-title="See all models, your hardware and downloads"><span data-i18n="Models…"></span></button>
             <label title="Context length in tokens (empty = automatic)" data-i18n-title="Context length in tokens (empty = automatic)"><span class="sr-only"><span data-i18n="Context length"></span></span><input id="context" class="ctx-input" type="number" min="2048" max="1048576" step="1" value="16384" placeholder="auto"></label>
             <span class="grow"></span>
             <details id="context-menu" class="ctx">
@@ -288,9 +291,7 @@
               <div id="dev-files" class="file-list"></div>
             </section>
             <section class="side-group">
-              <div class="section-head"><h3><span data-i18n="Checkpoints"></span></h3>
-                <button id="dev-refresh-checkpoints" class="icon-btn small" type="button" aria-label="Refresh checkpoints" data-i18n-aria-label="Refresh checkpoints">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"></path></svg></button></div>
+              <div class="section-head"><h3><span data-i18n="Checkpoints"></span></h3></div>
               <div id="dev-checkpoints" class="checkpoints"></div>
             </section>
           </aside>
@@ -301,9 +302,6 @@
           <h1 class="strong"><span data-i18n="Models"></span></h1>
           <div class="header-actions">
             <span id="models-status" class="dev-hint" role="status" aria-live="polite"></span>
-            <button id="models-refresh" class="icon-btn" type="button" aria-label="Check hardware and recommendations again" data-i18n-aria-label="Check hardware and recommendations again">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"></path></svg>
-            </button>
           </div>
         </header>
         <div class="models-scroll">
@@ -318,7 +316,8 @@
               <div id="models-installed" class="model-list"></div>
             </section>
             <section aria-labelledby="rec-title">
-              <h2 id="rec-title" class="models-h"><span data-i18n="Recommended for this computer"></span></h2>
+              <div class="models-h-row"><h2 id="rec-title" class="models-h"><span data-i18n="Recommended for this computer"></span></h2>
+                <button id="models-check-online" class="btn ghost small-btn" type="button" title="Asks before going online: reads model lists from ollama.com and huggingface.co" data-i18n-title="Asks before going online: reads model lists from ollama.com and huggingface.co" data-i18n="Check online for suggestions"></button></div>
               <div id="models-recommended" class="model-grid"></div>
             </section>
             <section aria-labelledby="other-title">
@@ -348,7 +347,7 @@
         </div>
       </div>
       <section id="capabilities-view" class="view" aria-labelledby="capabilities-title" hidden>
-        <header class="header"><h1 id="capabilities-title" data-i18n="Capabilities"></h1><button id="capabilities-refresh" class="btn" type="button" data-i18n="Refresh"></button></header>
+        <header class="header"><h1 id="capabilities-title" data-i18n="Capabilities"></h1></header>
         <div class="models-scroll"><div class="models-page"><p class="setting-hint" data-i18n="Capabilities reported by the selected model. Unreported features remain unknown."></p><div id="capabilities-result" class="model-list" role="status"></div></div></div>
       </section>
       <section id="generate-view" class="view" aria-labelledby="generate-title" hidden>
@@ -477,7 +476,7 @@
   <footer class="statusbar">
     <span id="status" class="status-engine" role="status" aria-live="polite"><span data-i18n="Connecting…"></span></span>
     <span id="status-model"></span><span id="status-placement"></span><span id="status-vram"></span>
-    <span class="status-context"><meter id="status-meter" min="0" max="1" value="0"></meter><span id="status-context"></span></span>
+    <span id="status-context-box" class="status-context" hidden><meter id="status-meter" min="0" max="1" value="0"></meter><span id="status-context"></span></span>
     <span id="status-speed"></span><span id="status-agent"></span>
     <span class="grow"></span>
     <span id="status-privacy" class="privacy" data-i18n="local only"></span>
@@ -533,8 +532,7 @@
     <h3><span data-i18n="Models"></span></h3>
     <label class="setting-row"><span><span class="setting-title"><span data-i18n="Unload after inactivity"></span></span><span class="setting-hint"><span data-i18n="Frees GPU memory when a model has not been used for a while."></span></span></span>
       <select id="setting-idle"><option value="0" data-i18n="Never"></option><option value="5" data-i18n="5 minutes"></option><option value="15" data-i18n="15 minutes"></option><option value="30" data-i18n="30 minutes"></option><option value="60" data-i18n="1 hour"></option></select></label>
-    <div class="setting-sub"><span data-i18n="Loaded now"></span></div>
-    <div id="loaded-models"></div>
+    <p class="setting-hint"><span data-i18n="Loaded models and their Unload buttons are on the Models screen."></span> <button id="settings-open-models" class="btn ghost small-btn" type="button" data-i18n="Open Models"></button></p>
   </section>
   <section class="setting-group" data-pane="models" hidden><h3 data-i18n="Colibri quality review"></h3>
       <form id="hybrid-form"><label class="check-row"><input id="hybrid-enabled" type="checkbox"><span data-i18n="Offer quality review by default"></span></label>
@@ -543,7 +541,7 @@
         <p id="hybrid-model-hint" class="setting-hint"></p>
         <label class="check-row"><input id="hybrid-memory" type="checkbox" checked><span data-i18n="Manage local memory handoff"></span></label>
         <p class="setting-hint" data-i18n="Ollama acts once; Colibri reviews without tools. Memory handoff unloads only the selected local worker."></p>
-        <div class="setting-actions"><button class="btn" type="submit" data-i18n="Save"></button></div><p id="hybrid-status" class="setting-hint" role="status"></p>
+        <p id="hybrid-status" class="setting-hint" role="status"></p>
       </form></section>
   <section class="setting-group" data-pane="chats" hidden>
     <h3><span data-i18n="Shared memory"></span></h3>
@@ -570,8 +568,7 @@
   </section>
   <section class="setting-group" data-pane="privacy" aria-labelledby="privacy-title" hidden>
     <h3 id="privacy-title" data-i18n="Privacy & internet"></h3>
-    <div class="setting-row"><p id="privacy-gate" class="setting-hint" role="status"></p>
-      <button id="privacy-refresh" class="btn" type="button" data-i18n="Refresh"></button></div>
+    <div class="setting-row"><p id="privacy-gate" class="setting-hint" role="status"></p></div>
     <div class="windows-only">
       <h4 class="setting-subhead" data-i18n="AI engine firewall lock"></h4><p class="setting-hint" data-i18n="Changes affect Windows Firewall and require administrator approval. Local engines run outside Python's gate."></p>
       <p id="firewall-status" class="setting-hint" role="status"></p>

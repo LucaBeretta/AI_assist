@@ -1,6 +1,7 @@
 """Desktop adapters over the mandatory gate and existing Windows firewall lock."""
 from copy import deepcopy
 import threading
+import time
 
 import firewall_lock
 import network_gate
@@ -12,14 +13,18 @@ class PrivacyApi:
     def _init_privacy(self):
         self._internet = Approvals(self._bridge.emit)
         self._privacy_lock = threading.RLock()
+        self._firewall_read_at = 0.0
         folder = getattr(self._colibri, "folder", lambda: None)
         self._firewall = firewall_lock.Lock(folder, self._store.directory / "firewall-lift.json")
         self._privacy_started = False
         self._firewall_outcomes = []
 
     def _poll_firewall(self):
+        was_busy = self._firewall.busy
         self._firewall_outcomes.extend(self._firewall.poll())
         self._firewall_outcomes = self._firewall_outcomes[-10:]
+        if was_busy and not self._firewall.busy:
+            self._firewall_read_at = time.monotonic()  # a slow read may take 90 s: the minute starts when it ends
 
     def _start_privacy(self):
         with self._privacy_lock:
@@ -44,7 +49,14 @@ class PrivacyApi:
     def privacy_state(self):
         with self._privacy_lock:
             self._poll_firewall()
-            if self._firewall.summary is None and not self._firewall.busy and not self._closed:
+            summary = self._firewall.summary
+            # Re-read by itself when nothing is known, the last read failed (at most once a minute),
+            # or a temporary lift has run out, so Settings never shows an old state.
+            stale = (summary is None
+                     or (summary.get("state") == "error" and time.monotonic() - self._firewall_read_at > 60)
+                     or (summary.get("state") == "lifted" and (summary.get("lift_until") or 0) <= time.time()))
+            if stale and not self._firewall.busy and not self._closed:
+                self._firewall_read_at = time.monotonic()
                 self._firewall.refresh()
             return {"ok": True, "gate": network_gate.status(), "connections": network_gate.recent()[-200:],
                     "firewall": deepcopy(self._firewall.summary), "busy": self._firewall.busy,

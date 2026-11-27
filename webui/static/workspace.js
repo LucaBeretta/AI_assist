@@ -147,12 +147,15 @@ window.workspaceui = (() => {
     el("status-placement").textContent = value.gpu_fraction == null ? (value.backend === "Colibri" ? "ram + ssd" : "")
       : `${Math.round(value.gpu_fraction * 100)}% gpu · ${Math.round(value.cpu_fraction * 100)}% cpu`;
     el("status-vram").textContent = value.vram || "";
+    // How full the context is: Chats has its own meter by the message box, so the status bar shows it
+    // only elsewhere, for example during a Developer task.
+    el("status-context-box").hidden = !value.context || !el("chat-view").hidden;
     el("status-context").textContent = value.context || ""; el("status-meter").value = value.fraction || 0;
+    el("status-meter").className = value.fraction >= .95 ? "level-full" : value.fraction >= .8 ? "level-warn" : "";
     el("status-speed").textContent = value.speed || "";
     el("status-agent").textContent = value.agent ? t("Agent step {v0} / {v1}", {v0: value.agent_step, v1: value.agent_max_steps}) : "";
     el("status-privacy").textContent = window.securityui ? window.securityui.privacyText(value.privacy) : t(value.privacy_kind || value.privacy || "");
     el("status-privacy").className = "privacy" + (value.privacy_role === "amber" || value.privacy_kind && value.privacy_kind !== "local only" ? " is-remote" : "");
-    el("status-meter").className = value.fraction >= .95 ? "level-full" : value.fraction >= .8 ? "level-warn" : "";
     window.app?.syncContext?.(value);
   }
   function onEvent(event) {

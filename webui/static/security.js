@@ -87,7 +87,6 @@ window.securityui = (() => {
   el("internet-dialog").addEventListener("keydown", event => {
     if (["Enter", "Escape"].includes(event.key)) { event.preventDefault(); event.stopPropagation?.(); respond("block"); }
   });
-  el("privacy-refresh")?.addEventListener("click", openSettings);
   el("firewall-on")?.addEventListener("click", () => changeFirewall("on"));
   el("firewall-off")?.addEventListener("click", () => changeFirewall("off"));
   el("firewall-relock")?.addEventListener("click", () => changeFirewall("relock"));
